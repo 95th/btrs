@@ -1,1 +1,3 @@
-pub type InfoHash = [u8; 20];
+pub mod torrent;
+
+pub type TorrentId = [u8; 20];
