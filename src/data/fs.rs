@@ -1,15 +1,15 @@
 use crate::data::{Storage, StorageUnit};
-use crate::metainfo::torrent::Torrent;
+use crate::metainfo::torrent::{Torrent, TorrentFile};
 use std::path::PathBuf;
 
 pub struct FileSystemStorage {
     _root_dir: PathBuf,
 }
 
-impl<T: Torrent> Storage<T> for FileSystemStorage {
+impl Storage for FileSystemStorage {
     type Unit = FileSystemStorageUnit;
 
-    fn get_unit(&self, _torrent: &T, _file: &T::File) -> Self::Unit {
+    fn get_unit(&self, _torrent: &Torrent, _file: &TorrentFile) -> Self::Unit {
         todo!()
     }
 }
