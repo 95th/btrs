@@ -1,7 +1,9 @@
 use std::fmt::Write;
 
+type Bytes = [u8; 20];
+
 #[derive(Debug, Default, PartialEq)]
-pub struct InfoHash([u8; 20]);
+pub struct InfoHash(Bytes);
 
 impl InfoHash {
     pub fn encode_url(&self) -> String {
@@ -19,13 +21,13 @@ impl InfoHash {
         data_encoding::BASE32.encode(&self.0)
     }
 
-    pub fn as_mut(&mut self) -> &mut [u8; 20] {
+    pub fn as_mut(&mut self) -> &mut Bytes {
         &mut self.0
     }
 }
 
-impl From<[u8; 20]> for InfoHash {
-    fn from(b: [u8; 20]) -> Self {
+impl From<Bytes> for InfoHash {
+    fn from(b: Bytes) -> Self {
         Self(b)
     }
 }
