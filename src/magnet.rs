@@ -1,9 +1,9 @@
-use crate::metainfo::TorrentId;
+use crate::metainfo::InfoHash;
 use std::net::SocketAddr;
 
 #[derive(Debug, Default)]
 pub struct MagnetUri {
-    torrent_id: TorrentId,
+    torrent_id: InfoHash,
     display_name: Option<String>,
     tracker_urls: Vec<String>,
     peer_addrs: Vec<SocketAddr>,
@@ -87,20 +87,20 @@ mod parser {
         }
     }
 
-    fn build_torrent_id(encoded: &str) -> Result<TorrentId, &'static str> {
+    fn build_torrent_id(encoded: &str) -> Result<InfoHash, &'static str> {
         use data_encoding::{BASE32 as base32, HEXLOWER_PERMISSIVE as hex};
 
         let encoded = encoded.as_bytes();
-        let mut id = TorrentId::default();
+        let mut id = InfoHash::default();
 
         match encoded.len() {
             40 => {
-                hex.decode_mut(encoded, &mut id)
+                hex.decode_mut(encoded, id.as_mut())
                     .map_err(|_| "Invalid hex string")?;
             }
             32 => {
                 base32
-                    .decode_mut(encoded, &mut id)
+                    .decode_mut(encoded, id.as_mut())
                     .map_err(|_| "Invalid base 32 string")?;
             }
             _ => return Err("Invalid infohash length"),
@@ -113,27 +113,26 @@ mod parser {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use data_encoding::{BASE32 as base32, HEXLOWER_PERMISSIVE as hex};
 
     #[test]
     fn parse_hex_infohash() {
-        let infohash = [12; 20];
-        let s = format!("magnet:?xt=urn:btih:{}", hex.encode(&infohash));
+        let infohash = InfoHash::from([12; 20]);
+        let s = format!("magnet:?xt=urn:btih:{}", infohash.encode_hex());
         let magnet = MagnetUri::parse(&s).unwrap();
         assert_eq!(infohash, magnet.torrent_id);
     }
 
     #[test]
     fn parse_base32_infohash() {
-        let infohash = [12; 20];
-        let s = format!("magnet:?xt=urn:btih:{}", base32.encode(&infohash));
+        let infohash = InfoHash::from([12; 20]);
+        let s = format!("magnet:?xt=urn:btih:{}", infohash.encode_base32());
         let magnet = MagnetUri::parse(&s).unwrap();
         assert_eq!(infohash, magnet.torrent_id);
     }
 
     #[test]
     fn parse_all_params_present() {
-        let infohash = [0; 20];
+        let infohash = InfoHash::from([0; 20]);
         let display_name = "xyz";
         let tracker_url_1 = "http://jupiter.gx/ann";
         let tracker_url_2 = "udp://jupiter.gx:1111";
@@ -141,7 +140,7 @@ mod tests {
         let peer_2 = "2.2.2.2:10000";
         let s = format!(
             "magnet:?xt=urn:btih:{}&dn={}&tr={}&tr={}&x.pe={}&x.pe={}",
-            hex.encode(&infohash),
+            infohash.encode_hex(),
             display_name,
             tracker_url_1,
             tracker_url_2,
@@ -161,20 +160,20 @@ mod tests {
 
     #[test]
     fn parse_only_infohash_present() {
-        let infohash = [0; 20];
-        let s = format!("magnet:?xt=urn:btih:{}", hex.encode(&infohash),);
+        let infohash = InfoHash::from([0; 20]);
+        let s = format!("magnet:?xt=urn:btih:{}", infohash.encode_hex());
         let magnet = MagnetUri::parse(&s).unwrap();
         assert_eq!(infohash, magnet.torrent_id);
     }
 
     #[test]
     fn parse_both_infohash_and_multihash_present() {
-        let infohash = [0; 20];
-        let multihash = [1; 20];
+        let infohash = InfoHash::from([0; 20]);
+        let multihash = InfoHash::from([1; 20]);
         let s = format!(
             "magnet:?xt=urn:btih:{}&xt=urn:btmh:{}",
-            hex.encode(&infohash),
-            hex.encode(&multihash),
+            infohash.encode_hex(),
+            multihash.encode_hex(),
         );
         let magnet = MagnetUri::parse(&s).unwrap();
         assert_eq!(infohash, magnet.torrent_id);
@@ -182,12 +181,12 @@ mod tests {
 
     #[test]
     fn parse_multiple_infohashes_present() {
-        let infohash_1 = [0; 20];
-        let infohash_2 = [1; 20];
+        let infohash_1 = InfoHash::from([0; 20]);
+        let infohash_2 = InfoHash::from([1; 20]);
         let s = format!(
             "magnet:?xt=urn:btih:{}&xt=urn:btih:{}",
-            hex.encode(&infohash_1),
-            hex.encode(&infohash_2),
+            infohash_1.encode_hex(),
+            infohash_2.encode_hex(),
         );
         let err = MagnetUri::parse(&s).unwrap_err();
         assert_eq!("Multiple infohashes found", err);
@@ -195,11 +194,11 @@ mod tests {
 
     #[test]
     fn parse_multiple_identical_infohashes_present() {
-        let infohash = [0; 20];
+        let infohash = InfoHash::from([0; 20]);
         let s = format!(
             "magnet:?xt=urn:btih:{}&xt=urn:btih:{}",
-            hex.encode(&infohash),
-            hex.encode(&infohash),
+            infohash.encode_hex(),
+            infohash.encode_hex(),
         );
         let magnet = MagnetUri::parse(&s).unwrap();
         assert_eq!(infohash, magnet.torrent_id);
@@ -207,11 +206,11 @@ mod tests {
 
     #[test]
     fn parse_invalid_peer_addr_no_err() {
-        let infohash = [0; 20];
+        let infohash = InfoHash::from([0; 20]);
         let peer = "xxxyyyzzz";
         let s = format!(
             "magnet:?xt=urn:btih:{}&x.pe={}",
-            hex.encode(&infohash),
+            infohash.encode_hex(),
             peer,
         );
         let magnet = MagnetUri::parse_lenient(&s).unwrap();
