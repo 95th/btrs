@@ -1,5 +1,3 @@
-use std::fmt::Write;
-
 type Bytes = [u8; 20];
 
 #[derive(Debug, Default, PartialEq)]
@@ -7,12 +5,22 @@ pub struct InfoHash(Bytes);
 
 impl InfoHash {
     pub fn encode_url(&self) -> String {
+        const HEX_CHARS: &[u8] = b"0123456789ABCDEF";
         let mut encoded = String::new();
         for &c in &self.0 {
-            write!(&mut encoded, "%{:02X}", c).unwrap();
+            match c {
+                b' ' => encoded.push('+'),
+                c if c.is_ascii_alphanumeric() => encoded.push(c as char),
+                c => {
+                    encoded.push('%');
+                    encoded.push(HEX_CHARS[(c >> 4) as usize] as char);
+                    encoded.push(HEX_CHARS[(c & 0xf) as usize] as char);
+                }
+            }
         }
         encoded
     }
+
     pub fn encode_hex(&self) -> String {
         data_encoding::HEXUPPER_PERMISSIVE.encode(&self.0)
     }
@@ -55,7 +63,7 @@ mod tests {
             0xf7, 0x17, 0x80, 0x31, 0x00, 0x74,
         ]);
         assert_eq!(
-            "%86%D4%C8%00%24%A4%69%BE%4C%50%BC%5A%10%2C%F7%17%80%31%00%74",
+            "%86%D4%C8%00%24%A4i%BELP%BCZ%10%2C%F7%17%801%00t",
             i.encode_url()
         );
     }
