@@ -16,7 +16,11 @@
 //     }
 // }
 
+pub mod bitfield;
 pub mod conn;
+mod error;
 pub mod magnet;
 pub mod metainfo;
 pub mod torrent;
+
+pub use error::*;
