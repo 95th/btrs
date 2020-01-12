@@ -1,22 +1,26 @@
 use std::fmt;
 
-#[derive(Default)]
-pub struct BitField {
-    arr: Vec<u8>,
+pub struct Bits {
+    arr: Box<[u8]>,
     len: usize,
 }
 
-impl fmt::Debug for BitField {
+impl fmt::Debug for Bits {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("BitField").field("len", &self.len).finish()
+        f.debug_struct("Bits").field("len", &self.len).finish()
     }
 }
 
-impl BitField {
+impl Bits {
     pub fn new(len: usize) -> Self {
+        Self::with_value(len, false)
+    }
+
+    pub fn with_value(len: usize, val: bool) -> Self {
         let arr_len = (len as f64 / 8.0).ceil() as usize;
+        let v = if val { !0 } else { 0 };
         Self {
-            arr: vec![0; arr_len],
+            arr: vec![v; arr_len].into(),
             len,
         }
     }
@@ -83,8 +87,8 @@ impl BitField {
         Some((self.arr[i] & 1 << offset) != 0)
     }
 
-    pub fn iter(&self) -> BitIter {
-        BitIter {
+    pub fn iter(&self) -> BitsIter {
+        BitsIter {
             field: self,
             idx: 0,
         }
@@ -95,12 +99,12 @@ impl BitField {
     }
 }
 
-pub struct BitIter<'a> {
-    field: &'a BitField,
+pub struct BitsIter<'a> {
+    field: &'a Bits,
     idx: usize,
 }
 
-impl Iterator for BitIter<'_> {
+impl Iterator for BitsIter<'_> {
     type Item = bool;
 
     fn next(&mut self) -> Option<bool> {
@@ -120,13 +124,13 @@ mod tests {
 
     #[test]
     fn iter_01() {
-        let f = BitField::new(3);
+        let f = Bits::new(3);
         assert_eq!(vec![false, false, false], f.to_vec());
     }
 
     #[test]
     fn iter_02() {
-        let mut f = BitField::new(3);
+        let mut f = Bits::new(3);
         assert!(f.set(0, true));
         assert!(f.set(2, true));
         assert_eq!(vec![true, false, true], f.to_vec());
@@ -144,7 +148,7 @@ mod tests {
 
     #[test]
     fn get_01() {
-        let mut f = BitField::new(3);
+        let mut f = Bits::new(3);
         assert!(f.set(0, true));
         assert!(f.set(2, true));
         assert_eq!(Some(true), f.get(0));
@@ -155,7 +159,7 @@ mod tests {
 
     #[test]
     fn all_true_and_true_count() {
-        let mut f = BitField::new(3);
+        let mut f = Bits::new(3);
         assert!(f.set(0, true));
         assert!(f.set(2, true));
         assert_eq!(false, f.all_true());
@@ -168,14 +172,14 @@ mod tests {
 
     #[test]
     fn set_all_with_all_true_and_true_count() {
-        let mut f = BitField::new(3);
-        assert!(f.set(0, true));
-        assert!(f.set(2, true));
-        assert_eq!(false, f.all_true());
-        assert_eq!(2, f.true_count());
+        let mut f = Bits::new(3);
 
         f.set_all(true);
         assert_eq!(true, f.all_true());
         assert_eq!(3, f.true_count());
+
+        f.set(2, false);
+        assert_eq!(false, f.all_true());
+        assert_eq!(2, f.true_count());
     }
 }
