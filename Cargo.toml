@@ -11,3 +11,5 @@ bencode = { path = "./bencode" }
 sha1 = { version = "0.6.0", features = ["std"] }
 tokio = { version = "0.2.9", features = ["full"] }
 reqwest = "0.10.1"
+futures = "0.3.1"
+rand = "0.7.3"

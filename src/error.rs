@@ -1,5 +1,6 @@
 use std::borrow::Cow;
 use std::fmt;
+use std::io;
 
 #[derive(Debug)]
 pub struct Error {
@@ -18,6 +19,22 @@ impl fmt::Display for Error {
 
 impl From<reqwest::Error> for Error {
     fn from(e: reqwest::Error) -> Self {
+        Self {
+            err: e.to_string().into(),
+        }
+    }
+}
+
+impl From<tokio::time::Elapsed> for Error {
+    fn from(e: tokio::time::Elapsed) -> Self {
+        Self {
+            err: e.to_string().into(),
+        }
+    }
+}
+
+impl From<io::Error> for Error {
+    fn from(e: io::Error) -> Self {
         Self {
             err: e.to_string().into(),
         }

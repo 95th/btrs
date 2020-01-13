@@ -29,6 +29,10 @@ impl InfoHash {
         data_encoding::BASE32.encode(&self.0)
     }
 
+    pub fn as_ref(&self) -> &Bytes {
+        &self.0
+    }
+
     pub fn as_mut(&mut self) -> &mut Bytes {
         &mut self.0
     }

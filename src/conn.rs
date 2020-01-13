@@ -1,10 +1,21 @@
+use crate::future::timeout;
+use crate::metainfo::InfoHash;
+use crate::peer::Peer;
 use crate::torrent::TorrentFile;
 use bencode::ValueRef;
 use reqwest::Client;
 use std::convert::TryInto;
-use std::net::SocketAddr;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpStream;
 
-pub async fn connect(
+#[derive(Debug)]
+pub struct AnnounceResponse {
+    pub interval: usize,
+    pub peers: Vec<Peer>,
+    pub peers6: Vec<Peer>,
+}
+
+pub async fn announce(
     torrent: &TorrentFile,
     peer_id: &str,
     port: u16,
@@ -29,10 +40,8 @@ pub async fn connect(
     let value = value.as_dict().ok_or("not a dict")?;
     let interval = value
         .get("interval")
-        .ok_or("interval not found")?
-        .as_int()
-        .ok_or("interval not numeric")?
-        .try_into()
+        .and_then(|v| v.as_int())
+        .and_then(|n| n.try_into().ok())
         .unwrap_or(0);
 
     let peers = value.get("peers").and_then(|v| v.as_bytes()).unwrap_or(&[]);
@@ -40,14 +49,7 @@ pub async fn connect(
         Err("Invalid peer len")?;
     }
 
-    let peers = peers
-        .chunks_exact(6)
-        .map(|b| {
-            let ip: [u8; 4] = b[..4].try_into().unwrap();
-            let port = u16::from_be_bytes(b[4..].try_into().unwrap());
-            (ip, port).into()
-        })
-        .collect();
+    let peers = peers.chunks_exact(6).map(Peer::v4).collect();
 
     let peers6 = value
         .get("peers6")
@@ -57,14 +59,7 @@ pub async fn connect(
         return Err("Invalid peer len".into());
     }
 
-    let peers6 = peers6
-        .chunks_exact(18)
-        .map(|b| {
-            let ip: [u8; 16] = b[..16].try_into().unwrap();
-            let port = u16::from_be_bytes(b[16..].try_into().unwrap());
-            (ip, port).into()
-        })
-        .collect();
+    let peers6 = peers6.chunks_exact(18).map(Peer::v6).collect();
 
     Ok(AnnounceResponse {
         interval,
@@ -73,9 +68,32 @@ pub async fn connect(
     })
 }
 
-#[derive(Debug)]
-pub struct AnnounceResponse {
-    interval: usize,
-    peers: Vec<SocketAddr>,
-    peers6: Vec<SocketAddr>,
+pub struct Handshake<'a> {
+    pub extensions: [u8; 8],
+    pub infohash: &'a InfoHash,
+    pub peer_id: &'a str,
+}
+
+impl Handshake<'_> {
+    pub fn as_bytes(&self) -> Vec<u8> {
+        let mut v = vec![];
+        v.push(0x13);
+        v.extend(b"BitTorrent protocol");
+        v.extend(&self.extensions);
+        v.extend(self.infohash.as_ref());
+        v.extend(self.peer_id.as_bytes());
+        v
+    }
+}
+
+pub async fn handshake(peer: &Peer, handshake: &Handshake<'_>) -> crate::Result<()> {
+    let mut tcp = timeout(TcpStream::connect(peer.addr()), 3).await?;
+    let msg = handshake.as_bytes();
+    timeout(tcp.write_all(&msg), 3).await?;
+
+    let mut v = vec![];
+    timeout(tcp.read_to_end(&mut v), 3).await?;
+
+    println!("{:?}, {:?}", msg, v);
+    Ok(())
 }

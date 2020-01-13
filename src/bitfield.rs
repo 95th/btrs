@@ -1,17 +1,17 @@
 use std::fmt;
 
-pub struct Bits {
+pub struct BitField {
     arr: Box<[u8]>,
     len: usize,
 }
 
-impl fmt::Debug for Bits {
+impl fmt::Debug for BitField {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Bits").field("len", &self.len).finish()
     }
 }
 
-impl Bits {
+impl BitField {
     pub fn new(len: usize) -> Self {
         Self::with_value(len, false)
     }
@@ -42,6 +42,7 @@ impl Bits {
     pub fn set_all(&mut self, value: bool) {
         if value {
             self.arr.iter_mut().for_each(|v| *v = !0);
+            self.clear_unused();
         } else {
             self.arr.iter_mut().for_each(|v| *v = 0);
         }
@@ -59,7 +60,7 @@ impl Bits {
         }
 
         let remaining = self.len - (self.arr.len() - 1) * 8;
-        let last_byte = self.arr[self.arr.len() - 1] << (8 - remaining);
+        let last_byte: u8 = self.arr[self.arr.len() - 1] << (8 - remaining);
         last_byte.count_ones() as usize == remaining
     }
 
@@ -74,7 +75,7 @@ impl Bits {
         }
 
         let remaining = self.len - (self.arr.len() - 1) * 8;
-        let last_byte = self.arr[self.arr.len() - 1] << (8 - remaining);
+        let last_byte: u8 = self.arr[self.arr.len() - 1] << (8 - remaining);
         count + last_byte.count_ones() as usize
     }
 
@@ -87,8 +88,8 @@ impl Bits {
         Some((self.arr[i] & 1 << offset) != 0)
     }
 
-    pub fn iter(&self) -> BitsIter {
-        BitsIter {
+    pub fn iter(&self) -> BitIter {
+        BitIter {
             field: self,
             idx: 0,
         }
@@ -97,14 +98,35 @@ impl Bits {
     pub fn to_vec(&self) -> Vec<bool> {
         self.iter().collect()
     }
+
+    pub fn len(&self) -> usize {
+        self.len
+    }
+
+    pub fn len_bytes(&self) -> usize {
+        self.arr.len()
+    }
+
+    fn clear_unused(&mut self) {
+        if self.arr.is_empty() {
+            return;
+        }
+
+        let extra_bits = (self.arr.len() * 8) - self.len;
+        let last_byte = &mut self.arr[self.arr.len() - 1];
+        for i in 0..extra_bits {
+            let mask: u8 = 1 << (7 - i);
+            *last_byte &= !mask;
+        }
+    }
 }
 
-pub struct BitsIter<'a> {
-    field: &'a Bits,
+pub struct BitIter<'a> {
+    field: &'a BitField,
     idx: usize,
 }
 
-impl Iterator for BitsIter<'_> {
+impl Iterator for BitIter<'_> {
     type Item = bool;
 
     fn next(&mut self) -> Option<bool> {
@@ -124,13 +146,13 @@ mod tests {
 
     #[test]
     fn iter_01() {
-        let f = Bits::new(3);
+        let f = BitField::new(3);
         assert_eq!(vec![false, false, false], f.to_vec());
     }
 
     #[test]
     fn iter_02() {
-        let mut f = Bits::new(3);
+        let mut f = BitField::new(3);
         assert!(f.set(0, true));
         assert!(f.set(2, true));
         assert_eq!(vec![true, false, true], f.to_vec());
@@ -148,7 +170,7 @@ mod tests {
 
     #[test]
     fn get_01() {
-        let mut f = Bits::new(3);
+        let mut f = BitField::new(3);
         assert!(f.set(0, true));
         assert!(f.set(2, true));
         assert_eq!(Some(true), f.get(0));
@@ -159,7 +181,7 @@ mod tests {
 
     #[test]
     fn all_true_and_true_count() {
-        let mut f = Bits::new(3);
+        let mut f = BitField::new(3);
         assert!(f.set(0, true));
         assert!(f.set(2, true));
         assert_eq!(false, f.all_true());
@@ -172,7 +194,7 @@ mod tests {
 
     #[test]
     fn set_all_with_all_true_and_true_count() {
-        let mut f = Bits::new(3);
+        let mut f = BitField::new(3);
 
         f.set_all(true);
         assert_eq!(true, f.all_true());
@@ -181,5 +203,19 @@ mod tests {
         f.set(2, false);
         assert_eq!(false, f.all_true());
         assert_eq!(2, f.true_count());
+    }
+
+    #[test]
+    fn clear_unused() {
+        let mut f = BitField::new(17);
+        assert_eq!(3, f.len_bytes());
+        assert_eq!(17, f.len());
+
+        f.set_all(true);
+        assert_eq!(&[0xff, 0xff, 0x01], &f.arr[..]);
+        f.set_all(false);
+        assert_eq!(&[0x00, 0x00, 0x00], &f.arr[..]);
+        assert!(!f.set(21, true));
+        assert_eq!(&[0x00, 0x00, 0x00], &f.arr[..]);
     }
 }

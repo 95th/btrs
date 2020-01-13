@@ -16,11 +16,16 @@
 //     }
 // }
 
+pub const CLIENT_VERSION: &str = "950001";
+
 pub mod bitfield;
+pub mod client;
 pub mod conn;
 mod error;
+mod future;
 pub mod magnet;
 pub mod metainfo;
+pub mod peer;
 pub mod torrent;
 
 pub use error::*;
