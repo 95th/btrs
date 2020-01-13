@@ -107,6 +107,15 @@ impl BitField {
         self.arr.len()
     }
 
+    pub fn write_to(&self, buf: &mut [u8]) {
+        buf.copy_from_slice(&self.arr);
+    }
+
+    pub fn copy_from(&mut self, buf: &[u8]) {
+        self.arr.copy_from_slice(&buf[..self.arr.len()]);
+        self.clear_unused();
+    }
+
     fn clear_unused(&mut self) {
         if self.arr.is_empty() {
             return;
