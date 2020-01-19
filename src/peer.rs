@@ -1,6 +1,7 @@
 use rand::Rng;
 use std::convert::TryInto;
 use std::net::{IpAddr, SocketAddr};
+
 #[derive(Debug)]
 pub struct Peer {
     ip: IpAddr,

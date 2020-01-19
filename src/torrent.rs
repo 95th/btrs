@@ -19,11 +19,14 @@ impl TorrentFile {
         let dict = value.as_dict()?;
         let announce = dict.get("announce")?.as_str()?;
         let info_dict = dict.get("info")?.as_dict()?;
-        let info_bytes = dict.get("info")?.to_vec();
+        let info_bytes = dict.get("info")?.encode_to_vec();
         let info_hash = Sha1::from(info_bytes).digest().bytes().into();
 
         let length = info_dict.get("length")?.as_int()?;
-        let name = info_dict.get("name").and_then(|n| n.as_str()).unwrap_or("");
+        let name = info_dict
+            .get("name")
+            .and_then(|n| n.as_str())
+            .unwrap_or_default();
         let piece_len = info_dict.get("piece length")?.as_int()?;
         let pieces = info_dict.get("pieces")?.as_bytes()?;
 

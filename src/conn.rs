@@ -20,8 +20,6 @@ pub async fn announce(
     peer_id: &str,
     port: u16,
 ) -> crate::Result<AnnounceResponse> {
-    println!("Announce: {}", torrent.announce);
-    println!("InfoHash: {:x?}", torrent.info_hash);
     let url = format!(
         "{}?info_hash={}",
         torrent.announce,
@@ -86,13 +84,17 @@ impl Handshake<'_> {
     }
 }
 
-pub async fn handshake(peer: &Peer, handshake: &Handshake<'_>) -> crate::Result<()> {
+pub async fn handshake(
+    peer: &Peer,
+    handshake: &Handshake<'_>,
+    timeout_secs: u64,
+) -> crate::Result<()> {
     let mut tcp = timeout(TcpStream::connect(peer.addr()), 3).await?;
     let msg = handshake.as_bytes();
-    timeout(tcp.write_all(&msg), 3).await?;
+    timeout(tcp.write_all(&msg), timeout_secs).await?;
 
     let mut v = vec![];
-    timeout(tcp.read_to_end(&mut v), 3).await?;
+    timeout(tcp.read_to_end(&mut v), timeout_secs).await?;
 
     println!("{:?}, {:?}", msg, v);
     Ok(())

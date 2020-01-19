@@ -74,7 +74,7 @@ impl<'a> ValueRef<'a> {
         inner_if!(self == Dict)
     }
 
-    pub fn to_vec(&self) -> Vec<u8> {
+    pub fn encode_to_vec(&self) -> Vec<u8> {
         let mut v = vec![];
         self.encode(&mut v).unwrap();
         v
@@ -296,7 +296,7 @@ impl<'a> From<&'a [u8]> for ValueRef<'a> {
 
 impl fmt::Display for ValueRef<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let v = self.to_vec();
+        let v = self.encode_to_vec();
         write!(f, "{}", String::from_utf8_lossy(&v))
     }
 }
