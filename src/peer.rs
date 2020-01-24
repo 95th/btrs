@@ -1,3 +1,4 @@
+use rand::distributions::Alphanumeric;
 use rand::Rng;
 use std::convert::TryInto;
 use std::net::{IpAddr, SocketAddr};
@@ -9,6 +10,10 @@ pub struct Peer {
 }
 
 impl Peer {
+    pub fn new(ip: IpAddr, port: u16) -> Self {
+        Self { ip, port }
+    }
+
     pub fn v4(bytes: &[u8]) -> Self {
         let ip: [u8; 4] = bytes[..4].try_into().unwrap();
         let port = u16::from_be_bytes(bytes[4..].try_into().unwrap());
@@ -37,10 +42,6 @@ pub fn generate_peer_id() -> String {
     s.push('-');
     s.push_str(crate::CLIENT_VERSION);
     s.push('-');
-    let mut rng = rand::thread_rng();
-    while s.len() < 20 {
-        let b = b'0' + rng.gen_range(0, 10);
-        s.push(b as char);
-    }
+    s.extend(rand::thread_rng().sample_iter(&Alphanumeric).take(12));
     s
 }

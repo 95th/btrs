@@ -8,6 +8,8 @@ use std::convert::TryInto;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
+const PROTOCOL: &[u8] = b"BitTorrent protocol";
+
 #[derive(Debug)]
 pub struct AnnounceResponse {
     pub interval: usize,
@@ -29,7 +31,7 @@ pub async fn announce(
         .get(&url)
         .query(&[("peer_id", peer_id)])
         .query(&[("port", port)])
-        .query(&[("uploaded", "0"), ("downloaded", "0"), ("compact", "1")])
+        .query(&[("uploaded", "0"), ("downloaded", "0"), ("compact", "1")]) // prefer compact peer list
         .send()
         .await?
         .bytes()
@@ -42,12 +44,34 @@ pub async fn announce(
         .and_then(|n| n.try_into().ok())
         .unwrap_or(0);
 
-    let peers = value.get("peers").and_then(|v| v.as_bytes()).unwrap_or(&[]);
-    if peers.len() % 6 != 0 {
-        Err("Invalid peer len")?;
-    }
+    let peers = match value.get("peers") {
+        Some(peers) if peers.is_list() => {
+            let mut v = vec![];
+            for peer in peers.as_list().unwrap() {
+                let peer = peer.as_dict().ok_or("Peer not a dict")?;
+                let ip = peer
+                    .get("ip")
+                    .and_then(|ip| ip.as_str())
+                    .ok_or("IP not present")
+                    .and_then(|v| v.parse().map_err(|_| "Invalid IP/DNS name"))?;
+                let port = peer
+                    .get("port")
+                    .ok_or("Port not present")
+                    .and_then(|port| port.as_int().ok_or("Invalid port number"))?;
+                v.push(Peer::new(ip, port as u16));
+            }
+            v
+        }
+        Some(peers) => {
+            let peers = peers.as_bytes().unwrap_or(&[]);
+            if peers.len() % 6 != 0 {
+                return Err("Invalid peer len".into());
+            }
 
-    let peers = peers.chunks_exact(6).map(Peer::v4).collect();
+            peers.chunks_exact(6).map(Peer::v4).collect()
+        }
+        None => vec![],
+    };
 
     let peers6 = value
         .get("peers6")
@@ -68,34 +92,38 @@ pub async fn announce(
 
 pub struct Handshake<'a> {
     pub extensions: [u8; 8],
-    pub infohash: &'a InfoHash,
+    pub info_hash: &'a InfoHash,
     pub peer_id: &'a str,
 }
 
-impl Handshake<'_> {
+impl<'a> Handshake<'a> {
+    pub fn new(info_hash: &'a InfoHash, peer_id: &'a str) -> Self {
+        Self {
+            peer_id,
+            info_hash,
+            extensions: Default::default(),
+        }
+    }
+
     pub fn as_bytes(&self) -> Vec<u8> {
         let mut v = vec![];
-        v.push(0x13);
-        v.extend(b"BitTorrent protocol");
+        v.push(19);
+        v.extend(PROTOCOL);
         v.extend(&self.extensions);
-        v.extend(self.infohash.as_ref());
+        v.extend(self.info_hash.as_ref());
         v.extend(self.peer_id.as_bytes());
         v
     }
-}
 
-pub async fn handshake(
-    peer: &Peer,
-    handshake: &Handshake<'_>,
-    timeout_secs: u64,
-) -> crate::Result<()> {
-    let mut tcp = timeout(TcpStream::connect(peer.addr()), 3).await?;
-    let msg = handshake.as_bytes();
-    timeout(tcp.write_all(&msg), timeout_secs).await?;
+    pub async fn send(&self, peer: &Peer, timeout_secs: u64) -> crate::Result<()> {
+        let mut tcp = timeout(TcpStream::connect(peer.addr()), timeout_secs).await?;
+        let msg = self.as_bytes();
+        timeout(tcp.write_all(&msg), timeout_secs).await?;
 
-    let mut v = vec![];
-    timeout(tcp.read_to_end(&mut v), timeout_secs).await?;
+        let mut v = vec![];
+        timeout(tcp.read_to_end(&mut v), timeout_secs).await?;
 
-    println!("{:?}, {:?}", msg, v);
-    Ok(())
+        println!("{:?}, {:?}", msg, v);
+        Ok(())
+    }
 }
