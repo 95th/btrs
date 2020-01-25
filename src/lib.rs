@@ -25,6 +25,7 @@ mod error;
 pub mod future;
 pub mod magnet;
 pub mod metainfo;
+pub mod msg;
 pub mod peer;
 pub mod torrent;
 

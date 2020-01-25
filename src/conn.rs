@@ -3,9 +3,9 @@ use crate::peer::Peer;
 use crate::torrent::TorrentFile;
 use bencode::ValueRef;
 use reqwest::Client;
-use std::convert::TryInto;
+use std::convert::{TryFrom, TryInto};
 use std::io;
-use tokio::io::{AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
 
 const PROTOCOL: &[u8] = b"BitTorrent protocol";
@@ -109,30 +109,47 @@ impl<'a> Handshake<'a> {
 
     pub async fn send(&self, peer: &Peer) -> crate::Result<()> {
         let mut tcp = TcpStream::connect(peer.addr()).await?;
-        self.write_bytes(&mut tcp).await?;
+        self.write(&mut tcp).await?;
 
-        let mut v = [0; Self::LEN];
-        tcp.read_exact(&mut v).await?;
+        let remote_peer_id = self.read(&mut tcp).await?;
+        println!("Remote peer_id: {}", remote_peer_id);
 
-        println!("{:?}", v);
         Ok(())
     }
 
-    async fn write_bytes<W>(&self, writer: &mut W) -> io::Result<()>
+    async fn write<W>(&self, writer: &mut W) -> io::Result<()>
     where
         W: AsyncWrite + Unpin,
     {
-        dbg!(&[19]);
-        dbg!(PROTOCOL);
-        dbg!(&self.extensions);
-        dbg!(self.info_hash.as_ref());
-        dbg!(self.peer_id.as_bytes());
-
         writer.write_all(&[19]).await?;
         writer.write_all(PROTOCOL).await?;
         writer.write_all(&self.extensions).await?;
         writer.write_all(self.info_hash.as_ref()).await?;
         writer.write_all(self.peer_id.as_bytes()).await?;
         Ok(())
+    }
+
+    async fn read<R>(&self, reader: &mut R) -> crate::Result<String>
+    where
+        R: AsyncRead + Unpin,
+    {
+        let mut buf = [0; Handshake::LEN];
+        reader.read_exact(&mut buf).await?;
+
+        if buf[0] as usize != PROTOCOL.len() {
+            Err("Invalid length")?;
+        }
+
+        if &buf[1..20] != PROTOCOL {
+            Err("Invalid Protocol")?;
+        }
+
+        let info_hash = InfoHash::try_from(&buf[28..48])?;
+        if self.info_hash != &info_hash {
+            Err("InfoHash mismatch")?;
+        }
+
+        let peer_id = String::from_utf8_lossy(&buf[48..68]).to_string();
+        Ok(peer_id)
     }
 }

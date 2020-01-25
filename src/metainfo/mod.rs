@@ -1,4 +1,5 @@
 use percent_encoding::{percent_encode, PercentEncode, NON_ALPHANUMERIC};
+use std::convert::TryFrom;
 
 type Bytes = [u8; 20];
 
@@ -34,5 +35,14 @@ impl AsMut<Bytes> for InfoHash {
 impl From<Bytes> for InfoHash {
     fn from(b: Bytes) -> Self {
         Self(b)
+    }
+}
+
+impl TryFrom<&[u8]> for InfoHash {
+    type Error = crate::Error;
+
+    fn try_from(buf: &[u8]) -> crate::Result<Self> {
+        let buf = Bytes::try_from(buf).map_err(|_| "Incorrect length")?;
+        Ok(Self(buf))
     }
 }
