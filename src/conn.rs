@@ -1,11 +1,11 @@
-use crate::future::timeout;
 use crate::metainfo::InfoHash;
 use crate::peer::Peer;
 use crate::torrent::TorrentFile;
 use bencode::ValueRef;
 use reqwest::Client;
 use std::convert::TryInto;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use std::io;
+use tokio::io::{AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
 
 const PROTOCOL: &[u8] = b"BitTorrent protocol";
@@ -97,6 +97,8 @@ pub struct Handshake<'a> {
 }
 
 impl<'a> Handshake<'a> {
+    const LEN: usize = 68;
+
     pub fn new(info_hash: &'a InfoHash, peer_id: &'a str) -> Self {
         Self {
             peer_id,
@@ -105,25 +107,32 @@ impl<'a> Handshake<'a> {
         }
     }
 
-    pub fn as_bytes(&self) -> Vec<u8> {
-        let mut v = vec![];
-        v.push(19);
-        v.extend(PROTOCOL);
-        v.extend(&self.extensions);
-        v.extend(self.info_hash.as_ref());
-        v.extend(self.peer_id.as_bytes());
-        v
+    pub async fn send(&self, peer: &Peer) -> crate::Result<()> {
+        let mut tcp = TcpStream::connect(peer.addr()).await?;
+        self.write_bytes(&mut tcp).await?;
+
+        let mut v = [0; Self::LEN];
+        tcp.read_exact(&mut v).await?;
+
+        println!("{:?}", v);
+        Ok(())
     }
 
-    pub async fn send(&self, peer: &Peer, timeout_secs: u64) -> crate::Result<()> {
-        let mut tcp = timeout(TcpStream::connect(peer.addr()), timeout_secs).await?;
-        let msg = self.as_bytes();
-        timeout(tcp.write_all(&msg), timeout_secs).await?;
+    async fn write_bytes<W>(&self, writer: &mut W) -> io::Result<()>
+    where
+        W: AsyncWrite + Unpin,
+    {
+        dbg!(&[19]);
+        dbg!(PROTOCOL);
+        dbg!(&self.extensions);
+        dbg!(self.info_hash.as_ref());
+        dbg!(self.peer_id.as_bytes());
 
-        let mut v = vec![];
-        timeout(tcp.read_to_end(&mut v), timeout_secs).await?;
-
-        println!("{:?}, {:?}", msg, v);
+        writer.write_all(&[19]).await?;
+        writer.write_all(PROTOCOL).await?;
+        writer.write_all(&self.extensions).await?;
+        writer.write_all(self.info_hash.as_ref()).await?;
+        writer.write_all(self.peer_id.as_bytes()).await?;
         Ok(())
     }
 }

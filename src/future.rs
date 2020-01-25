@@ -1,6 +1,6 @@
 use std::future::Future;
 
-pub(crate) async fn timeout<T, E, F>(future: F, timeout_secs: u64) -> crate::Result<T>
+pub async fn timeout<T, E, F>(future: F, timeout_secs: u64) -> crate::Result<T>
 where
     F: Future<Output = Result<T, E>>,
     crate::Error: From<E>,
