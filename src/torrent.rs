@@ -1,5 +1,9 @@
 use crate::metainfo::InfoHash;
+use crate::peer::Peer;
+use crate::work::{PieceResult, PieceWork, WorkQueue};
 use sha1::Sha1;
+use std::convert::TryInto;
+use tokio::sync::mpsc::Sender;
 
 pub const HASH_LEN: usize = 20;
 
@@ -42,9 +46,60 @@ impl TorrentFile {
         Some(torrent)
     }
 
-    pub fn piece_hash(&self, piece_idx: usize) -> &[u8] {
-        let start = piece_idx * HASH_LEN;
-        let end = self.piece_hashes.len().min(start + HASH_LEN);
-        &self.piece_hashes[start..end]
+    pub fn piece_iter(&self) -> PieceIter {
+        PieceIter::new(self)
+    }
+
+    pub async fn start_worker(
+        &self,
+        _peer: Peer,
+        _work_queue: WorkQueue,
+        _result_tx: Sender<PieceResult>,
+    ) {
+        todo!()
+    }
+}
+
+pub struct PieceIter<'a> {
+    torrent: &'a TorrentFile,
+    idx: usize,
+    count: usize,
+}
+
+impl<'a> PieceIter<'a> {
+    fn new(torrent: &'a TorrentFile) -> Self {
+        Self {
+            torrent,
+            idx: 0,
+            count: torrent.piece_hashes.len() / 20,
+        }
+    }
+}
+
+impl Iterator for PieceIter<'_> {
+    type Item = PieceWork;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.idx >= self.count {
+            return None;
+        }
+
+        let bytes = &self.torrent.piece_hashes[self.idx * HASH_LEN..][..HASH_LEN];
+        let hash = bytes.try_into().unwrap();
+
+        let start = self.idx * self.torrent.piece_len;
+
+        let end = start + self.torrent.piece_len;
+        let len = end.min(self.torrent.length) - start;
+
+        let piece = PieceWork {
+            idx: self.idx,
+            len,
+            hash,
+        };
+
+        self.idx += 1;
+
+        Some(piece)
     }
 }
