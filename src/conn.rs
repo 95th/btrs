@@ -112,7 +112,7 @@ impl<'a> Handshake<'a> {
         self.write(&mut tcp).await?;
 
         let remote_peer_id = self.read(&mut tcp).await?;
-        println!("Remote peer_id: {}", remote_peer_id);
+        println!("Remote peer_id: {:?}", remote_peer_id);
 
         Ok(())
     }
@@ -129,7 +129,7 @@ impl<'a> Handshake<'a> {
         Ok(())
     }
 
-    async fn read<R>(&self, reader: &mut R) -> crate::Result<String>
+    async fn read<R>(&self, reader: &mut R) -> crate::Result<Vec<u8>>
     where
         R: AsyncRead + Unpin,
     {
@@ -149,7 +149,7 @@ impl<'a> Handshake<'a> {
             Err("InfoHash mismatch")?;
         }
 
-        let peer_id = String::from_utf8_lossy(&buf[48..68]).to_string();
+        let peer_id = buf[48..68].to_vec();
         Ok(peer_id)
     }
 }

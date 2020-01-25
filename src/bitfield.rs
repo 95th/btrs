@@ -19,10 +19,21 @@ impl BitField {
     pub fn with_value(len: usize, val: bool) -> Self {
         let arr_len = (len as f64 / 8.0).ceil() as usize;
         let v = if val { !0 } else { 0 };
-        Self {
+        let mut bits = Self {
             arr: vec![v; arr_len].into(),
             len,
+        };
+        bits.clear_unused();
+        bits
+    }
+
+    pub fn get(&self, idx: usize) -> Option<bool> {
+        if idx >= self.len {
+            return None;
         }
+        let i = idx / 8;
+        let offset = idx % 8;
+        Some((self.arr[i] & 1 << offset) != 0)
     }
 
     pub fn set(&mut self, idx: usize, value: bool) -> bool {
@@ -77,15 +88,6 @@ impl BitField {
         let remaining = self.len - (self.arr.len() - 1) * 8;
         let last_byte: u8 = self.arr[self.arr.len() - 1] << (8 - remaining);
         count + last_byte.count_ones() as usize
-    }
-
-    pub fn get(&self, idx: usize) -> Option<bool> {
-        if idx >= self.len {
-            return None;
-        }
-        let i = idx / 8;
-        let offset = idx % 8;
-        Some((self.arr[i] & 1 << offset) != 0)
     }
 
     pub fn iter(&self) -> BitIter {
