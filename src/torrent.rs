@@ -7,15 +7,15 @@ pub const HASH_LEN: usize = 20;
 pub struct TorrentFile {
     pub announce: String,
     pub info_hash: InfoHash,
-    pub pieces: Vec<u8>,
+    pub piece_hashes: Vec<u8>,
     pub piece_len: usize,
     pub length: usize,
     pub name: String,
 }
 
 impl TorrentFile {
-    pub fn parse(bytes: &[u8]) -> Option<TorrentFile> {
-        let value = bencode::ValueRef::decode(bytes).ok()?;
+    pub fn parse(bytes: impl AsRef<[u8]>) -> Option<TorrentFile> {
+        let value = bencode::ValueRef::decode(bytes.as_ref()).ok()?;
         let dict = value.as_dict()?;
         let announce = dict.get("announce")?.as_str()?;
         let info_dict = dict.get("info")?.as_dict()?;
@@ -33,7 +33,7 @@ impl TorrentFile {
         let torrent = TorrentFile {
             announce: announce.to_owned(),
             info_hash,
-            pieces: pieces.to_vec(),
+            piece_hashes: pieces.to_vec(),
             piece_len: piece_len as usize,
             length: length as usize,
             name: name.to_owned(),
@@ -44,7 +44,7 @@ impl TorrentFile {
 
     pub fn piece_hash(&self, piece_idx: usize) -> &[u8] {
         let start = piece_idx * HASH_LEN;
-        let end = self.pieces.len().min(start + HASH_LEN);
-        &self.pieces[start..end]
+        let end = self.piece_hashes.len().min(start + HASH_LEN);
+        &self.piece_hashes[start..end]
     }
 }
