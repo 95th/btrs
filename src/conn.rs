@@ -2,6 +2,7 @@ use crate::metainfo::InfoHash;
 use crate::peer::{Peer, PeerId};
 use crate::torrent::TorrentFile;
 use bencode::ValueRef;
+use log::debug;
 use reqwest::Client;
 use std::convert::{TryFrom, TryInto};
 use std::io;
@@ -73,6 +74,8 @@ pub async fn announce(
         None => vec![],
     };
 
+    debug!("Found {} peers (v4)", peers.len());
+
     let peers6 = value
         .get("peers6")
         .and_then(|v| v.as_bytes())
@@ -81,7 +84,8 @@ pub async fn announce(
         return Err("Invalid peer len".into());
     }
 
-    let peers6 = peers6.chunks_exact(18).map(Peer::v6).collect();
+    let peers6: Vec<_> = peers6.chunks_exact(18).map(Peer::v6).collect();
+    debug!("Found {} peers (v6)", peers6.len());
 
     Ok(AnnounceResponse {
         interval,

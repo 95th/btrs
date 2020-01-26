@@ -7,6 +7,7 @@ use crate::peer::{Peer, PeerId};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpStream;
 
+#[derive(Debug)]
 pub struct Client<C> {
     conn: C,
     pub choked: bool,

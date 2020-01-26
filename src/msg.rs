@@ -1,8 +1,8 @@
 use crate::util::read_u32;
 use std::convert::TryFrom;
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncWrite};
 
-#[derive(Copy, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 #[repr(u8)]
 pub enum MessageKind {
     Choke = 0,
@@ -37,6 +37,7 @@ impl TryFrom<u8> for MessageKind {
     }
 }
 
+#[derive(Debug)]
 pub struct Message {
     pub kind: MessageKind,
     pub payload: Vec<u8>,
@@ -51,9 +52,10 @@ impl Message {
     where
         W: AsyncWrite + Unpin,
     {
+        use tokio::io::AsyncWriteExt;
         let len = self.payload.len() as u32 + 1; // +1 for MessageKind
-        writer.write_all(&len.to_be_bytes()).await?;
-        writer.write_all(&[self.kind as u8]).await?;
+        writer.write_u32(len).await?;
+        writer.write_u8(self.kind as u8).await?;
         writer.write_all(&self.payload).await?;
         Ok(())
     }
@@ -104,6 +106,7 @@ pub async fn write<W>(msg: Option<&Message>, writer: &mut W) -> crate::Result<()
 where
     W: AsyncWrite + Unpin,
 {
+    use tokio::io::AsyncWriteExt;
     match msg {
         Some(msg) => msg.write(writer).await?,
         // Keep-alive
@@ -116,6 +119,7 @@ pub async fn read<R>(reader: &mut R) -> crate::Result<Option<Message>>
 where
     R: AsyncRead + Unpin,
 {
+    use tokio::io::AsyncReadExt;
     let len = reader.read_u32().await?;
     if len == 0 {
         // Keep-alive
@@ -139,8 +143,8 @@ where
 pub fn request(index: u32, begin: u32, length: u32) -> Message {
     let mut payload = vec![0; 12];
     payload[..4].copy_from_slice(&index.to_be_bytes());
-    payload[..4].copy_from_slice(&begin.to_be_bytes());
-    payload[..4].copy_from_slice(&length.to_be_bytes());
+    payload[4..8].copy_from_slice(&begin.to_be_bytes());
+    payload[8..].copy_from_slice(&length.to_be_bytes());
     Message::new(MessageKind::Request, payload)
 }
 

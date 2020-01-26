@@ -1,9 +1,11 @@
 use crate::client::Client;
 use crate::conn::{announce, AnnounceResponse};
+use crate::future::timeout;
 use crate::metainfo::InfoHash;
 use crate::msg::MessageKind;
 use crate::peer::{self, Peer, PeerId};
 use crate::work::{PieceResult, PieceWork, WorkQueue};
+use log::{debug, info, trace};
 use sha1::Sha1;
 use std::convert::TryInto;
 use std::ops::Range;
@@ -55,6 +57,8 @@ impl TorrentFile {
 
     pub async fn to_torrent(self) -> crate::Result<Torrent> {
         let peer_id = peer::generate_peer_id();
+        debug!("Our peer_id: {:?}", peer_id);
+
         let AnnounceResponse { peers, peers6, .. } = announce(&self, &peer_id, 6881).await?;
 
         Ok(Torrent {
@@ -103,15 +107,21 @@ impl Torrent {
         client.send_interested().await?;
 
         loop {
+            debug!("Get piece of work");
             let wrk = match work_queue.lock().await.pop_front() {
                 Some(v) => v,
                 None => break,
             };
 
+            debug!("Got piece of work index: {}", wrk.index);
+
             if !client.bitfield.get(wrk.index) {
+                debug!("This guy doesn't have {} piece", wrk.index);
                 work_queue.lock().await.push_back(wrk);
                 continue;
             }
+
+            debug!("Let's download {} piece", wrk.index);
 
             let buf = match attempt_download(&mut client, &wrk).await {
                 Ok(v) => v,
@@ -121,10 +131,15 @@ impl Torrent {
                 }
             };
 
+            debug!("Woohoo! Downloaded {} piece", wrk.index);
+
             if !check_integrity(&buf, &wrk) {
+                debug!("Dang it! Bad piece: {}", wrk.index);
                 work_queue.lock().await.push_back(wrk);
                 continue;
             }
+
+            debug!("Woohoo! Verified {} piece", wrk.index);
 
             client.send_have(wrk.index).await?;
             result_tx
@@ -152,19 +167,27 @@ where
     };
     while state.downloaded < pw.len {
         if !state.client.choked {
+            trace!("I can breathe!");
             while state.backlog < MAX_BACKLOG && state.requested < pw.len {
                 let block_size = MAX_BLOCK_SIZE.min(pw.len - state.requested);
 
-                state
-                    .client
-                    .send_request(pw.index, state.requested, block_size)
-                    .await?;
+                timeout(
+                    state
+                        .client
+                        .send_request(pw.index, state.requested, block_size),
+                    30,
+                )
+                .await?;
                 state.backlog += 1;
                 state.requested += block_size;
             }
+        } else {
+            trace!("OMG! this guy's choking me");
         }
-        state.read_msg().await?;
+        timeout(state.read_msg(), 30).await?;
+        info!("Downloaded: {}", state.downloaded);
     }
+    info!("Piece downloaded: {}", pw.index);
     Ok(state.buf)
 }
 
@@ -173,6 +196,7 @@ fn check_integrity(buf: &[u8], wrk: &PieceWork) -> bool {
     hash == *wrk.hash.as_ref()
 }
 
+#[derive(Debug)]
 struct PieceProgress<'a, C> {
     index: usize,
     client: &'a mut Client<C>,
@@ -193,15 +217,19 @@ where
             None => return Ok(()),
         };
 
+        debug!("We got message: {:?}", msg.kind);
+
         match msg.kind {
             MessageKind::Unchoke => self.client.choked = false,
             MessageKind::Choke => self.client.choked = true,
             MessageKind::Have => {
                 let index = msg.parse_have()?;
+                debug!("This guy has {} piece", index);
                 self.client.bitfield.set(index, true);
             }
             MessageKind::Piece => {
                 let n = msg.parse_piece(self.index, &mut self.buf)?;
+                debug!("Yay! we downloaded {} bytes", n);
                 self.downloaded += n;
                 self.backlog -= 1;
             }
