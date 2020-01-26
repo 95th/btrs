@@ -116,16 +116,14 @@ pub async fn read<R>(reader: &mut R) -> crate::Result<Option<Message>>
 where
     R: AsyncRead + Unpin,
 {
-    let mut buf = [0; 4];
-    reader.read_exact(&mut buf[..4]).await?;
-    let len = u32::from_be_bytes(buf);
+    let len = reader.read_u32().await?;
     if len == 0 {
         // Keep-alive
         return Ok(None);
     }
 
-    reader.read_exact(&mut buf[..1]).await?;
-    let kind = MessageKind::try_from(buf[0])?;
+    let b = reader.read_u8().await?;
+    let kind = MessageKind::try_from(b)?;
 
     let payload = if len == 1 {
         vec![]

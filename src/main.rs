@@ -6,6 +6,7 @@ use tokio::sync::{mpsc, Mutex};
 
 #[tokio::main]
 async fn main() -> btrs::Result<()> {
+    env_logger::init();
     let buf = fs::read("t.torrent").await?;
     let torrent_file = TorrentFile::parse(buf).ok_or("Unable to parse torrent file")?;
     let torrent = torrent_file.to_torrent().await?;
