@@ -5,7 +5,7 @@ use std::net::{IpAddr, SocketAddr};
 
 pub type PeerId = [u8; 20];
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Peer {
     ip: IpAddr,
     port: u16,

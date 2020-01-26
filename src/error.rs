@@ -1,6 +1,7 @@
 use std::borrow::Cow;
 use std::fmt;
 use std::io;
+use tokio::sync::mpsc::error::SendError;
 
 #[derive(Debug)]
 pub struct Error {
@@ -50,5 +51,13 @@ impl From<&'static str> for Error {
 impl From<String> for Error {
     fn from(err: String) -> Self {
         Self { err: err.into() }
+    }
+}
+
+impl<T> From<SendError<T>> for Error {
+    fn from(_: SendError<T>) -> Self {
+        Self {
+            err: "Send error occured".into(),
+        }
     }
 }

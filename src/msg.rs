@@ -47,14 +47,6 @@ impl Message {
         Self { kind, payload }
     }
 
-    pub fn kind(&self) -> MessageKind {
-        self.kind
-    }
-
-    pub fn payload(&self) -> &[u8] {
-        &self.payload
-    }
-
     pub async fn write<W>(&self, writer: &mut W) -> crate::Result<()>
     where
         W: AsyncWrite + Unpin,

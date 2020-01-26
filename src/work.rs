@@ -4,7 +4,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 pub struct PieceWork {
-    pub idx: usize,
+    pub index: usize,
     pub len: usize,
     pub hash: InfoHash,
 }

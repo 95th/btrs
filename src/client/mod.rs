@@ -7,31 +7,21 @@ use crate::peer::{Peer, PeerId};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpStream;
 
-pub struct Client<C>
-where
-    C: AsyncRead + AsyncWrite + Unpin,
-{
+pub struct Client<C> {
     conn: C,
-    choked: bool,
-    bitfield: BitField,
+    pub choked: bool,
+    pub bitfield: BitField,
     peer: Peer,
     info_hash: InfoHash,
     peer_id: PeerId,
 }
 
-impl<C> Client<C>
-where
-    C: AsyncRead + AsyncWrite + Unpin,
-{
-    pub async fn new_tcp(
-        peer: Peer,
-        info_hash: InfoHash,
-        peer_id: PeerId,
-    ) -> crate::Result<Client<TcpStream>> {
+impl Client<TcpStream> {
+    pub async fn new_tcp(peer: Peer, info_hash: InfoHash, peer_id: PeerId) -> crate::Result<Self> {
         let mut conn = TcpStream::connect(peer.addr()).await?;
         timeout(handshake(&mut conn, &info_hash, &peer_id), 3).await?;
         let bitfield = timeout(recv_bitfield(&mut conn), 5).await?;
-        Ok(Client {
+        Ok(Self {
             conn,
             choked: true,
             bitfield,
@@ -40,7 +30,12 @@ where
             peer_id,
         })
     }
+}
 
+impl<C> Client<C>
+where
+    C: AsyncRead + AsyncWrite + Unpin,
+{
     pub async fn read(&mut self) -> crate::Result<Option<Message>> {
         msg::read(&mut self.conn).await
     }

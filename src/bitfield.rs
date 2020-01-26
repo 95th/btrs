@@ -27,13 +27,11 @@ impl BitField {
         bits
     }
 
-    pub fn get(&self, idx: usize) -> Option<bool> {
-        if idx >= self.len {
-            return None;
-        }
+    pub fn get(&self, idx: usize) -> bool {
+        assert!(idx < self.len);
         let i = idx / 8;
         let offset = idx % 8;
-        Some((self.arr[i] & 1 << offset) != 0)
+        (self.arr[i] & 1 << offset) != 0
     }
 
     pub fn set(&mut self, idx: usize, value: bool) -> bool {
@@ -156,7 +154,7 @@ impl Iterator for BitIter<'_> {
         } else {
             let value = self.field.get(self.idx);
             self.idx += 1;
-            value
+            Some(value)
         }
     }
 }
@@ -194,10 +192,16 @@ mod tests {
         let mut f = BitField::new(3);
         assert!(f.set(0, true));
         assert!(f.set(2, true));
-        assert_eq!(Some(true), f.get(0));
-        assert_eq!(Some(false), f.get(1));
-        assert_eq!(Some(true), f.get(2));
-        assert_eq!(None, f.get(3));
+        assert_eq!(true, f.get(0));
+        assert_eq!(false, f.get(1));
+        assert_eq!(true, f.get(2));
+    }
+
+    #[test]
+    #[should_panic]
+    fn get_02() {
+        let f = BitField::new(3);
+        f.get(3);
     }
 
     #[test]
