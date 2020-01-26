@@ -1,6 +1,5 @@
 use btrs::torrent::TorrentFile;
 use futures::StreamExt;
-use log::debug;
 use std::sync::Arc;
 use tokio::fs;
 use tokio::sync::{mpsc, Mutex};
@@ -9,16 +8,10 @@ use tokio::sync::{mpsc, Mutex};
 async fn main() -> btrs::Result<()> {
     env_logger::init();
 
-    debug!("read file");
     let buf = fs::read("t.torrent").await?;
-
-    debug!("parse file");
     let torrent_file = TorrentFile::parse(buf).ok_or("Unable to parse torrent file")?;
-
-    debug!("resolve torrent");
     let torrent = torrent_file.to_torrent().await?;
 
-    debug!("resolved");
     let torrent = Arc::new(torrent);
     let work_queue = Arc::new(Mutex::new(torrent.piece_iter().collect()));
     let (result_tx, mut result_rx) = mpsc::channel(200);

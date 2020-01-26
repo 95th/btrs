@@ -5,7 +5,7 @@ use crate::metainfo::InfoHash;
 use crate::msg::MessageKind;
 use crate::peer::{self, Peer, PeerId};
 use crate::work::{PieceResult, PieceWork, WorkQueue};
-use log::{debug, info, trace};
+use log::{debug, info};
 use sha1::Sha1;
 use std::convert::TryInto;
 use std::ops::Range;
@@ -153,41 +153,37 @@ impl Torrent {
     }
 }
 
-async fn attempt_download<C>(client: &mut Client<C>, pw: &PieceWork) -> crate::Result<Vec<u8>>
+async fn attempt_download<C>(client: &mut Client<C>, wrk: &PieceWork) -> crate::Result<Vec<u8>>
 where
     C: AsyncRead + AsyncWrite + Unpin,
 {
     let mut state = PieceProgress {
-        index: pw.index,
+        index: wrk.index,
         client,
-        buf: vec![0; pw.len],
+        buf: vec![0; wrk.len],
         downloaded: 0,
         requested: 0,
         backlog: 0,
     };
-    while state.downloaded < pw.len {
+    while state.downloaded < wrk.len {
         if !state.client.choked {
-            trace!("I can breathe!");
-            while state.backlog < MAX_BACKLOG && state.requested < pw.len {
-                let block_size = MAX_BLOCK_SIZE.min(pw.len - state.requested);
+            while state.backlog < MAX_BACKLOG && state.requested < wrk.len {
+                let block_size = MAX_BLOCK_SIZE.min(wrk.len - state.requested);
 
                 timeout(
                     state
                         .client
-                        .send_request(pw.index, state.requested, block_size),
+                        .send_request(wrk.index, state.requested, block_size),
                     30,
                 )
                 .await?;
                 state.backlog += 1;
                 state.requested += block_size;
             }
-        } else {
-            trace!("OMG! this guy's choking me");
         }
         timeout(state.read_msg(), 30).await?;
-        info!("Downloaded: {}", state.downloaded);
     }
-    info!("Piece downloaded: {}", pw.index);
+    info!("Piece downloaded: {}", wrk.index);
     Ok(state.buf)
 }
 

@@ -39,10 +39,10 @@ impl From<Bytes> for InfoHash {
 }
 
 impl TryFrom<&[u8]> for InfoHash {
-    type Error = crate::Error;
+    type Error = &'static str;
 
-    fn try_from(buf: &[u8]) -> crate::Result<Self> {
-        let buf = Bytes::try_from(buf).map_err(|_| "Incorrect length")?;
+    fn try_from(buf: &[u8]) -> Result<Self, Self::Error> {
+        let buf = Bytes::try_from(buf).map_err(|_| "Incorrect Infohash length")?;
         Ok(Self(buf))
     }
 }
