@@ -37,8 +37,8 @@ impl TryFrom<u8> for MessageKind {
 }
 
 pub struct Message {
-    kind: MessageKind,
-    payload: Vec<u8>,
+    pub kind: MessageKind,
+    pub payload: Vec<u8>,
 }
 
 impl Message {

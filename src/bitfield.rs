@@ -132,6 +132,16 @@ impl BitField {
     }
 }
 
+impl From<Vec<u8>> for BitField {
+    fn from(buf: Vec<u8>) -> Self {
+        let len = buf.len() * 8;
+        Self {
+            arr: buf.into(),
+            len,
+        }
+    }
+}
+
 pub struct BitIter<'a> {
     field: &'a BitField,
     idx: usize,
