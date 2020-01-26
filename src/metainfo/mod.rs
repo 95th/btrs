@@ -3,7 +3,7 @@ use std::convert::TryFrom;
 
 type Bytes = [u8; 20];
 
-#[derive(Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct InfoHash(Bytes);
 
 impl InfoHash {

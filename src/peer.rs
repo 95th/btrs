@@ -3,6 +3,8 @@ use rand::Rng;
 use std::convert::TryInto;
 use std::net::{IpAddr, SocketAddr};
 
+pub type PeerId = [u8; 20];
+
 #[derive(Debug)]
 pub struct Peer {
     ip: IpAddr,
@@ -37,11 +39,14 @@ impl Peer {
     }
 }
 
-pub fn generate_peer_id() -> String {
-    let mut s = String::new();
-    s.push('-');
-    s.push_str(crate::CLIENT_VERSION);
-    s.push('-');
-    s.extend(rand::thread_rng().sample_iter(&Alphanumeric).take(12));
-    s
+pub fn generate_peer_id() -> PeerId {
+    let mut buf = [0; 20];
+    buf[0] = b'-';
+    buf[1..7].copy_from_slice(crate::CLIENT_VERSION);
+    buf[7] = b'-';
+    rand::thread_rng()
+        .sample_iter(&Alphanumeric)
+        .zip(&mut buf[7..])
+        .for_each(|(c, b)| *b = c as u8);
+    buf
 }

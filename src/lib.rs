@@ -16,7 +16,7 @@
 //     }
 // }
 
-pub const CLIENT_VERSION: &str = "950001";
+pub const CLIENT_VERSION: &[u8] = b"950001";
 
 pub mod bitfield;
 pub mod client;

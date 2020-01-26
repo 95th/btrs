@@ -3,6 +3,7 @@ use crate::peer::Peer;
 use crate::work::{PieceResult, PieceWork, WorkQueue};
 use sha1::Sha1;
 use std::convert::TryInto;
+use std::ops::Range;
 use tokio::sync::mpsc::Sender;
 
 pub const HASH_LEN: usize = 20;
@@ -50,6 +51,12 @@ impl TorrentFile {
         PieceIter::new(self)
     }
 
+    pub fn piece_bounds(&self, idx: usize) -> Range<usize> {
+        let start = idx * self.piece_len;
+        let end = start + self.piece_len;
+        start..end.min(self.length)
+    }
+
     pub async fn start_worker(
         &self,
         _peer: Peer,
@@ -88,13 +95,11 @@ impl Iterator for PieceIter<'_> {
         let hash = bytes.try_into().unwrap();
 
         let start = self.idx * self.torrent.piece_len;
-
         let end = start + self.torrent.piece_len;
-        let len = end.min(self.torrent.length) - start;
 
         let piece = PieceWork {
             idx: self.idx,
-            len,
+            len: end.min(self.torrent.length) - start,
             hash,
         };
 

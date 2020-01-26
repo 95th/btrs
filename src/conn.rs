@@ -1,12 +1,11 @@
 use crate::metainfo::InfoHash;
-use crate::peer::Peer;
+use crate::peer::{Peer, PeerId};
 use crate::torrent::TorrentFile;
 use bencode::ValueRef;
 use reqwest::Client;
 use std::convert::{TryFrom, TryInto};
 use std::io;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
-use tokio::net::TcpStream;
 
 const PROTOCOL: &[u8] = b"BitTorrent protocol";
 
@@ -19,9 +18,10 @@ pub struct AnnounceResponse {
 
 pub async fn announce(
     torrent: &TorrentFile,
-    peer_id: &str,
+    peer_id: &PeerId,
     port: u16,
 ) -> crate::Result<AnnounceResponse> {
+    let peer_id = std::str::from_utf8(peer_id).unwrap();
     let url = format!(
         "{}?info_hash={}",
         torrent.announce,
@@ -93,13 +93,13 @@ pub async fn announce(
 pub struct Handshake<'a> {
     pub extensions: [u8; 8],
     pub info_hash: &'a InfoHash,
-    pub peer_id: &'a str,
+    pub peer_id: &'a PeerId,
 }
 
 impl<'a> Handshake<'a> {
     const LEN: usize = 68;
 
-    pub fn new(info_hash: &'a InfoHash, peer_id: &'a str) -> Self {
+    pub fn new(info_hash: &'a InfoHash, peer_id: &'a PeerId) -> Self {
         Self {
             peer_id,
             info_hash,
@@ -107,17 +107,7 @@ impl<'a> Handshake<'a> {
         }
     }
 
-    pub async fn send(&self, peer: &Peer) -> crate::Result<()> {
-        let mut tcp = TcpStream::connect(peer.addr()).await?;
-        self.write(&mut tcp).await?;
-
-        let remote_peer_id = self.read(&mut tcp).await?;
-        println!("Remote peer_id: {:?}", remote_peer_id);
-
-        Ok(())
-    }
-
-    async fn write<W>(&self, writer: &mut W) -> io::Result<()>
+    pub async fn write<W>(&self, writer: &mut W) -> io::Result<()>
     where
         W: AsyncWrite + Unpin,
     {
@@ -125,11 +115,11 @@ impl<'a> Handshake<'a> {
         writer.write_all(PROTOCOL).await?;
         writer.write_all(&self.extensions).await?;
         writer.write_all(self.info_hash.as_ref()).await?;
-        writer.write_all(self.peer_id.as_bytes()).await?;
+        writer.write_all(self.peer_id).await?;
         Ok(())
     }
 
-    async fn read<R>(&self, reader: &mut R) -> crate::Result<Vec<u8>>
+    pub async fn read<R>(&self, reader: &mut R) -> crate::Result<PeerId>
     where
         R: AsyncRead + Unpin,
     {
@@ -149,7 +139,7 @@ impl<'a> Handshake<'a> {
             Err("InfoHash mismatch")?;
         }
 
-        let peer_id = buf[48..68].to_vec();
+        let peer_id = buf[48..68].try_into().unwrap();
         Ok(peer_id)
     }
 }

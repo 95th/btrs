@@ -1,8 +1,6 @@
-use btrs::conn::{announce, Handshake};
-use btrs::future::timeout;
+use btrs::conn::announce;
 use btrs::peer;
 use btrs::torrent::TorrentFile;
-use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use std::sync::Arc;
 use tokio::fs;
@@ -17,29 +15,9 @@ async fn main() -> btrs::Result<()> {
 
     println!("{:?}", response);
 
-    {
-        let handshake = &Handshake::new(&torrent.info_hash, &peer_id);
-
-        let mut futs: FuturesUnordered<_> = response
-            .peers
-            .iter()
-            .map(|peer| {
-                async move {
-                    if let Err(e) = timeout(handshake.send(peer), 10).await {
-                        println!("{:?}: {:?}", peer, e);
-                    }
-                }
-            })
-            .collect();
-
-        while let Some(_) = futs.next().await {
-            println!("done");
-        }
-    }
-
     let torrent = Arc::new(torrent);
     let work_queue = Arc::new(Mutex::new(torrent.piece_iter().collect()));
-    let (result_tx, _result_rx) = mpsc::channel(200);
+    let (result_tx, mut result_rx) = mpsc::channel(200);
 
     for peer in response.peers {
         let torrent = torrent.clone();
@@ -50,5 +28,13 @@ async fn main() -> btrs::Result<()> {
             torrent.start_worker(peer, work_queue, result_tx).await;
         });
     }
+
+    let mut file = vec![0; torrent.length];
+
+    while let Some(piece) = result_rx.next().await {
+        let bounds = torrent.piece_bounds(piece.index);
+        file[bounds].copy_from_slice(&piece.buf);
+    }
+
     Ok(())
 }
