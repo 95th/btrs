@@ -41,8 +41,39 @@ where
         })
     }
 
-    pub async fn read_msg(&mut self) -> crate::Result<Option<Message>> {
-        Ok(msg::read(&mut self.conn).await?)
+    pub async fn read(&mut self) -> crate::Result<Option<Message>> {
+        msg::read(&mut self.conn).await
+    }
+
+    pub async fn send_request(
+        &mut self,
+        index: usize,
+        begin: usize,
+        length: usize,
+    ) -> crate::Result<()> {
+        msg::request(index as u32, begin as u32, length as u32)
+            .write(&mut self.conn)
+            .await
+    }
+
+    pub async fn send_interested(&mut self) -> crate::Result<()> {
+        msg::interested().write(&mut self.conn).await
+    }
+
+    pub async fn send_not_interested(&mut self) -> crate::Result<()> {
+        msg::not_interested().write(&mut self.conn).await
+    }
+
+    pub async fn send_choke(&mut self) -> crate::Result<()> {
+        msg::choke().write(&mut self.conn).await
+    }
+
+    pub async fn send_unchoke(&mut self) -> crate::Result<()> {
+        msg::unchoke().write(&mut self.conn).await
+    }
+
+    pub async fn send_have(&mut self, index: usize) -> crate::Result<()> {
+        msg::have(index as u32).write(&mut self.conn).await
     }
 }
 
