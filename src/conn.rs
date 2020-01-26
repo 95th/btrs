@@ -115,7 +115,7 @@ impl<'a> Handshake<'a> {
     where
         W: AsyncWrite + Unpin,
     {
-        writer.write_all(&[19]).await?;
+        writer.write_u8(19).await?;
         writer.write_all(PROTOCOL).await?;
         writer.write_all(&self.extensions).await?;
         writer.write_all(self.info_hash.as_ref()).await?;
