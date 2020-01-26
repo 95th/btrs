@@ -55,7 +55,7 @@ impl TorrentFile {
         Some(torrent)
     }
 
-    pub async fn to_torrent(self) -> crate::Result<Torrent> {
+    pub async fn into_torrent(self) -> crate::Result<Torrent> {
         let peer_id = peer::generate_peer_id();
         debug!("Our peer_id: {:?}", peer_id);
 

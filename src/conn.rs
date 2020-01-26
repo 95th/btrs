@@ -131,16 +131,16 @@ impl<'a> Handshake<'a> {
         reader.read_exact(&mut buf).await?;
 
         if buf[0] as usize != PROTOCOL.len() {
-            Err("Invalid length")?;
+            return Err("Invalid length".into());
         }
 
         if &buf[1..20] != PROTOCOL {
-            Err("Invalid Protocol")?;
+            return Err("Invalid Protocol".into());
         }
 
         let info_hash = InfoHash::try_from(&buf[28..48])?;
         if self.info_hash != &info_hash {
-            Err("InfoHash mismatch")?;
+            return Err("InfoHash mismatch".into());
         }
 
         let peer_id = buf[48..68].try_into().unwrap();

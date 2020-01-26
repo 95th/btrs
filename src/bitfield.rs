@@ -103,6 +103,10 @@ impl BitField {
         self.len
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.arr.iter().all(|&b| b == 0)
+    }
+
     pub fn len_bytes(&self) -> usize {
         self.arr.len()
     }

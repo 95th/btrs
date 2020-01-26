@@ -95,6 +95,6 @@ where
     {
         Ok(payload.into())
     } else {
-        Err("Invalid message")?
+        Err("Invalid message".into())
     }
 }

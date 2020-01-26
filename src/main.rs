@@ -10,7 +10,7 @@ async fn main() -> btrs::Result<()> {
 
     let buf = fs::read("t.torrent").await?;
     let torrent_file = TorrentFile::parse(buf).ok_or("Unable to parse torrent file")?;
-    let torrent = torrent_file.to_torrent().await?;
+    let torrent = torrent_file.into_torrent().await?;
 
     let torrent = Arc::new(torrent);
     let work_queue = Arc::new(Mutex::new(torrent.piece_iter().collect()));
