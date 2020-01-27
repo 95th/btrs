@@ -133,7 +133,7 @@ impl Torrent {
 
             debug!("Woohoo! Downloaded {} piece", wrk.index);
 
-            if !check_integrity(&buf, &wrk) {
+            if !wrk.check_integrity(&buf) {
                 debug!("Dang it! Bad piece: {}", wrk.index);
                 work_queue.lock().await.push_back(wrk);
                 continue;
@@ -185,11 +185,6 @@ where
     }
     info!("Piece downloaded: {}", wrk.index);
     Ok(state.buf)
-}
-
-fn check_integrity(buf: &[u8], wrk: &PieceWork) -> bool {
-    let hash = Sha1::from(buf).digest().bytes();
-    hash == *wrk.hash.as_ref()
 }
 
 #[derive(Debug)]

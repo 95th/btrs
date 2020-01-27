@@ -1,7 +1,10 @@
 use crate::metainfo::InfoHash;
+use sha1::Sha1;
 use std::collections::VecDeque;
 use std::sync::Arc;
 use tokio::sync::Mutex;
+
+pub type WorkQueue = Arc<Mutex<VecDeque<PieceWork>>>;
 
 pub struct PieceWork {
     pub index: usize,
@@ -9,7 +12,12 @@ pub struct PieceWork {
     pub hash: InfoHash,
 }
 
-pub type WorkQueue = Arc<Mutex<VecDeque<PieceWork>>>;
+impl PieceWork {
+    pub fn check_integrity(&self, buf: &[u8]) -> bool {
+        let hash = Sha1::from(buf).digest().bytes();
+        hash == *self.hash.as_ref()
+    }
+}
 
 pub struct PieceResult {
     pub index: usize,
