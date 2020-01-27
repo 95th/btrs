@@ -18,9 +18,9 @@
 
 pub const CLIENT_VERSION: &[u8] = b"950001";
 
+pub mod announce;
 pub mod bitfield;
 pub mod client;
-pub mod conn;
 mod error;
 pub mod future;
 pub mod magnet;

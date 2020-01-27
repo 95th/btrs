@@ -1,5 +1,5 @@
+use crate::announce::{announce, AnnounceResponse};
 use crate::client::Client;
-use crate::conn::{announce, AnnounceResponse};
 use crate::future::timeout;
 use crate::metainfo::InfoHash;
 use crate::msg::MessageKind;

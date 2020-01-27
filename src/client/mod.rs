@@ -1,5 +1,7 @@
+mod handshake;
+
 use crate::bitfield::BitField;
-use crate::conn::Handshake;
+use crate::client::handshake::Handshake;
 use crate::future::timeout;
 use crate::metainfo::InfoHash;
 use crate::msg::{self, Message, MessageKind};
