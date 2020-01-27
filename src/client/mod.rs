@@ -79,8 +79,8 @@ async fn handshake<C>(conn: &mut C, info_hash: &InfoHash, peer_id: &PeerId) -> c
 where
     C: AsyncRead + AsyncWrite + Unpin,
 {
-    let handshake = Handshake::new(info_hash, peer_id);
-
+    let mut handshake = Handshake::new(info_hash, peer_id);
+    handshake.set_extensions(true);
     handshake.write(conn).await?;
     let _ = handshake.read(conn).await?;
     Ok(())

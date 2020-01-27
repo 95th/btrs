@@ -1,4 +1,5 @@
 use crate::util::read_u32;
+use bencode::{Value, ValueRef};
 use std::convert::TryFrom;
 use tokio::io::{AsyncRead, AsyncWrite};
 
@@ -6,14 +7,15 @@ use tokio::io::{AsyncRead, AsyncWrite};
 #[repr(u8)]
 pub enum MessageKind {
     Choke = 0,
-    Unchoke,
-    Interested,
-    NotInterested,
-    Have,
-    Bitfield,
-    Request,
-    Piece,
-    Cancel,
+    Unchoke = 1,
+    Interested = 2,
+    NotInterested = 3,
+    Have = 4,
+    Bitfield = 5,
+    Request = 6,
+    Piece = 7,
+    Cancel = 8,
+    Extended = 20,
 }
 
 impl TryFrom<u8> for MessageKind {
@@ -32,6 +34,7 @@ impl TryFrom<u8> for MessageKind {
             6 => Request,
             7 => Piece,
             8 => Cancel,
+            20 => Extended,
             _ => return Err("Invalid Message Kind"),
         })
     }
@@ -100,6 +103,22 @@ impl Message {
         let index = read_u32(&self.payload) as usize;
         Ok(index)
     }
+
+    pub fn parse_extended(&self) -> Result<ExtendedMessage<'_>, &'static str> {
+        if self.kind != MessageKind::Extended {
+            return Err("Not an Extended message");
+        }
+
+        if self.payload.is_empty() {
+            return Err("Extended message can't have empty payload");
+        }
+
+        let id = self.payload[0];
+        Ok(ExtendedMessage {
+            id,
+            payload: &self.payload[1..],
+        })
+    }
 }
 
 pub async fn write<W>(msg: Option<&Message>, writer: &mut W) -> crate::Result<()>
@@ -166,4 +185,33 @@ pub fn unchoke() -> Message {
 
 pub fn have(index: u32) -> Message {
     Message::new(MessageKind::Have, index.to_be_bytes().to_vec())
+}
+
+pub fn extended_handshake(data: Value) -> Message {
+    extended(0, data)
+}
+
+pub fn extended(id: u8, data: Value) -> Message {
+    let mut payload = vec![id];
+    data.encode(&mut payload).unwrap();
+    Message {
+        kind: MessageKind::Extended,
+        payload,
+    }
+}
+
+pub struct ExtendedMessage<'a> {
+    pub id: u8,
+    pub payload: &'a [u8],
+}
+
+impl ExtendedMessage<'_> {
+    pub fn is_handshake(&self) -> bool {
+        self.id == 0
+    }
+
+    pub fn parse(&self) -> Result<ValueRef<'_>, &'static str> {
+        ValueRef::decode(&self.payload[1..])
+            .map_err(|_| "Invalid bencoded data in Extended message")
+    }
 }

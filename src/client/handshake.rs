@@ -23,6 +23,14 @@ impl<'a> Handshake<'a> {
         }
     }
 
+    pub fn set_extensions(&mut self, enable: bool) {
+        if enable {
+            self.extensions[5] |= 0x10;
+        } else {
+            self.extensions[5] &= !0x10;
+        }
+    }
+
     pub async fn write<W>(&self, writer: &mut W) -> io::Result<()>
     where
         W: AsyncWrite + Unpin,
