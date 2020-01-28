@@ -6,6 +6,7 @@ use crate::future::timeout;
 use crate::metainfo::InfoHash;
 use crate::msg::{self, Message, MessageKind};
 use crate::peer::{Peer, PeerId};
+use bencode::Value;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpStream;
 
@@ -72,6 +73,14 @@ where
 
     pub async fn send_have(&mut self, index: usize) -> crate::Result<()> {
         msg::have(index as u32).write(&mut self.conn).await
+    }
+
+    pub async fn send_extended_handshake(&mut self, value: &Value) -> crate::Result<()> {
+        msg::extended_handshake(value).write(&mut self.conn).await
+    }
+
+    pub async fn send_extended(&mut self, id: u8, value: &Value) -> crate::Result<()> {
+        msg::extended(id, value).write(&mut self.conn).await
     }
 }
 

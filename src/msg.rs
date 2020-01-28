@@ -187,17 +187,25 @@ pub fn have(index: u32) -> Message {
     Message::new(MessageKind::Have, index.to_be_bytes().to_vec())
 }
 
-pub fn extended_handshake(data: Value) -> Message {
+pub fn extended_handshake(data: &Value) -> Message {
     extended(0, data)
 }
 
-pub fn extended(id: u8, data: Value) -> Message {
+pub fn extended(id: u8, data: &Value) -> Message {
     let mut payload = vec![id];
     data.encode(&mut payload).unwrap();
     Message {
         kind: MessageKind::Extended,
         payload,
     }
+}
+
+#[derive(Copy, Clone)]
+#[repr(u8)]
+pub enum MetadataMsgKind {
+    Request = 0,
+    Data = 1,
+    Reject = 2,
 }
 
 pub struct ExtendedMessage<'a> {

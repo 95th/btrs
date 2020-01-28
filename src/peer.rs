@@ -39,6 +39,15 @@ impl Peer {
     }
 }
 
+impl From<SocketAddr> for Peer {
+    fn from(addr: SocketAddr) -> Self {
+        Self {
+            ip: addr.ip(),
+            port: addr.port(),
+        }
+    }
+}
+
 pub fn generate_peer_id() -> PeerId {
     let mut buf = [0; 20];
     buf[0] = b'-';

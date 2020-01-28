@@ -1,9 +1,14 @@
+use crate::client::Client;
 use crate::metainfo::InfoHash;
+use crate::peer::PeerId;
+use crate::torrent::Torrent;
+use bencode::Value;
+use std::collections::BTreeMap;
 use std::net::SocketAddr;
 
 #[derive(Debug, Default)]
 pub struct MagnetUri {
-    torrent_id: InfoHash,
+    info_hash: InfoHash,
     display_name: Option<String>,
     tracker_urls: Vec<String>,
     peer_addrs: Vec<SocketAddr>,
@@ -16,6 +21,30 @@ impl MagnetUri {
 
     pub fn parse_lenient(s: &str) -> Result<Self, &'static str> {
         parser::MagnetUriParser::new_lenient().parse(s)
+    }
+
+    pub async fn request_metadata(&self, peer_id: PeerId) -> Result<Torrent, &'static str> {
+        let mut m = BTreeMap::new();
+        m.insert("ut_metadata".to_owned(), Value::with_int(3));
+
+        let mut dict = BTreeMap::new();
+        dict.insert("m".to_owned(), Value::with_dict(m));
+
+        let data = Value::with_dict(dict);
+
+        for addr in &self.peer_addrs {
+            if self.try_get(*addr, &data, peer_id).await.is_ok() {
+                break;
+            }
+        }
+        todo!()
+    }
+
+    async fn try_get(&self, addr: SocketAddr, data: &Value, peer_id: PeerId) -> crate::Result<()> {
+        let ih = self.info_hash.clone();
+        let mut client = Client::new_tcp(addr.into(), ih, peer_id).await?;
+        client.send_extended_handshake(&data).await?;
+        Ok(())
     }
 }
 
@@ -56,13 +85,13 @@ mod parser {
                 match &key[..] {
                     TORRENT_ID => {
                         if value.starts_with(INFOHASH_PREFIX) {
-                            let torrent_id = build_torrent_id(&value[INFOHASH_PREFIX.len()..])?;
+                            let info_hash = build_info_hash(&value[INFOHASH_PREFIX.len()..])?;
 
-                            if has_ih && torrent_id != magnet.torrent_id {
+                            if has_ih && info_hash != magnet.info_hash {
                                 return Err("Multiple infohashes found");
                             }
 
-                            magnet.torrent_id = torrent_id;
+                            magnet.info_hash = info_hash;
                             has_ih = true;
                         }
                     }
@@ -87,7 +116,7 @@ mod parser {
         }
     }
 
-    fn build_torrent_id(encoded: &str) -> Result<InfoHash, &'static str> {
+    fn build_info_hash(encoded: &str) -> Result<InfoHash, &'static str> {
         use data_encoding::{BASE32 as base32, HEXLOWER_PERMISSIVE as hex};
 
         let encoded = encoded.as_bytes();
@@ -119,7 +148,7 @@ mod tests {
         let infohash = InfoHash::from([12; 20]);
         let s = format!("magnet:?xt=urn:btih:{}", infohash.encode_hex());
         let magnet = MagnetUri::parse(&s).unwrap();
-        assert_eq!(infohash, magnet.torrent_id);
+        assert_eq!(infohash, magnet.info_hash);
     }
 
     #[test]
@@ -127,7 +156,7 @@ mod tests {
         let infohash = InfoHash::from([12; 20]);
         let s = format!("magnet:?xt=urn:btih:{}", infohash.encode_base32());
         let magnet = MagnetUri::parse(&s).unwrap();
-        assert_eq!(infohash, magnet.torrent_id);
+        assert_eq!(infohash, magnet.info_hash);
     }
 
     #[test]
@@ -148,7 +177,7 @@ mod tests {
             peer_2
         );
         let magnet = MagnetUri::parse(&s).unwrap();
-        assert_eq!(infohash, magnet.torrent_id);
+        assert_eq!(infohash, magnet.info_hash);
         assert_eq!(display_name, magnet.display_name.unwrap());
 
         let urls: Vec<&str> = magnet.tracker_urls.iter().map(|s| &s[..]).collect();
@@ -163,7 +192,7 @@ mod tests {
         let infohash = InfoHash::from([0; 20]);
         let s = format!("magnet:?xt=urn:btih:{}", infohash.encode_hex());
         let magnet = MagnetUri::parse(&s).unwrap();
-        assert_eq!(infohash, magnet.torrent_id);
+        assert_eq!(infohash, magnet.info_hash);
     }
 
     #[test]
@@ -176,7 +205,7 @@ mod tests {
             multihash.encode_hex(),
         );
         let magnet = MagnetUri::parse(&s).unwrap();
-        assert_eq!(infohash, magnet.torrent_id);
+        assert_eq!(infohash, magnet.info_hash);
     }
 
     #[test]
@@ -201,7 +230,7 @@ mod tests {
             infohash.encode_hex(),
         );
         let magnet = MagnetUri::parse(&s).unwrap();
-        assert_eq!(infohash, magnet.torrent_id);
+        assert_eq!(infohash, magnet.info_hash);
     }
 
     #[test]
@@ -214,7 +243,7 @@ mod tests {
             peer,
         );
         let magnet = MagnetUri::parse_lenient(&s).unwrap();
-        assert_eq!(infohash, magnet.torrent_id);
+        assert_eq!(infohash, magnet.info_hash);
         assert!(magnet.peer_addrs.is_empty());
     }
 }
