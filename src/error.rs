@@ -42,6 +42,14 @@ impl From<io::Error> for Error {
     }
 }
 
+impl From<bencode::Error> for Error {
+    fn from(e: bencode::Error) -> Self {
+        Self {
+            err: e.to_string().into(),
+        }
+    }
+}
+
 impl From<&'static str> for Error {
     fn from(err: &'static str) -> Self {
         Self { err: err.into() }

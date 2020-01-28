@@ -1,8 +1,12 @@
+use crate::announce::{announce, AnnounceResponse};
 use crate::client::Client;
 use crate::metainfo::InfoHash;
-use crate::peer::PeerId;
+use crate::peer::{Peer, PeerId};
 use crate::torrent::Torrent;
 use bencode::Value;
+use futures::stream::FuturesUnordered;
+use futures::stream::StreamExt;
+use log::debug;
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
 
@@ -24,28 +28,79 @@ impl MagnetUri {
     }
 
     pub async fn request_metadata(&self, peer_id: PeerId) -> Result<Torrent, &'static str> {
-        let mut m = BTreeMap::new();
-        m.insert("ut_metadata".to_owned(), Value::with_int(3));
+        debug!("Requesting peers");
+        let mut peer_futures: FuturesUnordered<_> = self
+            .tracker_urls
+            .iter()
+            .map(|url| self.get_peers(url, &peer_id))
+            .collect();
 
-        let mut dict = BTreeMap::new();
-        dict.insert("m".to_owned(), Value::with_dict(m));
+        let mut peers = vec![];
+        let mut peers6 = vec![];
 
-        let data = Value::with_dict(dict);
+        loop {
+            match peer_futures.next().await {
+                Some(Ok((p, p6))) => {
+                    peers.extend(p);
+                    peers6.extend(p6);
+                }
+                Some(Err(e)) => debug!("Error: {}", e),
+                None => break,
+            }
+        }
 
-        for addr in &self.peer_addrs {
-            if self.try_get(*addr, &data, peer_id).await.is_ok() {
-                break;
+        debug!("Got {} v4 peers and {} v6 peers", peers.len(), peers6.len());
+
+        if peers.is_empty() && peers6.is_empty() {
+            return Err("No peers received from trackers");
+        }
+
+        let data = handshake();
+        for peer in peers.iter().chain(peers6.iter()) {
+            debug!("Try connecting {:?}", peer);
+
+            if self.try_get(peer.clone(), &data, peer_id).await.is_ok() {
+                return Ok(Torrent {
+                    peers,
+                    peers6,
+                    info_hash: self.info_hash.clone(),
+                    peer_id,
+                    piece_len: 0,
+                    piece_hashes: vec![],
+                    length: 0,
+                    name: "".to_string(),
+                });
             }
         }
         todo!()
     }
 
-    async fn try_get(&self, addr: SocketAddr, data: &Value, peer_id: PeerId) -> crate::Result<()> {
+    async fn get_peers(
+        &self,
+        url: &str,
+        peer_id: &PeerId,
+    ) -> crate::Result<(Vec<Peer>, Vec<Peer>)> {
+        match announce(url, &self.info_hash, &peer_id, 6881).await? {
+            AnnounceResponse { peers, peers6, .. } => Ok((peers, peers6)),
+        }
+    }
+
+    async fn try_get(&self, peer: Peer, data: &Value, peer_id: PeerId) -> crate::Result<()> {
         let ih = self.info_hash.clone();
-        let mut client = Client::new_tcp(addr.into(), ih, peer_id).await?;
+        let mut client = Client::new_tcp(peer, ih, peer_id).await?;
         client.send_extended_handshake(&data).await?;
         Ok(())
     }
+}
+
+fn handshake() -> Value {
+    let mut m = BTreeMap::new();
+    m.insert("ut_metadata".to_owned(), Value::with_int(3));
+
+    let mut dict = BTreeMap::new();
+    dict.insert("m".to_owned(), Value::with_dict(m));
+
+    Value::with_dict(dict)
 }
 
 mod parser {

@@ -1,5 +1,5 @@
+use crate::metainfo::InfoHash;
 use crate::peer::{Peer, PeerId};
-use crate::torrent::TorrentFile;
 use bencode::ValueRef;
 use log::debug;
 use reqwest::Client;
@@ -13,16 +13,13 @@ pub struct AnnounceResponse {
 }
 
 pub async fn announce(
-    torrent: &TorrentFile,
+    url: &str,
+    info_hash: &InfoHash,
     peer_id: &PeerId,
     port: u16,
 ) -> crate::Result<AnnounceResponse> {
     let peer_id = std::str::from_utf8(peer_id).unwrap();
-    let url = format!(
-        "{}?info_hash={}",
-        torrent.announce,
-        torrent.info_hash.encode_url()
-    );
+    let url = format!("{}?info_hash={}", url, info_hash.encode_url());
     let data = Client::new()
         .get(&url)
         .query(&[("peer_id", peer_id)])
@@ -32,7 +29,7 @@ pub async fn announce(
         .await?
         .bytes()
         .await?;
-    let value = ValueRef::decode(&data).unwrap();
+    let value = ValueRef::decode(&data)?;
     let value = value.as_dict().ok_or("not a dict")?;
     let interval = value
         .get("interval")

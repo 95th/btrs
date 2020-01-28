@@ -59,7 +59,8 @@ impl TorrentFile {
         let peer_id = peer::generate_peer_id();
         debug!("Our peer_id: {:?}", peer_id);
 
-        let AnnounceResponse { peers, peers6, .. } = announce(&self, &peer_id, 6881).await?;
+        let resp = announce(&self.announce, &self.info_hash, &peer_id, 6881).await?;
+        let AnnounceResponse { peers, peers6, .. } = resp;
 
         Ok(Torrent {
             peers,
@@ -77,9 +78,9 @@ impl TorrentFile {
 pub struct Torrent {
     pub peers: Vec<Peer>,
     pub peers6: Vec<Peer>,
-    peer_id: PeerId,
-    info_hash: InfoHash,
-    piece_hashes: Vec<u8>,
+    pub peer_id: PeerId,
+    pub info_hash: InfoHash,
+    pub piece_hashes: Vec<u8>,
     pub piece_len: usize,
     pub length: usize,
     pub name: String,
