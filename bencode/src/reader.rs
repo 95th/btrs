@@ -19,6 +19,10 @@ impl<'a> Reader<'a> {
         Reader { buf, curr_idx: 0 }
     }
 
+    pub fn pos(&self) -> usize {
+        self.curr_idx
+    }
+
     pub fn next_byte(&mut self) -> Option<u8> {
         let byte = self.buf.get(self.curr_idx)?;
         self.curr_idx += 1;

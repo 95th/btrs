@@ -42,7 +42,7 @@ impl Value {
     }
 
     pub fn as_int(&self) -> Option<i64> {
-        inner_if!(self == Int).map(|n| *n)
+        inner_if!(self == Int).copied()
     }
 
     pub fn as_str(&self) -> Option<&str> {

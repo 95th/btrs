@@ -39,7 +39,7 @@ impl<'a> ValueRef<'a> {
     }
 
     pub fn as_int(&self) -> Option<i64> {
-        inner_if!(self == Int).map(|n| *n)
+        inner_if!(self == Int).copied()
     }
 
     pub fn as_str(&self) -> Option<&'a str> {
@@ -199,6 +199,14 @@ impl<'a> ValueRef<'a> {
     }
 
     pub fn decode(bytes: &'a [u8]) -> Result<Self> {
+        let (value, pos) = Self::decode_with_limits(bytes, None, None)?;
+        if pos != bytes.len() {
+            return Err(Error::EOF);
+        }
+        Ok(value)
+    }
+
+    pub fn decode_prefix(bytes: &'a [u8]) -> Result<(Self, usize)> {
         Self::decode_with_limits(bytes, None, None)
     }
 
@@ -206,7 +214,7 @@ impl<'a> ValueRef<'a> {
         bytes: &'a [u8],
         depth_limit: Option<usize>,
         item_limit: Option<usize>,
-    ) -> Result<Self> {
+    ) -> Result<(Self, usize)> {
         enum Kind {
             Dict(usize),
             List(usize),
@@ -218,6 +226,10 @@ impl<'a> ValueRef<'a> {
         let mut items = 0;
 
         loop {
+            if c_stack.is_empty() && v_stack.len() == 1 {
+                return Ok((v_stack.into_iter().next().unwrap(), rdr.pos()));
+            }
+
             match rdr.next_byte() {
                 Some(b'e') => match c_stack.pop() {
                     Some(Kind::List(len)) => {
@@ -281,7 +293,7 @@ impl<'a> ValueRef<'a> {
         }
 
         if c_stack.is_empty() && v_stack.len() == 1 {
-            Ok(v_stack.into_iter().next().unwrap())
+            Ok((v_stack.into_iter().next().unwrap(), rdr.pos()))
         } else {
             Err(Error::EOF)
         }

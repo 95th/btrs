@@ -1,3 +1,4 @@
+use bencode::Error;
 use bencode::ValueRef;
 use std::collections::BTreeMap;
 
@@ -15,4 +16,17 @@ fn to_owned() {
     assert_eq!("d3:cow3:moo4:spam4:eggse", v.to_string());
     let v = v.to_owned();
     assert_eq!("d3:cow3:moo4:spam4:eggse", v.to_string());
+}
+
+#[test]
+fn decode_trailing_extra() {
+    let (v, pos) = ValueRef::decode_prefix(b"d3:cow3:moo4:spam4:eggseabcd").unwrap();
+    assert_eq!("d3:cow3:moo4:spam4:eggse", v.to_string());
+    assert_eq!(24, pos);
+}
+
+#[test]
+fn decode_none() {
+    let e = ValueRef::decode_prefix(b"abcd").unwrap_err();
+    assert_eq!(e, Error::InvalidChar(b'a'));
 }
