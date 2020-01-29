@@ -213,8 +213,8 @@ where
         debug!("We got message: {:?}", msg.kind);
 
         match msg.kind {
-            MessageKind::Unchoke => self.client.choked = false,
             MessageKind::Choke => self.client.choked = true,
+            MessageKind::Unchoke => self.client.choked = false,
             MessageKind::Have => {
                 let index = msg.parse_have()?;
                 debug!("This guy has {} piece", index);
@@ -239,9 +239,9 @@ pub struct PieceIter<'a> {
     count: usize,
 }
 
-impl<'a> PieceIter<'a> {
-    fn new(torrent: &'a Torrent) -> Self {
-        Self {
+impl PieceIter<'_> {
+    fn new(torrent: &Torrent) -> PieceIter {
+        PieceIter {
             torrent,
             index: 0,
             count: torrent.piece_hashes.len() / 20,

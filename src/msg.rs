@@ -187,8 +187,11 @@ pub fn have(index: u32) -> Message {
     Message::new(MessageKind::Have, index.to_be_bytes().to_vec())
 }
 
-pub fn extended_handshake(data: &Value) -> Message {
-    extended(0, data)
+pub fn extended_handshake() -> Message {
+    Message {
+        kind: MessageKind::Extended,
+        payload: vec![0],
+    }
 }
 
 pub fn extended(id: u8, data: &Value) -> Message {
@@ -213,13 +216,14 @@ pub struct ExtendedMessage<'a> {
     pub payload: &'a [u8],
 }
 
-impl ExtendedMessage<'_> {
+impl<'a> ExtendedMessage<'a> {
     pub fn is_handshake(&self) -> bool {
         self.id == 0
     }
 
-    pub fn parse(&self) -> Result<ValueRef<'_>, &'static str> {
-        ValueRef::decode(&self.payload[1..])
+    pub fn parse(&self) -> Result<ValueRef<'a>, &'static str> {
+        ValueRef::decode_prefix(&self.payload)
+            .map(|(v, _)| v)
             .map_err(|_| "Invalid bencoded data in Extended message")
     }
 }

@@ -95,8 +95,8 @@ where
         msg::have(index as u32).write(&mut self.conn).await
     }
 
-    pub async fn send_extended_handshake(&mut self, value: &Value) -> crate::Result<()> {
-        msg::extended_handshake(value).write(&mut self.conn).await
+    pub async fn send_extended_handshake(&mut self) -> crate::Result<()> {
+        msg::extended_handshake().write(&mut self.conn).await
     }
 
     pub async fn send_extended(&mut self, id: u8, value: &Value) -> crate::Result<()> {

@@ -4,11 +4,9 @@ use crate::future::timeout;
 use crate::metainfo::InfoHash;
 use crate::peer::{Peer, PeerId};
 use crate::torrent::Torrent;
-use bencode::Value;
 use futures::stream::FuturesUnordered;
 use futures::stream::StreamExt;
 use log::debug;
-use std::collections::BTreeMap;
 use std::net::SocketAddr;
 
 #[derive(Debug, Default)]
@@ -56,15 +54,13 @@ impl MagnetUri {
             return Err("No peers received from trackers");
         }
 
-        let data = handshake();
-
         let mut client_futures: FuturesUnordered<_> = peers
             .iter()
             .chain(peers6.iter())
             .map(|p| {
                 let p = p.clone();
                 async {
-                    timeout(self.try_get(p.clone(), &data, peer_id), 10)
+                    timeout(self.try_get(p.clone(), peer_id), 10)
                         .await
                         .map_err(|e| (p, e))
                 }
@@ -89,7 +85,8 @@ impl MagnetUri {
                 None => break,
             }
         }
-        todo!()
+
+        Err("Metadata request failed")
     }
 
     async fn get_peers(
@@ -102,27 +99,28 @@ impl MagnetUri {
         }
     }
 
-    async fn try_get(&self, peer: Peer, data: &Value, peer_id: PeerId) -> crate::Result<()> {
+    async fn try_get(&self, peer: Peer, peer_id: PeerId) -> crate::Result<()> {
         let ih = self.info_hash.clone();
 
         debug!("Create client to {:?}", peer);
         let mut client = Client::new_tcp(peer, ih, peer_id).await?;
 
         debug!("Send extension handshake");
-        client.send_extended_handshake(&data).await?;
+        client.send_extended_handshake().await?;
 
+        debug!("Recv extended message");
+        loop {
+            let msg = match client.read().await? {
+                Some(m) => m,
+                // Keep-alive
+                None => continue,
+            };
+            let ext = msg.parse_extended()?.parse()?;
+            println!("Received: {:#?}", ext);
+            break;
+        }
         Ok(())
     }
-}
-
-fn handshake() -> Value {
-    let mut m = BTreeMap::new();
-    m.insert("ut_metadata".to_owned(), Value::with_int(3));
-
-    let mut dict = BTreeMap::new();
-    dict.insert("m".to_owned(), Value::with_dict(m));
-
-    Value::with_dict(dict)
 }
 
 mod parser {

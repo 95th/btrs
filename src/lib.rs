@@ -17,6 +17,7 @@
 // }
 
 pub const CLIENT_VERSION: &[u8] = b"950001";
+pub const CLIENT_NAME: &str = "95th 0.1";
 
 pub mod announce;
 pub mod bitfield;
