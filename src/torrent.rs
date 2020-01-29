@@ -104,6 +104,7 @@ impl Torrent {
         mut result_tx: Sender<PieceResult>,
     ) -> crate::Result<()> {
         let mut client = Client::new_tcp(peer, self.info_hash.clone(), self.peer_id).await?;
+        client.recv_bitfield().await?;
         client.send_unchoke().await?;
         client.send_interested().await?;
 

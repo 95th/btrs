@@ -1,5 +1,6 @@
 use crate::announce::{announce, AnnounceResponse};
 use crate::client::Client;
+use crate::future::timeout;
 use crate::metainfo::InfoHash;
 use crate::peer::{Peer, PeerId};
 use crate::torrent::Torrent;
@@ -32,7 +33,7 @@ impl MagnetUri {
         let mut peer_futures: FuturesUnordered<_> = self
             .tracker_urls
             .iter()
-            .map(|url| self.get_peers(url, &peer_id))
+            .map(|url| timeout(self.get_peers(url, &peer_id), 10))
             .collect();
 
         let mut peers = vec![];
@@ -56,20 +57,36 @@ impl MagnetUri {
         }
 
         let data = handshake();
-        for peer in peers.iter().chain(peers6.iter()) {
-            debug!("Try connecting {:?}", peer);
 
-            if self.try_get(peer.clone(), &data, peer_id).await.is_ok() {
-                return Ok(Torrent {
-                    peers,
-                    peers6,
-                    info_hash: self.info_hash.clone(),
-                    peer_id,
-                    piece_len: 0,
-                    piece_hashes: vec![],
-                    length: 0,
-                    name: "".to_string(),
-                });
+        let mut client_futures: FuturesUnordered<_> = peers
+            .iter()
+            .chain(peers6.iter())
+            .map(|p| {
+                let p = p.clone();
+                async {
+                    timeout(self.try_get(p.clone(), &data, peer_id), 10)
+                        .await
+                        .map_err(|e| (p, e))
+                }
+            })
+            .collect();
+
+        loop {
+            match client_futures.next().await {
+                Some(Ok(_)) => {
+                    return Ok(Torrent {
+                        peers,
+                        peers6,
+                        info_hash: self.info_hash.clone(),
+                        peer_id,
+                        piece_len: 0,
+                        piece_hashes: vec![],
+                        length: 0,
+                        name: "".to_string(),
+                    })
+                }
+                Some(Err((p, e))) => debug!("Error for {:?} : {}", p, e),
+                None => break,
             }
         }
         todo!()
@@ -87,8 +104,13 @@ impl MagnetUri {
 
     async fn try_get(&self, peer: Peer, data: &Value, peer_id: PeerId) -> crate::Result<()> {
         let ih = self.info_hash.clone();
+
+        debug!("Create client to {:?}", peer);
         let mut client = Client::new_tcp(peer, ih, peer_id).await?;
+
+        debug!("Send extension handshake");
         client.send_extended_handshake(&data).await?;
+
         Ok(())
     }
 }

@@ -1,5 +1,6 @@
 use std::fmt;
 
+#[derive(Default)]
 pub struct BitField {
     arr: Box<[u8]>,
     len: usize,

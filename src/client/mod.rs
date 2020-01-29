@@ -2,7 +2,6 @@ mod handshake;
 
 use crate::bitfield::BitField;
 use crate::client::handshake::Handshake;
-use crate::future::timeout;
 use crate::metainfo::InfoHash;
 use crate::msg::{self, Message, MessageKind};
 use crate::peer::{Peer, PeerId};
@@ -22,17 +21,8 @@ pub struct Client<C> {
 
 impl Client<TcpStream> {
     pub async fn new_tcp(peer: Peer, info_hash: InfoHash, peer_id: PeerId) -> crate::Result<Self> {
-        let mut conn = TcpStream::connect(peer.addr()).await?;
-        timeout(handshake(&mut conn, &info_hash, &peer_id), 3).await?;
-        let bitfield = timeout(recv_bitfield(&mut conn), 5).await?;
-        Ok(Self {
-            conn,
-            choked: true,
-            bitfield,
-            peer,
-            info_hash,
-            peer_id,
-        })
+        let conn = TcpStream::connect(peer.addr()).await?;
+        Client::new(conn, peer, info_hash, peer_id).await
     }
 }
 
@@ -40,8 +30,38 @@ impl<C> Client<C>
 where
     C: AsyncRead + AsyncWrite + Unpin,
 {
+    pub async fn new(
+        mut conn: C,
+        peer: Peer,
+        info_hash: InfoHash,
+        peer_id: PeerId,
+    ) -> crate::Result<Self> {
+        handshake(&mut conn, &info_hash, &peer_id).await?;
+        Ok(Self {
+            conn,
+            choked: true,
+            bitfield: BitField::default(),
+            peer,
+            info_hash,
+            peer_id,
+        })
+    }
+
     pub async fn read(&mut self) -> crate::Result<Option<Message>> {
         msg::read(&mut self.conn).await
+    }
+
+    pub async fn recv_bitfield(&mut self) -> crate::Result<()> {
+        match self.read().await? {
+            Some(Message {
+                kind: MessageKind::Bitfield,
+                payload,
+            }) => {
+                self.bitfield = payload.into();
+                Ok(())
+            }
+            _ => Err("Invalid message: Expected Bitfield".into()),
+        }
     }
 
     pub async fn send_request(
@@ -93,19 +113,4 @@ where
     handshake.write(conn).await?;
     let _ = handshake.read(conn).await?;
     Ok(())
-}
-
-async fn recv_bitfield<R>(rdr: &mut R) -> crate::Result<BitField>
-where
-    R: AsyncRead + Unpin,
-{
-    if let Some(Message {
-        kind: MessageKind::Bitfield,
-        payload,
-    }) = msg::read(rdr).await?
-    {
-        Ok(payload.into())
-    } else {
-        Err("Invalid message".into())
-    }
 }
