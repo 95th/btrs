@@ -124,8 +124,7 @@ where
     use tokio::io::AsyncWriteExt;
     match msg {
         Some(msg) => msg.write(writer).await?,
-        // Keep-alive
-        None => writer.write_all(&[0; 4]).await?,
+        None => writer.write_u32(0).await?, // Keep-alive
     }
     Ok(())
 }
@@ -219,15 +218,19 @@ impl ExtendedMessage<'_> {
         self.id == 0
     }
 
-    pub fn support_metadata(&self) -> bool {
-        self.value
-            .as_dict()
-            .and_then(|d| d.get("m"))
-            .and_then(|m| m.as_dict())
-            .and_then(|d| d.get("ut_metadata"))
-            .and_then(|u| Some(u.is_int()))
-            .unwrap_or(false)
+    pub fn metadata(&self) -> Option<Metadata> {
+        let dict = self.value.as_dict()?;
+        let m = dict.get("m")?.as_dict()?;
+        let id = m.get("ut_metadata")?.as_int()? as usize;
+        let size = dict.get("metadata_size")?.as_int()? as usize;
+        Some(Metadata { id, size })
     }
+}
+
+#[derive(Debug)]
+pub struct Metadata {
+    pub id: usize,
+    pub size: usize,
 }
 
 #[cfg(test)]

@@ -44,7 +44,7 @@ impl<'a> Reader<'a> {
         let pos = slice
             .iter()
             .position(|&b| b == stop_byte)
-            .ok_or_else(|| Error::ExpectedChar(stop_byte))?;
+            .ok_or_else(|| Error::ExpectedChar(stop_byte as char))?;
         self.curr_idx += pos + 1; // Plus one to ignore the stop byte
         Ok(&slice[..pos])
     }

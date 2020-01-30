@@ -10,8 +10,8 @@ pub enum Error {
     ParseString,
     ParseList,
     ParseDict,
-    InvalidChar(u8),
-    ExpectedChar(u8),
+    InvalidChar(char),
+    ExpectedChar(char),
     DepthLimit,
     ItemLimit,
 }

@@ -255,7 +255,7 @@ impl<'a> ValueRef<'a> {
                         }
                         v_stack.push(Self::Dict(map))
                     }
-                    None => return Err(Error::InvalidChar(b'e')),
+                    None => return Err(Error::InvalidChar('e')),
                 },
                 Some(v) => {
                     if c_stack.is_empty() && !v_stack.is_empty() {
@@ -285,7 +285,7 @@ impl<'a> ValueRef<'a> {
                         }
                         b'l' => c_stack.push(Kind::List(v_stack.len())),
                         b'd' => c_stack.push(Kind::Dict(v_stack.len())),
-                        c => return Err(Error::InvalidChar(c)),
+                        c => return Err(Error::InvalidChar(c as char)),
                     }
                 }
                 None => break,

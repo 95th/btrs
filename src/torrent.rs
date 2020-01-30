@@ -206,8 +206,7 @@ where
     async fn read_msg(&mut self) -> crate::Result<()> {
         let msg = match self.client.read().await? {
             Some(msg) => msg,
-            // Keep-alive
-            None => return Ok(()),
+            None => return Ok(()), // Keep-alive
         };
 
         debug!("We got message: {:?}", msg.kind);
