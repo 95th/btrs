@@ -115,8 +115,9 @@ impl MagnetUri {
                 // Keep-alive
                 None => continue,
             };
-            let ext = msg.parse_extended()?.parse()?;
-            println!("Received: {:#?}", ext);
+            let ext = msg.parse_extended()?;
+
+            println!("Received: {:#?}", ext.value);
             break;
         }
         Ok(())

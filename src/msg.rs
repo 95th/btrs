@@ -113,11 +113,7 @@ impl Message {
             return Err("Extended message can't have empty payload");
         }
 
-        let id = self.payload[0];
-        Ok(ExtendedMessage {
-            id,
-            payload: &self.payload[1..],
-        })
+        ExtendedMessage::new(&self.payload)
     }
 }
 
@@ -203,27 +199,47 @@ pub fn extended(id: u8, data: &Value) -> Message {
     }
 }
 
-#[derive(Copy, Clone)]
-#[repr(u8)]
-pub enum MetadataMsgKind {
-    Request = 0,
-    Data = 1,
-    Reject = 2,
-}
-
 pub struct ExtendedMessage<'a> {
     pub id: u8,
-    pub payload: &'a [u8],
+    pub value: ValueRef<'a>,
+    pub rest: &'a [u8],
 }
 
-impl<'a> ExtendedMessage<'a> {
+impl ExtendedMessage<'_> {
+    pub fn new(data: &[u8]) -> Result<ExtendedMessage, &'static str> {
+        let id = data[0];
+        let (value, i) = ValueRef::decode_prefix(&data[1..])
+            .map_err(|_| "Invalid bencoded data in extended message")?;
+
+        let rest = &data[i + 1..];
+        Ok(ExtendedMessage { id, value, rest })
+    }
+
     pub fn is_handshake(&self) -> bool {
         self.id == 0
     }
 
-    pub fn parse(&self) -> Result<ValueRef<'a>, &'static str> {
-        ValueRef::decode_prefix(&self.payload)
-            .map(|(v, _)| v)
-            .map_err(|_| "Invalid bencoded data in Extended message")
+    pub fn support_metadata(&self) -> bool {
+        self.value
+            .as_dict()
+            .and_then(|d| d.get("m"))
+            .and_then(|m| m.as_dict())
+            .and_then(|d| d.get("ut_metadata"))
+            .and_then(|u| Some(u.is_int()))
+            .unwrap_or(false)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::BTreeMap;
+
+    #[test]
+    fn extended_new() {
+        let ext = ExtendedMessage::new(&[0, b'd', b'e', 1, 2, 3, 4]).unwrap();
+        assert_eq!(0, ext.id);
+        assert_eq!(ValueRef::with_dict(BTreeMap::new()), ext.value);
+        assert_eq!(&[1, 2, 3, 4], ext.rest);
     }
 }
