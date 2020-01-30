@@ -102,13 +102,10 @@ impl MagnetUri {
     async fn try_get(&self, peer: Peer, peer_id: PeerId) -> crate::Result<()> {
         let ih = self.info_hash.clone();
 
-        debug!("Create client to {:?}", peer);
         let mut client = Client::new_tcp(peer, ih, peer_id).await?;
 
-        debug!("Send extension handshake");
         client.send_extended_handshake().await?;
 
-        debug!("Recv extension handshake");
         let metadata = loop {
             let msg = match client.read().await? {
                 Some(m) => m,

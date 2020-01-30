@@ -1,5 +1,6 @@
 use crate::metainfo::InfoHash;
 use crate::peer::PeerId;
+use log::trace;
 use std::convert::{TryFrom, TryInto};
 use std::io;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
@@ -35,6 +36,7 @@ impl<'a> Handshake<'a> {
     where
         W: AsyncWrite + Unpin,
     {
+        trace!("Write handshake message");
         writer.write_u8(19).await?;
         writer.write_all(PROTOCOL).await?;
         writer.write_all(&self.extensions).await?;
@@ -47,6 +49,7 @@ impl<'a> Handshake<'a> {
     where
         R: AsyncRead + Unpin,
     {
+        trace!("Read handshake message");
         let mut buf = [0; Handshake::LEN];
         reader.read_exact(&mut buf).await?;
 

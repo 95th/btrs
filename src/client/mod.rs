@@ -6,6 +6,7 @@ use crate::metainfo::InfoHash;
 use crate::msg::{self, Message, MessageKind};
 use crate::peer::{Peer, PeerId};
 use bencode::Value;
+use log::trace;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpStream;
 
@@ -14,15 +15,15 @@ pub struct Client<C> {
     conn: C,
     pub choked: bool,
     pub bitfield: BitField,
-    peer: Peer,
     info_hash: InfoHash,
     peer_id: PeerId,
 }
 
 impl Client<TcpStream> {
     pub async fn new_tcp(peer: Peer, info_hash: InfoHash, peer_id: PeerId) -> crate::Result<Self> {
+        trace!("Create new TCP client to {:?}", peer);
         let conn = TcpStream::connect(peer.addr()).await?;
-        Client::new(conn, peer, info_hash, peer_id).await
+        Client::new(conn, info_hash, peer_id).await
     }
 }
 
@@ -30,28 +31,24 @@ impl<C> Client<C>
 where
     C: AsyncRead + AsyncWrite + Unpin,
 {
-    pub async fn new(
-        mut conn: C,
-        peer: Peer,
-        info_hash: InfoHash,
-        peer_id: PeerId,
-    ) -> crate::Result<Self> {
+    pub async fn new(mut conn: C, info_hash: InfoHash, peer_id: PeerId) -> crate::Result<Self> {
         handshake(&mut conn, &info_hash, &peer_id).await?;
         Ok(Self {
             conn,
             choked: true,
             bitfield: BitField::default(),
-            peer,
             info_hash,
             peer_id,
         })
     }
 
     pub async fn read(&mut self) -> crate::Result<Option<Message>> {
+        trace!("Read message");
         msg::read(&mut self.conn).await
     }
 
     pub async fn recv_bitfield(&mut self) -> crate::Result<()> {
+        trace!("Receive Bitfield");
         match self.read().await? {
             Some(Message {
                 kind: MessageKind::Bitfield,
@@ -70,36 +67,49 @@ where
         begin: usize,
         length: usize,
     ) -> crate::Result<()> {
+        trace!(
+            "Send Piece request: index: {}, begin: {}, length: {}",
+            index,
+            begin,
+            length
+        );
         msg::request(index as u32, begin as u32, length as u32)
             .write(&mut self.conn)
             .await
     }
 
     pub async fn send_interested(&mut self) -> crate::Result<()> {
+        trace!("Send interested");
         msg::interested().write(&mut self.conn).await
     }
 
     pub async fn send_not_interested(&mut self) -> crate::Result<()> {
+        trace!("Send not interested");
         msg::not_interested().write(&mut self.conn).await
     }
 
     pub async fn send_choke(&mut self) -> crate::Result<()> {
+        trace!("Send choke");
         msg::choke().write(&mut self.conn).await
     }
 
     pub async fn send_unchoke(&mut self) -> crate::Result<()> {
+        trace!("Send unchoke");
         msg::unchoke().write(&mut self.conn).await
     }
 
     pub async fn send_have(&mut self, index: usize) -> crate::Result<()> {
+        trace!("Send have for piece: {}", index);
         msg::have(index as u32).write(&mut self.conn).await
     }
 
     pub async fn send_extended_handshake(&mut self) -> crate::Result<()> {
+        trace!("Send extended handshake");
         msg::extended_handshake().write(&mut self.conn).await
     }
 
     pub async fn send_extended(&mut self, id: u8, value: &Value) -> crate::Result<()> {
+        trace!("Send extended message");
         msg::extended(id, value).write(&mut self.conn).await
     }
 }
