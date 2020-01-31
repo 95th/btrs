@@ -106,19 +106,16 @@ impl MagnetUri {
 
         client.send_extended_handshake().await?;
 
-        let metadata = loop {
-            let msg = match client.read().await? {
-                Some(m) => m,
-                None => continue, // Keep-alive
-            };
-            let ext = msg.parse_extended()?;
+        let msg = client
+            .read()
+            .await?
+            .ok_or("Expected Extended Handshake, Got keep-alive")?;
 
-            if let Some(metadata) = ext.metadata() {
-                break metadata;
-            }
+        let ext = msg.parse_extended()?;
 
-            return Err("Peer doesn't support Metadata extension".into());
-        };
+        let metadata = ext
+            .metadata()
+            .ok_or("Peer doesn't support Metadata extension")?;
 
         println!("{:?}", metadata);
 
