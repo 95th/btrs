@@ -2,6 +2,7 @@ use crate::announce::{announce, AnnounceResponse};
 use crate::client::Client;
 use crate::future::timeout;
 use crate::metainfo::InfoHash;
+use crate::msg::MetadataMsg;
 use crate::peer::{Peer, PeerId};
 use crate::torrent::Torrent;
 use futures::stream::FuturesUnordered;
@@ -69,7 +70,8 @@ impl MagnetUri {
 
         loop {
             match client_futures.next().await {
-                Some(Ok(_)) => {
+                Some(Ok(data)) => {
+                    println!("Got metadata: {:?}", data);
                     return Ok(Torrent {
                         peers,
                         peers6,
@@ -99,7 +101,7 @@ impl MagnetUri {
         }
     }
 
-    async fn try_get(&self, peer: Peer, peer_id: PeerId) -> crate::Result<()> {
+    async fn try_get(&self, peer: Peer, peer_id: PeerId) -> crate::Result<Vec<u8>> {
         let ih = self.info_hash.clone();
 
         let mut client = Client::new_tcp(peer, ih, peer_id).await?;
@@ -113,13 +115,39 @@ impl MagnetUri {
 
         let ext = msg.parse_extended()?;
 
+        if !ext.is_handshake() {
+            return Err("Expected Extended Handshake".into());
+        }
+
         let metadata = ext
             .metadata()
             .ok_or("Peer doesn't support Metadata extension")?;
 
         println!("{:?}", metadata);
 
-        Ok(())
+        let mut remaining = metadata.len;
+        let mut piece = 0;
+        let mut buf = vec![0; remaining];
+        while remaining > 0 {
+            let m = MetadataMsg::Request(piece);
+            client.send_extended(metadata.id, &m.as_value()).await?;
+            let msg = client
+                .read()
+                .await?
+                .ok_or("Expected Extended message, Got keep-alive")?;
+
+            let ext = msg.parse_extended()?;
+            if ext.id != metadata.id {
+                return Err("Expected Metadata message".into());
+            }
+
+            let data = ext.data(piece)?;
+            buf.extend(data);
+            remaining -= data.len();
+            piece += 1;
+        }
+
+        Ok(buf)
     }
 }
 

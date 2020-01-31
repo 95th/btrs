@@ -1,7 +1,10 @@
 use crate::util::read_u32;
 use bencode::{Value, ValueRef};
+use std::collections::BTreeMap;
 use std::convert::TryFrom;
-use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
+
+const METADATA_PIECE_LEN: usize = 16384;
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 #[repr(u8)]
@@ -55,7 +58,6 @@ impl Message {
     where
         W: AsyncWrite + Unpin,
     {
-        use tokio::io::AsyncWriteExt;
         let len = self.payload.len() as u32 + 1; // +1 for MessageKind
         writer.write_u32(len).await?;
         writer.write_u8(self.kind as u8).await?;
@@ -121,7 +123,6 @@ pub async fn write<W>(msg: Option<&Message>, writer: &mut W) -> crate::Result<()
 where
     W: AsyncWrite + Unpin,
 {
-    use tokio::io::AsyncWriteExt;
     match msg {
         Some(msg) => msg.write(writer).await?,
         None => writer.write_u32(0).await?, // Keep-alive
@@ -221,16 +222,69 @@ impl ExtendedMessage<'_> {
     pub fn metadata(&self) -> Option<Metadata> {
         let dict = self.value.as_dict()?;
         let m = dict.get("m")?.as_dict()?;
-        let id = m.get("ut_metadata")?.as_int()? as usize;
-        let size = dict.get("metadata_size")?.as_int()? as usize;
-        Some(Metadata { id, size })
+        let id = m.get("ut_metadata")?.as_int()? as u8;
+        let len = dict.get("metadata_size")?.as_int()? as usize;
+        Some(Metadata { id, len })
+    }
+
+    pub fn data(&self, expected_piece: usize) -> Result<&[u8], &'static str> {
+        let dict = self.value.as_dict().ok_or("Not a dict")?;
+        let msg_type = dict
+            .get("msg_type")
+            .and_then(|v| v.as_int())
+            .ok_or("Msg type attr not found")?;
+
+        if msg_type != 1 {
+            return Err("Not a piece message");
+        }
+
+        let piece = dict
+            .get("piece")
+            .and_then(|v| v.as_int())
+            .ok_or("Piece attr not found")? as usize;
+
+        if piece != expected_piece {
+            return Err("Not the right piece");
+        }
+
+        let total_size = dict
+            .get("total_size")
+            .and_then(|v| v.as_int())
+            .ok_or("Total size attr not found")? as usize;
+
+        if self.rest.len() != total_size {
+            return Err("Incorrect size");
+        }
+
+        if self.rest.len() > METADATA_PIECE_LEN {
+            return Err("Piece can't be larger than 16kB");
+        }
+
+        Ok(self.rest)
     }
 }
 
 #[derive(Debug)]
 pub struct Metadata {
-    pub id: usize,
-    pub size: usize,
+    pub id: u8,
+    pub len: usize,
+}
+
+pub enum MetadataMsg {
+    Request(usize),
+}
+
+impl MetadataMsg {
+    pub fn as_value(&self) -> Value {
+        match self {
+            Self::Request(piece) => {
+                let mut dict = BTreeMap::new();
+                dict.insert("msg_type", Value::with_int(0));
+                dict.insert("piece", Value::with_int(*piece as i64));
+                Value::with_dict(dict)
+            }
+        }
+    }
 }
 
 #[cfg(test)]

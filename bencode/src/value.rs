@@ -1,6 +1,3 @@
-use crate::error::{Error, Result};
-use crate::reader::Reader;
-
 use std::collections::BTreeMap;
 use std::fmt;
 use std::io;
@@ -10,7 +7,7 @@ pub enum Value {
     Int(i64),
     Bytes(Vec<u8>),
     List(Vec<Self>),
-    Dict(BTreeMap<String, Self>),
+    Dict(BTreeMap<&'static str, Self>),
 }
 
 impl Value {
@@ -30,7 +27,7 @@ impl Value {
         Self::List(list)
     }
 
-    pub fn with_dict(map: BTreeMap<String, Self>) -> Self {
+    pub fn with_dict(map: BTreeMap<&'static str, Self>) -> Self {
         Self::Dict(map)
     }
 
@@ -65,15 +62,15 @@ impl Value {
         inner_if!(self == List)
     }
 
-    pub fn as_dict(&self) -> Option<&BTreeMap<String, Self>> {
+    pub fn as_dict(&self) -> Option<&BTreeMap<&'static str, Self>> {
         inner_if!(self == Dict)
     }
 
-    pub fn as_dict_mut(&mut self) -> Option<&mut BTreeMap<String, Self>> {
+    pub fn as_dict_mut(&mut self) -> Option<&mut BTreeMap<&'static str, Self>> {
         inner_if!(self == Dict)
     }
 
-    pub fn into_dict(self) -> Option<BTreeMap<String, Self>> {
+    pub fn into_dict(self) -> Option<BTreeMap<&'static str, Self>> {
         inner_if!(self == Dict)
     }
 
@@ -157,10 +154,6 @@ impl Value {
         Some(self.as_list()?.len())
     }
 
-    fn into_string(self) -> Option<String> {
-        inner_if!(self == Bytes).and_then(|v| String::from_utf8(v).ok())
-    }
-
     pub fn encode<W: io::Write>(&self, w: &mut W) -> io::Result<()> {
         enum Token<'a> {
             B(&'a Value),
@@ -203,104 +196,6 @@ impl Value {
             }
         }
         Ok(())
-    }
-
-    pub fn decode(bytes: &[u8]) -> Result<Self> {
-        Self::decode_with_limits(bytes, None, None)
-    }
-
-    pub fn decode_with_limits(
-        bytes: &[u8],
-        depth_limit: Option<usize>,
-        item_limit: Option<usize>,
-    ) -> Result<Self> {
-        #[derive(Debug)]
-        enum Kind {
-            Dict(usize),
-            List(usize),
-        }
-
-        let mut c_stack = vec![];
-        let mut v_stack = vec![];
-        let mut items = 0;
-        let mut rdr = Reader::new(bytes);
-
-        loop {
-            match rdr.next_byte() {
-                Some(b'e') => match c_stack.pop() {
-                    Some(Kind::List(len)) => {
-                        let mut vec = Vec::with_capacity(v_stack.len() - len);
-                        while v_stack.len() > len {
-                            vec.push(v_stack.pop().unwrap());
-                        }
-                        vec.reverse();
-                        v_stack.push(Self::List(vec));
-                    }
-                    Some(Kind::Dict(len)) => {
-                        if (v_stack.len() - len) % 2 != 0 {
-                            return Err(Error::ParseDict);
-                        }
-                        let mut map = BTreeMap::new();
-                        while v_stack.len() > len {
-                            let val = v_stack.pop().unwrap();
-                            if let Some(key) = v_stack.pop().unwrap().into_string() {
-                                map.insert(key, val);
-                            } else {
-                                return Err(Error::ParseDict);
-                            }
-                        }
-                        v_stack.push(Self::Dict(map))
-                    }
-                    None => return Err(Error::InvalidChar('e')),
-                },
-                Some(v) => {
-                    if c_stack.is_empty() && !v_stack.is_empty() {
-                        return Err(Error::EOF);
-                    }
-
-                    match depth_limit {
-                        Some(limit) if c_stack.len() > limit => return Err(Error::DepthLimit),
-                        _ => {}
-                    }
-
-                    match item_limit {
-                        Some(limit) if items > limit => return Err(Error::ItemLimit),
-                        _ => items += 1,
-                    }
-
-                    match v {
-                        _d @ b'0'..=b'9' => {
-                            rdr.move_back();
-                            let len = rdr.read_int_until(b':')?;
-                            let value = rdr.read_exact(len as usize)?;
-                            v_stack.push(Self::Bytes(value.to_vec()));
-                        }
-                        b'i' => {
-                            let n = rdr.read_int_until(b'e')?;
-                            v_stack.push(Self::Int(n));
-                        }
-                        b'l' => c_stack.push(Kind::List(v_stack.len())),
-                        b'd' => c_stack.push(Kind::Dict(v_stack.len())),
-                        c => return Err(Error::InvalidChar(c as char)),
-                    }
-                }
-                None => break,
-            }
-        }
-
-        if c_stack.is_empty() && v_stack.len() == 1 {
-            Ok(v_stack.into_iter().next().unwrap())
-        } else {
-            Err(Error::EOF)
-        }
-    }
-}
-
-impl std::str::FromStr for Value {
-    type Err = Error;
-
-    fn from_str(s: &str) -> Result<Self> {
-        Self::decode(s.as_bytes())
     }
 }
 
