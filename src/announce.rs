@@ -18,7 +18,7 @@ pub async fn announce(
     peer_id: &PeerId,
     port: u16,
 ) -> crate::Result<AnnounceResponse> {
-    let peer_id = std::str::from_utf8(peer_id).unwrap();
+    let peer_id = std::str::from_utf8(&peer_id[..]).unwrap();
     let url = format!("{}?info_hash={}", url, info_hash.encode_url());
     let data = Client::new()
         .get(&url)

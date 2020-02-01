@@ -27,27 +27,28 @@ impl MagnetUri {
         parser::MagnetUriParser::new_lenient().parse(s)
     }
 
-    pub async fn request_metadata(&self, peer_id: PeerId) -> Result<Torrent, &'static str> {
+    pub async fn request_metadata(&self, peer_id: Box<PeerId>) -> Result<Torrent, &'static str> {
         debug!("Requesting peers");
-        let mut peer_futures: FuturesUnordered<_> = self
-            .tracker_urls
-            .iter()
-            .map(|url| timeout(self.get_peers(url, &peer_id), 10))
-            .collect();
 
         let mut peers = vec![];
         let mut peers6 = vec![];
+        {
+            let mut peer_futures: FuturesUnordered<_> = self
+                .tracker_urls
+                .iter()
+                .map(|url| timeout(self.get_peers(url, &peer_id), 10))
+                .collect();
 
-        while let Some(result) = peer_futures.next().await {
-            match result {
-                Ok((p, p6)) => {
-                    peers.extend(p);
-                    peers6.extend(p6);
+            while let Some(result) = peer_futures.next().await {
+                match result {
+                    Ok((p, p6)) => {
+                        peers.extend(p);
+                        peers6.extend(p6);
+                    }
+                    Err(e) => debug!("Error: {}", e),
                 }
-                Err(e) => debug!("Error: {}", e),
             }
         }
-
         debug!("Got {} v4 peers and {} v6 peers", peers.len(), peers6.len());
 
         if peers.is_empty() && peers6.is_empty() {
@@ -56,6 +57,7 @@ impl MagnetUri {
 
         let mut client_futures = FuturesUnordered::new();
         for peer in peers.iter().chain(peers6.iter()) {
+            let peer_id = &peer_id;
             client_futures.push(async move {
                 timeout(self.try_get(peer, peer_id), 10)
                     .await
@@ -96,10 +98,8 @@ impl MagnetUri {
         }
     }
 
-    async fn try_get(&self, peer: &Peer, peer_id: PeerId) -> crate::Result<Vec<u8>> {
-        let ih = self.info_hash.clone();
-
-        let mut client = Client::new_tcp(peer, ih, peer_id).await?;
+    async fn try_get(&self, peer: &Peer, peer_id: &PeerId) -> crate::Result<Vec<u8>> {
+        let mut client = Client::new_tcp(peer, &self.info_hash, peer_id).await?;
         client.send_ext_handshake().await?;
 
         let msg = client

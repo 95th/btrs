@@ -41,11 +41,11 @@ impl<'a> Handshake<'a> {
         writer.write_all(PROTOCOL).await?;
         writer.write_all(&self.extensions).await?;
         writer.write_all(self.info_hash.as_ref()).await?;
-        writer.write_all(self.peer_id).await?;
+        writer.write_all(&self.peer_id[..]).await?;
         Ok(())
     }
 
-    pub async fn read<R>(&self, reader: &mut R) -> crate::Result<PeerId>
+    pub async fn read<R>(&self, reader: &mut R) -> crate::Result<Box<PeerId>>
     where
         R: AsyncRead + Unpin,
     {
@@ -67,6 +67,6 @@ impl<'a> Handshake<'a> {
         }
 
         let peer_id = buf[48..68].try_into().unwrap();
-        Ok(peer_id)
+        Ok(Box::new(peer_id))
     }
 }

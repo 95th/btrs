@@ -78,7 +78,7 @@ impl TorrentFile {
 pub struct Torrent {
     pub peers: Vec<Peer>,
     pub peers6: Vec<Peer>,
-    pub peer_id: PeerId,
+    pub peer_id: Box<PeerId>,
     pub info_hash: InfoHash,
     pub piece_hashes: Vec<u8>,
     pub piece_len: usize,
@@ -103,7 +103,7 @@ impl Torrent {
         work_queue: WorkQueue,
         mut result_tx: Sender<PieceResult>,
     ) -> crate::Result<()> {
-        let mut client = Client::new_tcp(peer, self.info_hash.clone(), self.peer_id).await?;
+        let mut client = Client::new_tcp(peer, &self.info_hash, &self.peer_id).await?;
         client.recv_bitfield().await?;
         client.send_unchoke().await?;
         client.send_interested().await?;

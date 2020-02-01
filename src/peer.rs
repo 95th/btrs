@@ -62,11 +62,8 @@ impl From<SocketAddr> for Peer {
     }
 }
 
-pub fn generate_peer_id() -> PeerId {
-    let mut buf = [0; 20];
-    buf[0] = b'-';
-    buf[1..7].copy_from_slice(crate::CLIENT_VERSION);
-    buf[7] = b'-';
+pub fn generate_peer_id() -> Box<PeerId> {
+    let mut buf = Box::new(*b"-950001-000000000000");
     rand::thread_rng()
         .sample_iter(&Alphanumeric)
         .zip(&mut buf[7..])
