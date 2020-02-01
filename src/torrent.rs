@@ -99,7 +99,7 @@ impl Torrent {
 
     pub async fn start_worker(
         &self,
-        peer: Peer,
+        peer: &Peer,
         work_queue: WorkQueue,
         mut result_tx: Sender<PieceResult>,
     ) -> crate::Result<()> {

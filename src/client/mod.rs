@@ -20,7 +20,7 @@ pub struct Client<C> {
 }
 
 impl Client<TcpStream> {
-    pub async fn new_tcp(peer: Peer, info_hash: InfoHash, peer_id: PeerId) -> crate::Result<Self> {
+    pub async fn new_tcp(peer: &Peer, info_hash: InfoHash, peer_id: PeerId) -> crate::Result<Self> {
         trace!("Create new TCP client to {:?}", peer);
         let conn = TcpStream::connect(peer.addr()).await?;
         Client::new(conn, info_hash, peer_id).await

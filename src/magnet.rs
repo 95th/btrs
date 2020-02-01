@@ -38,14 +38,13 @@ impl MagnetUri {
         let mut peers = vec![];
         let mut peers6 = vec![];
 
-        loop {
-            match peer_futures.next().await {
-                Some(Ok((p, p6))) => {
+        while let Some(result) = peer_futures.next().await {
+            match result {
+                Ok((p, p6)) => {
                     peers.extend(p);
                     peers6.extend(p6);
                 }
-                Some(Err(e)) => debug!("Error: {}", e),
-                None => break,
+                Err(e) => debug!("Error: {}", e),
             }
         }
 
@@ -55,23 +54,20 @@ impl MagnetUri {
             return Err("No peers received from trackers");
         }
 
-        let mut client_futures: FuturesUnordered<_> = peers
-            .iter()
-            .chain(peers6.iter())
-            .map(|p| {
-                let p = p.clone();
-                async {
-                    timeout(self.try_get(p.clone(), peer_id), 10)
-                        .await
-                        .map_err(|e| (p, e))
-                }
-            })
-            .collect();
+        let mut client_futures = FuturesUnordered::new();
+        for peer in peers.iter().chain(peers6.iter()) {
+            client_futures.push(async move {
+                timeout(self.try_get(peer, peer_id), 10)
+                    .await
+                    .map_err(|e| (peer, e))
+            });
+        }
 
-        loop {
-            match client_futures.next().await {
-                Some(Ok(data)) => {
-                    println!("Got metadata: {:?}", data);
+        while let Some(result) = client_futures.next().await {
+            match result {
+                Ok(data) => {
+                    drop(client_futures);
+                    debug!("Got metadata: {:?}", data);
                     return Ok(Torrent {
                         peers,
                         peers6,
@@ -83,8 +79,7 @@ impl MagnetUri {
                         name: "".to_string(),
                     });
                 }
-                Some(Err((p, e))) => debug!("Error for {:?} : {}", p, e),
-                None => break,
+                Err((p, e)) => debug!("Error for {:?} : {}", p, e),
             }
         }
 
@@ -101,7 +96,7 @@ impl MagnetUri {
         }
     }
 
-    async fn try_get(&self, peer: Peer, peer_id: PeerId) -> crate::Result<Vec<u8>> {
+    async fn try_get(&self, peer: &Peer, peer_id: PeerId) -> crate::Result<Vec<u8>> {
         let ih = self.info_hash.clone();
 
         let mut client = Client::new_tcp(peer, ih, peer_id).await?;

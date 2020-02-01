@@ -14,13 +14,11 @@ async fn main() -> btrs::Result<()> {
 }
 
 pub async fn magnet() -> btrs::Result<()> {
-    let m = MagnetUri::parse_lenient("magnet:?xt=urn:btih:4GCTIH7RBHVFS6YKBYQAGGW4QJ26JREV&tr=http%3A%2F%2Fnyaa.tracker.wf%3A7777%2Fannounce&tr=http%3A%2F%2Fanidex.moe%3A6969%2Fannounce&tr=udp%3A%2F%2Ftracker.uw0.xyz%3A6969&tr=http%3A%2F%2Ftracker.anirena.com%3A80%2Fannounce&tr=udp%3A%2F%2Fopen.stealth.si%3A80%2Fannounce&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=udp%3A%2F%2Ftracker.coppersurfer.tk%3A6969%2Fannounce&tr=udp%3A%2F%2Fexodus.desync.com%3A6969%2Fannounce")?;
-    println!("{:?}", m);
-
+    let magnet = MagnetUri::parse_lenient("magnet:?xt=urn:btih:4GCTIH7RBHVFS6YKBYQAGGW4QJ26JREV&tr=http%3A%2F%2Fnyaa.tracker.wf%3A7777%2Fannounce&tr=http%3A%2F%2Fanidex.moe%3A6969%2Fannounce&tr=udp%3A%2F%2Ftracker.uw0.xyz%3A6969&tr=http%3A%2F%2Ftracker.anirena.com%3A80%2Fannounce&tr=udp%3A%2F%2Fopen.stealth.si%3A80%2Fannounce&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=udp%3A%2F%2Ftracker.coppersurfer.tk%3A6969%2Fannounce&tr=udp%3A%2F%2Fexodus.desync.com%3A6969%2Fannounce")?;
     let peer_id = peer::generate_peer_id();
     debug!("Our peer_id: {:?}", peer_id);
 
-    m.request_metadata(peer_id).await?;
+    magnet.request_metadata(peer_id).await?;
     todo!()
 }
 
@@ -40,8 +38,8 @@ pub async fn torrent_file() -> btrs::Result<()> {
         let peer = peer.clone();
 
         tokio::spawn(async move {
-            if let Err(e) = torrent.start_worker(peer, work_queue, result_tx).await {
-                println!("Error occurred: {}", e);
+            if let Err(e) = torrent.start_worker(&peer, work_queue, result_tx).await {
+                debug!("Error occurred: {}", e);
             }
         });
     }
