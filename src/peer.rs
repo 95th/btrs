@@ -1,3 +1,4 @@
+use crate::bitfield::BitField;
 use rand::distributions::Alphanumeric;
 use rand::Rng;
 use std::convert::TryInto;
@@ -5,45 +6,58 @@ use std::net::{IpAddr, SocketAddr};
 
 pub type PeerId = [u8; 20];
 
+#[derive(Debug, Clone, Copy)]
+pub struct PeerStatus {
+    pub choked: bool,
+    pub interested: bool,
+}
+
+impl Default for PeerStatus {
+    fn default() -> Self {
+        Self {
+            choked: true,
+            interested: false,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Peer {
-    ip: IpAddr,
-    port: u16,
+    addr: SocketAddr,
+    pieces: BitField,
+    local_status: PeerStatus,
+    remote_status: PeerStatus,
 }
 
 impl Peer {
     pub fn new(ip: IpAddr, port: u16) -> Self {
-        Self { ip, port }
+        SocketAddr::new(ip, port).into()
     }
 
     pub fn v4(bytes: &[u8]) -> Self {
         let ip: [u8; 4] = bytes[..4].try_into().unwrap();
-        let port = u16::from_be_bytes(bytes[4..].try_into().unwrap());
-        Self {
-            ip: ip.into(),
-            port,
-        }
+        let port_bytes: [u8; 2] = bytes[4..].try_into().unwrap();
+        Self::new(ip.into(), u16::from_be_bytes(port_bytes))
     }
 
     pub fn v6(bytes: &[u8]) -> Self {
         let ip: [u8; 16] = bytes[..16].try_into().unwrap();
-        let port = u16::from_be_bytes(bytes[16..].try_into().unwrap());
-        Self {
-            ip: ip.into(),
-            port,
-        }
+        let port_bytes: [u8; 2] = bytes[16..].try_into().unwrap();
+        Self::new(ip.into(), u16::from_be_bytes(port_bytes))
     }
 
     pub fn addr(&self) -> SocketAddr {
-        SocketAddr::new(self.ip, self.port)
+        self.addr
     }
 }
 
 impl From<SocketAddr> for Peer {
     fn from(addr: SocketAddr) -> Self {
         Self {
-            ip: addr.ip(),
-            port: addr.port(),
+            addr,
+            pieces: Default::default(),
+            local_status: Default::default(),
+            remote_status: Default::default(),
         }
     }
 }

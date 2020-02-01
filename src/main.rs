@@ -31,7 +31,7 @@ pub async fn torrent_file() -> btrs::Result<()> {
     let work_queue = Arc::new(Mutex::new(torrent.piece_iter().collect()));
     let (result_tx, mut result_rx) = mpsc::channel(200);
 
-    for peer in &torrent.peers {
+    for peer in torrent.peers.iter().chain(torrent.peers6.iter()) {
         let torrent = torrent.clone();
         let work_queue = work_queue.clone();
         let result_tx = result_tx.clone();

@@ -1,6 +1,6 @@
 use std::fmt;
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct BitField {
     arr: Box<[u8]>,
     len: usize,
