@@ -103,14 +103,14 @@ where
         msg::have(index as u32).write(&mut self.conn).await
     }
 
-    pub async fn send_extended_handshake(&mut self) -> crate::Result<()> {
+    pub async fn send_ext_handshake(&mut self) -> crate::Result<()> {
         trace!("Send extended handshake");
-        msg::extended_handshake().write(&mut self.conn).await
+        msg::ext_handshake().write(&mut self.conn).await
     }
 
-    pub async fn send_extended(&mut self, id: u8, value: &Value) -> crate::Result<()> {
+    pub async fn send_ext(&mut self, id: u8, value: &Value) -> crate::Result<()> {
         trace!("Send extended message");
-        msg::extended(id, value).write(&mut self.conn).await
+        msg::ext(id, value).write(&mut self.conn).await
     }
 }
 

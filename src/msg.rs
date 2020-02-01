@@ -1,7 +1,9 @@
 use crate::util::read_u32;
 use bencode::{Value, ValueRef};
+use log::trace;
 use std::collections::BTreeMap;
 use std::convert::TryFrom;
+use std::fmt;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 
 const METADATA_PIECE_LEN: usize = 16384;
@@ -43,10 +45,18 @@ impl TryFrom<u8> for MessageKind {
     }
 }
 
-#[derive(Debug)]
 pub struct Message {
     pub kind: MessageKind,
     pub payload: Vec<u8>,
+}
+
+impl fmt::Debug for Message {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Message")
+            .field("kind", &self.kind)
+            .field("payload", &"..")
+            .finish()
+    }
 }
 
 impl Message {
@@ -106,8 +116,9 @@ impl Message {
         Ok(index)
     }
 
-    pub fn parse_extended(&self) -> Result<ExtendedMessage<'_>, &'static str> {
+    pub fn parse_ext(&self) -> Result<ExtendedMessage<'_>, &'static str> {
         if self.kind != MessageKind::Extended {
+            trace!("Expected extended msg, got {:?}", self.kind);
             return Err("Not an Extended message");
         }
 
@@ -183,14 +194,14 @@ pub fn have(index: u32) -> Message {
     Message::new(MessageKind::Have, index.to_be_bytes().to_vec())
 }
 
-pub fn extended_handshake() -> Message {
+pub fn ext_handshake() -> Message {
     Message {
         kind: MessageKind::Extended,
         payload: vec![0],
     }
 }
 
-pub fn extended(id: u8, data: &Value) -> Message {
+pub fn ext(id: u8, data: &Value) -> Message {
     let mut payload = vec![id];
     data.encode(&mut payload).unwrap();
     Message {

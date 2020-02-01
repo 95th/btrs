@@ -81,7 +81,7 @@ impl MagnetUri {
                         piece_hashes: vec![],
                         length: 0,
                         name: "".to_string(),
-                    })
+                    });
                 }
                 Some(Err((p, e))) => debug!("Error for {:?} : {}", p, e),
                 None => break,
@@ -105,15 +105,14 @@ impl MagnetUri {
         let ih = self.info_hash.clone();
 
         let mut client = Client::new_tcp(peer, ih, peer_id).await?;
-
-        client.send_extended_handshake().await?;
+        client.send_ext_handshake().await?;
 
         let msg = client
             .read()
             .await?
             .ok_or("Expected Extended Handshake, Got keep-alive")?;
 
-        let ext = msg.parse_extended()?;
+        let ext = msg.parse_ext()?;
 
         if !ext.is_handshake() {
             return Err("Expected Extended Handshake".into());
@@ -123,20 +122,20 @@ impl MagnetUri {
             .metadata()
             .ok_or("Peer doesn't support Metadata extension")?;
 
-        println!("{:?}", metadata);
+        debug!("{:?}", metadata);
 
         let mut remaining = metadata.len;
         let mut piece = 0;
         let mut buf = vec![0; remaining];
         while remaining > 0 {
             let m = MetadataMsg::Request(piece);
-            client.send_extended(metadata.id, &m.as_value()).await?;
+            client.send_ext(metadata.id, &m.as_value()).await?;
             let msg = client
                 .read()
                 .await?
                 .ok_or("Expected Extended message, Got keep-alive")?;
 
-            let ext = msg.parse_extended()?;
+            let ext = msg.parse_ext()?;
             if ext.id != metadata.id {
                 return Err("Expected Metadata message".into());
             }
