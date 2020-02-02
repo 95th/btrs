@@ -139,17 +139,6 @@ impl Message {
     }
 }
 
-pub async fn write<W>(msg: Option<&Message>, writer: &mut W) -> crate::Result<()>
-where
-    W: AsyncWrite + Unpin,
-{
-    match msg {
-        Some(msg) => msg.write(writer).await?,
-        None => writer.write_u32(0).await?, // Keep-alive
-    }
-    Ok(())
-}
-
 pub async fn read<R>(reader: &mut R) -> crate::Result<Option<Message>>
 where
     R: AsyncRead + Unpin,
