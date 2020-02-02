@@ -99,7 +99,8 @@ impl MagnetUri {
     }
 
     async fn try_get(&self, peer: &Peer, peer_id: &PeerId) -> crate::Result<Vec<u8>> {
-        let mut client = Client::new_tcp(peer, &self.info_hash, peer_id).await?;
+        let mut client = Client::new_tcp(peer).await?;
+        client.handshake(&self.info_hash, peer_id).await?;
         client.send_ext_handshake().await?;
 
         let msg = client

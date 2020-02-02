@@ -23,26 +23,26 @@ pub struct Client {
 }
 
 impl Client {
-    pub async fn new_tcp(
-        peer: &Peer,
-        info_hash: &InfoHash,
-        peer_id: &PeerId,
-    ) -> crate::Result<Self> {
+    pub async fn new_tcp(peer: &Peer) -> crate::Result<Self> {
         trace!("Create new TCP client to {:?}", peer);
         let conn = TcpStream::connect(peer.addr()).await?;
-        Client::new(Box::new(conn), info_hash, peer_id).await
+        Ok(Client::new(Box::new(conn)))
     }
 
-    async fn new<C>(mut conn: C, info_hash: &InfoHash, peer_id: &PeerId) -> crate::Result<Client>
-    where
-        C: Connection + 'static,
-    {
-        handshake(&mut conn, info_hash, peer_id).await?;
-        Ok(Client {
-            conn: Box::new(conn),
+    pub fn new(conn: Box<dyn Connection>) -> Self {
+        Self {
+            conn,
             choked: true,
             bitfield: BitField::default(),
-        })
+        }
+    }
+
+    pub async fn handshake(&mut self, info_hash: &InfoHash, peer_id: &PeerId) -> crate::Result<()> {
+        let mut handshake = Handshake::new(&mut self.conn, info_hash, peer_id);
+        handshake.set_extended(true);
+        handshake.write().await?;
+        let _ = handshake.read().await?;
+        Ok(())
     }
 
     pub async fn read(&mut self) -> crate::Result<Option<Message>> {
@@ -115,15 +115,4 @@ impl Client {
         trace!("Send extended message");
         msg::ext(id, value).write(&mut self.conn).await
     }
-}
-
-async fn handshake<C>(conn: &mut C, info_hash: &InfoHash, peer_id: &PeerId) -> crate::Result<()>
-where
-    C: Connection,
-{
-    let mut handshake = Handshake::new(info_hash, peer_id);
-    handshake.set_extensions(true);
-    handshake.write(conn).await?;
-    let _ = handshake.read(conn).await?;
-    Ok(())
 }

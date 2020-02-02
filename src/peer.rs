@@ -5,6 +5,7 @@ use std::convert::TryInto;
 use std::net::{IpAddr, SocketAddr};
 
 pub type PeerId = [u8; 20];
+pub type Extensions = [u8; 8];
 
 #[derive(Debug, Clone, Copy)]
 pub struct PeerStatus {
