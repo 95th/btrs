@@ -9,7 +9,6 @@ use log::{debug, info};
 use sha1::Sha1;
 use std::convert::TryInto;
 use std::ops::Range;
-use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::mpsc::Sender;
 
 pub const HASH_LEN: usize = 20;
@@ -155,10 +154,7 @@ impl Torrent {
     }
 }
 
-async fn attempt_download<C>(client: &mut Client<C>, wrk: &PieceWork) -> crate::Result<Vec<u8>>
-where
-    C: AsyncRead + AsyncWrite + Unpin,
-{
+async fn attempt_download(client: &mut Client, wrk: &PieceWork) -> crate::Result<Vec<u8>> {
     let mut state = PieceProgress {
         index: wrk.index,
         client,
@@ -190,19 +186,16 @@ where
 }
 
 #[derive(Debug)]
-struct PieceProgress<'a, C> {
+struct PieceProgress<'a> {
     index: usize,
-    client: &'a mut Client<C>,
+    client: &'a mut Client,
     buf: Vec<u8>,
     downloaded: usize,
     requested: usize,
     backlog: usize,
 }
 
-impl<C> PieceProgress<'_, C>
-where
-    C: AsyncRead + AsyncWrite + Unpin,
-{
+impl PieceProgress<'_> {
     async fn read_msg(&mut self) -> crate::Result<()> {
         let msg = match self.client.read().await? {
             Some(msg) => msg,

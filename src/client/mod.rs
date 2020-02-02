@@ -7,17 +7,22 @@ use crate::msg::{self, Message, MessageKind};
 use crate::peer::{Peer, PeerId};
 use bencode::Value;
 use log::trace;
+use std::fmt::Debug;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpStream;
 
+pub trait Connection: AsyncRead + AsyncWrite + Send + Debug + Unpin {}
+
+impl<T> Connection for T where T: AsyncRead + AsyncWrite + Send + Debug + Unpin {}
+
 #[derive(Debug)]
-pub struct Client<C> {
-    conn: C,
+pub struct Client {
+    conn: Box<dyn Connection>,
     pub choked: bool,
     pub bitfield: BitField,
 }
 
-impl Client<TcpStream> {
+impl Client {
     pub async fn new_tcp(
         peer: &Peer,
         info_hash: &InfoHash,
@@ -25,18 +30,16 @@ impl Client<TcpStream> {
     ) -> crate::Result<Self> {
         trace!("Create new TCP client to {:?}", peer);
         let conn = TcpStream::connect(peer.addr()).await?;
-        Client::new(conn, info_hash, peer_id).await
+        Client::new(Box::new(conn), info_hash, peer_id).await
     }
-}
 
-impl<C> Client<C>
-where
-    C: AsyncRead + AsyncWrite + Unpin,
-{
-    pub async fn new(mut conn: C, info_hash: &InfoHash, peer_id: &PeerId) -> crate::Result<Self> {
+    async fn new<C>(mut conn: C, info_hash: &InfoHash, peer_id: &PeerId) -> crate::Result<Client>
+    where
+        C: Connection + 'static,
+    {
         handshake(&mut conn, info_hash, peer_id).await?;
-        Ok(Self {
-            conn,
+        Ok(Client {
+            conn: Box::new(conn),
             choked: true,
             bitfield: BitField::default(),
         })
@@ -116,7 +119,7 @@ where
 
 async fn handshake<C>(conn: &mut C, info_hash: &InfoHash, peer_id: &PeerId) -> crate::Result<()>
 where
-    C: AsyncRead + AsyncWrite + Unpin,
+    C: Connection,
 {
     let mut handshake = Handshake::new(info_hash, peer_id);
     handshake.set_extensions(true);
