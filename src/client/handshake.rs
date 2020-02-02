@@ -15,6 +15,7 @@ pub struct Handshake<'a, C> {
     pub peer_id: &'a PeerId,
 }
 
+#[derive(Debug)]
 pub struct HandshakeResult {
     pub extensions: Extensions,
     pub info_hash: InfoHash,

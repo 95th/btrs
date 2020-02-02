@@ -7,7 +7,7 @@ use std::sync::Arc;
 use tokio::fs;
 use tokio::sync::{mpsc, Mutex};
 
-#[tokio::main]
+#[tokio::main(core_threads = 1)]
 async fn main() -> btrs::Result<()> {
     env_logger::init();
     magnet().await

@@ -1,4 +1,4 @@
-use crate::announce::{announce, AnnounceResponse};
+use crate::announce::announce;
 use crate::client::Client;
 use crate::future::timeout;
 use crate::metainfo::InfoHash;
@@ -28,47 +28,19 @@ impl MagnetUri {
     }
 
     pub async fn request_metadata(&self, peer_id: Box<PeerId>) -> Result<Torrent, &'static str> {
-        debug!("Requesting peers");
+        let (peers, peers6) = self.get_peers(&peer_id).await?;
 
-        let mut peers = vec![];
-        let mut peers6 = vec![];
-        {
-            let mut peer_futures: FuturesUnordered<_> = self
-                .tracker_urls
-                .iter()
-                .map(|url| timeout(self.get_peers(url, &peer_id), 10))
-                .collect();
+        let mut futs: FuturesUnordered<_> = peers
+            .iter()
+            .chain(peers6.iter())
+            .map(|peer| self.try_get(peer, &peer_id))
+            .map(|fut| timeout(fut, 10))
+            .collect();
 
-            while let Some(result) = peer_futures.next().await {
-                match result {
-                    Ok((p, p6)) => {
-                        peers.extend(p);
-                        peers6.extend(p6);
-                    }
-                    Err(e) => debug!("Error: {}", e),
-                }
-            }
-        }
-        debug!("Got {} v4 peers and {} v6 peers", peers.len(), peers6.len());
-
-        if peers.is_empty() && peers6.is_empty() {
-            return Err("No peers received from trackers");
-        }
-
-        let mut client_futures = FuturesUnordered::new();
-        for peer in peers.iter().chain(peers6.iter()) {
-            let peer_id = &peer_id;
-            client_futures.push(async move {
-                timeout(self.try_get(peer, peer_id), 10)
-                    .await
-                    .map_err(|e| (peer, e))
-            });
-        }
-
-        while let Some(result) = client_futures.next().await {
+        while let Some(result) = futs.next().await {
             match result {
                 Ok(data) => {
-                    drop(client_futures);
+                    drop(futs);
                     debug!("Got metadata: {:?}", data);
                     return Ok(Torrent {
                         peers,
@@ -81,20 +53,42 @@ impl MagnetUri {
                         name: "".to_string(),
                     });
                 }
-                Err((p, e)) => debug!("Error for {:?} : {}", p, e),
+                Err(e) => debug!("Error : {}", e),
             }
         }
 
         Err("Metadata request failed")
     }
 
-    async fn get_peers(
-        &self,
-        url: &str,
-        peer_id: &PeerId,
-    ) -> crate::Result<(Vec<Peer>, Vec<Peer>)> {
-        match announce(url, &self.info_hash, &peer_id, 6881).await? {
-            AnnounceResponse { peers, peers6, .. } => Ok((peers, peers6)),
+    async fn get_peers(&self, peer_id: &PeerId) -> Result<(Vec<Peer>, Vec<Peer>), &'static str> {
+        debug!("Requesting peers");
+
+        let mut peers = vec![];
+        let mut peers6 = vec![];
+
+        let mut futs: FuturesUnordered<_> = self
+            .tracker_urls
+            .iter()
+            .map(|url| announce(url, &self.info_hash, &peer_id, 6881))
+            .map(|fut| timeout(fut, 10))
+            .collect();
+
+        while let Some(result) = futs.next().await {
+            match result {
+                Ok(r) => {
+                    peers.extend(r.peers);
+                    peers6.extend(r.peers6);
+                }
+                Err(e) => debug!("Error: {}", e),
+            }
+        }
+
+        debug!("Got {} v4 peers and {} v6 peers", peers.len(), peers6.len());
+
+        if peers.is_empty() && peers6.is_empty() {
+            Err("No peers received from trackers")
+        } else {
+            Ok((peers, peers6))
         }
     }
 

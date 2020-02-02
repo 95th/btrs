@@ -41,7 +41,8 @@ impl Client {
         let mut handshake = Handshake::new(&mut self.conn, info_hash, peer_id);
         handshake.set_extended(true);
         handshake.write().await?;
-        let _ = handshake.read().await?;
+        let result = handshake.read().await?;
+        trace!("Handshake result: {:?}", result);
         Ok(())
     }
 
