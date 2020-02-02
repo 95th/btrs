@@ -1,3 +1,4 @@
+use crate::bitfield::BitField;
 use crate::util::read_u32;
 use bencode::{Value, ValueRef};
 use log::trace;
@@ -116,6 +117,14 @@ impl Message {
         Ok(index)
     }
 
+    pub fn parse_bitfield(self) -> Result<BitField, &'static str> {
+        if self.kind != MessageKind::Bitfield {
+            return Err("Not a bitfield message");
+        }
+
+        Ok(self.payload.into())
+    }
+
     pub fn parse_ext(&self) -> Result<ExtendedMessage<'_>, &'static str> {
         if self.kind != MessageKind::Extended {
             trace!("Expected extended msg, got {:?}", self.kind);
@@ -216,6 +225,12 @@ pub struct ExtendedMessage<'a> {
     pub rest: &'a [u8],
 }
 
+mod msg_type {
+    pub const REQUEST: i64 = 1;
+    pub const DATA: i64 = 1;
+    pub const REJECT: i64 = 2;
+}
+
 impl ExtendedMessage<'_> {
     pub fn new(data: &[u8]) -> Result<ExtendedMessage, &'static str> {
         let id = data[0];
@@ -238,21 +253,21 @@ impl ExtendedMessage<'_> {
         Some(Metadata { id, len })
     }
 
-    pub fn data(&self, expected_piece: usize) -> Result<&[u8], &'static str> {
+    pub fn data(&self, expected_piece: i64) -> Result<&[u8], &'static str> {
         let dict = self.value.as_dict().ok_or("Not a dict")?;
         let msg_type = dict
             .get("msg_type")
             .and_then(|v| v.as_int())
             .ok_or("Msg type attr not found")?;
 
-        if msg_type != 1 {
-            return Err("Not a piece message");
+        if msg_type != msg_type::DATA {
+            return Err("Not a DATA message");
         }
 
         let piece = dict
             .get("piece")
             .and_then(|v| v.as_int())
-            .ok_or("Piece attr not found")? as usize;
+            .ok_or("Piece attr not found")?;
 
         if piece != expected_piece {
             return Err("Not the right piece");
@@ -261,9 +276,9 @@ impl ExtendedMessage<'_> {
         let total_size = dict
             .get("total_size")
             .and_then(|v| v.as_int())
-            .ok_or("Total size attr not found")? as usize;
+            .ok_or("Total size attr not found")?;
 
-        if self.rest.len() != total_size {
+        if self.rest.len() as i64 != total_size {
             return Err("Incorrect size");
         }
 
@@ -282,19 +297,30 @@ pub struct Metadata {
 }
 
 pub enum MetadataMsg {
-    Request(usize),
+    Request(i64),
+    Reject(i64),
+    Data(i64, i64),
 }
 
 impl MetadataMsg {
     pub fn as_value(&self) -> Value {
+        let mut dict = BTreeMap::new();
         match self {
             Self::Request(piece) => {
-                let mut dict = BTreeMap::new();
-                dict.insert("msg_type", Value::with_int(0));
-                dict.insert("piece", Value::with_int(*piece as i64));
-                Value::with_dict(dict)
+                dict.insert("msg_type", Value::with_int(msg_type::REQUEST));
+                dict.insert("piece", Value::with_int(*piece));
+            }
+            Self::Reject(piece) => {
+                dict.insert("msg_type", Value::with_int(msg_type::REJECT));
+                dict.insert("piece", Value::with_int(*piece));
+            }
+            Self::Data(piece, total_size) => {
+                dict.insert("msg_type", Value::with_int(msg_type::DATA));
+                dict.insert("piece", Value::with_int(*piece));
+                dict.insert("total_size", Value::with_int(*total_size));
             }
         }
+        Value::with_dict(dict)
     }
 }
 

@@ -4,10 +4,11 @@ use crate::bitfield::BitField;
 use crate::client::handshake::Handshake;
 use crate::metainfo::InfoHash;
 use crate::msg::{self, Message, MessageKind};
-use crate::peer::{Peer, PeerId};
+use crate::peer::PeerId;
 use bencode::Value;
 use log::trace;
 use std::fmt::Debug;
+use std::net::SocketAddr;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpStream;
 
@@ -23,9 +24,9 @@ pub struct Client {
 }
 
 impl Client {
-    pub async fn new_tcp(peer: &Peer) -> crate::Result<Self> {
-        trace!("Create new TCP client to {:?}", peer);
-        let conn = TcpStream::connect(peer.addr()).await?;
+    pub async fn new_tcp(addr: SocketAddr) -> crate::Result<Self> {
+        trace!("Create new TCP client to {:?}", addr);
+        let conn = TcpStream::connect(addr).await?;
         Ok(Client::new(Box::new(conn)))
     }
 

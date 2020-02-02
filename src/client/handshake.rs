@@ -63,6 +63,7 @@ where
 
     pub async fn read(&mut self) -> crate::Result<HandshakeResult> {
         trace!("Read handshake message");
+
         let mut buf = [0; 68];
         self.conn.read_exact(&mut buf).await?;
 

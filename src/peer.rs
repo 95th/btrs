@@ -24,7 +24,7 @@ impl Default for PeerStatus {
 
 #[derive(Debug, Clone)]
 pub struct Peer {
-    addr: SocketAddr,
+    pub addr: SocketAddr,
     pieces: BitField,
     local_status: PeerStatus,
     remote_status: PeerStatus,
@@ -45,10 +45,6 @@ impl Peer {
         let ip: [u8; 16] = bytes[..16].try_into().unwrap();
         let port_bytes: [u8; 2] = bytes[16..].try_into().unwrap();
         Self::new(ip.into(), u16::from_be_bytes(port_bytes))
-    }
-
-    pub fn addr(&self) -> SocketAddr {
-        self.addr
     }
 }
 
