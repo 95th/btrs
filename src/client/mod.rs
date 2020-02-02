@@ -9,7 +9,7 @@ use bencode::Value;
 use log::trace;
 use std::fmt::Debug;
 use std::net::SocketAddr;
-use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
 
 pub trait Connection: AsyncRead + AsyncWrite + Send + Debug + Unpin {}
@@ -116,5 +116,11 @@ impl Client {
     pub async fn send_ext(&mut self, id: u8, value: &Value) -> crate::Result<()> {
         trace!("Send extended message");
         msg::ext(id, value).write(&mut self.conn).await
+    }
+
+    pub async fn send_keep_alive(&mut self) -> crate::Result<()> {
+        trace!("Send Keep-alive message");
+        self.conn.write_u32(0).await?;
+        Ok(())
     }
 }
