@@ -2,10 +2,10 @@ use btrs::bitfield::BitField;
 use btrs::magnet::MagnetUri;
 use btrs::peer;
 use btrs::torrent::TorrentFile;
+use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use log::debug;
 use std::collections::VecDeque;
-use std::sync::Arc;
 use tokio::fs;
 use tokio::sync::{mpsc, Mutex};
 
@@ -29,36 +29,44 @@ pub async fn torrent_file() -> btrs::Result<()> {
     let torrent_file = TorrentFile::parse(buf).ok_or("Unable to parse torrent file")?;
     let torrent = torrent_file.into_torrent().await?;
 
-    let torrent = Arc::new(torrent);
     let work_queue: VecDeque<_> = torrent.piece_iter().collect();
     let num_pieces = work_queue.len();
-    let work_queue = Arc::new(Mutex::new(work_queue));
+    let work_queue = Mutex::new(work_queue);
     let (result_tx, mut result_rx) = mpsc::channel(200);
 
-    for peer in torrent.peers.iter().chain(torrent.peers6.iter()) {
-        let torrent = torrent.clone();
-        let work_queue = work_queue.clone();
-        let result_tx = result_tx.clone();
-        let peer = peer.clone();
+    let mut tasks = torrent
+        .peers
+        .iter()
+        .chain(&torrent.peers6)
+        .map(|peer| torrent.start_worker(&peer, &work_queue, result_tx.clone()))
+        .collect::<FuturesUnordered<_>>();
 
-        tokio::spawn(async move {
-            if let Err(e) = torrent.start_worker(&peer, work_queue, result_tx).await {
-                debug!("Error occurred: {}", e);
+    drop(result_tx);
+
+    let len = torrent.length;
+    let piece_len = torrent.piece_len;
+
+    let handle = tokio::spawn(async move {
+        let mut file = vec![0; len];
+        let mut bitfield = BitField::new(num_pieces);
+
+        while let Some(piece) = result_rx.next().await {
+            if bitfield.get(piece.index) {
+                panic!("Duplicate piece downloaded: {}", piece.index);
             }
-        });
-    }
-
-    let mut file = vec![0; torrent.length];
-    let mut bitfield = BitField::new(num_pieces);
-
-    while let Some(piece) = result_rx.next().await {
-        if bitfield.get(piece.index) {
-            panic!("Duplicate piece downloaded: {}", piece.index);
+            let start = piece.index * piece_len;
+            let end = len.min(start + piece_len);
+            file[start..end].copy_from_slice(&piece.buf);
+            bitfield.set(piece.index, true);
         }
-        let bounds = torrent.piece_bounds(piece.index);
-        file[bounds].copy_from_slice(&piece.buf);
-        bitfield.set(piece.index, true);
+    });
+
+    while let Some(result) = tasks.next().await {
+        if let Err(e) = result {
+            debug!("{}", e);
+        }
     }
 
+    handle.await.unwrap();
     Ok(())
 }

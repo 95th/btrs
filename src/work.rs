@@ -1,10 +1,9 @@
 use crate::metainfo::InfoHash;
 use sha1::Sha1;
 use std::collections::VecDeque;
-use std::sync::Arc;
 use tokio::sync::Mutex;
 
-pub type WorkQueue = Arc<Mutex<VecDeque<PieceWork>>>;
+pub type WorkQueue = Mutex<VecDeque<PieceWork>>;
 
 pub struct PieceWork {
     pub index: usize,
@@ -19,7 +18,7 @@ impl PieceWork {
     }
 }
 
-pub struct PieceResult {
+pub struct Piece {
     pub index: usize,
     pub buf: Vec<u8>,
 }

@@ -62,7 +62,7 @@ impl Client {
                 self.bitfield = payload.into();
                 Ok(())
             }
-            _ => Err("Invalid message: Expected Bitfield".into()),
+            msg => Err(format!("Invalid message: Expected Bitfield, got: {:?}", msg).into()),
         }
     }
 

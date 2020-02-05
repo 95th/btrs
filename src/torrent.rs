@@ -4,11 +4,10 @@ use crate::future::timeout;
 use crate::metainfo::InfoHash;
 use crate::msg::MessageKind;
 use crate::peer::{self, Peer, PeerId};
-use crate::work::{PieceResult, PieceWork, WorkQueue};
+use crate::work::{Piece, PieceWork, WorkQueue};
 use log::{debug, info};
 use sha1::Sha1;
 use std::convert::TryInto;
-use std::ops::Range;
 use tokio::sync::mpsc::Sender;
 
 pub const HASH_LEN: usize = 20;
@@ -86,27 +85,28 @@ pub struct Torrent {
 }
 
 impl Torrent {
-    pub fn piece_iter(&self) -> PieceIter {
+    pub fn piece_iter(&self) -> PieceIter<'_> {
         PieceIter::new(self)
-    }
-
-    pub fn piece_bounds(&self, idx: usize) -> Range<usize> {
-        let start = idx * self.piece_len;
-        let end = start + self.piece_len;
-        start..end.min(self.length)
     }
 
     pub async fn start_worker(
         &self,
         peer: &Peer,
-        work_queue: WorkQueue,
-        mut result_tx: Sender<PieceResult>,
+        work_queue: &WorkQueue,
+        mut result_tx: Sender<Piece>,
     ) -> crate::Result<()> {
-        let mut client = Client::new_tcp(peer.addr).await?;
-        client.handshake(&self.info_hash, &self.peer_id).await?;
-        client.recv_bitfield().await?;
-        client.send_unchoke().await?;
-        client.send_interested().await?;
+        let mut client = timeout(Client::new_tcp(peer.addr), 3).await?;
+        timeout(
+            async {
+                client.handshake(&self.info_hash, &self.peer_id).await?;
+                client.recv_bitfield().await?;
+                client.send_unchoke().await?;
+                client.send_interested().await?;
+                Ok::<_, crate::Error>(())
+            },
+            10,
+        )
+        .await?;
 
         loop {
             debug!("Get piece of work");
@@ -145,7 +145,7 @@ impl Torrent {
 
             client.send_have(wrk.index).await?;
             result_tx
-                .send(PieceResult {
+                .send(Piece {
                     index: wrk.index,
                     buf,
                 })
@@ -173,7 +173,7 @@ async fn attempt_download(client: &mut Client, wrk: &PieceWork) -> crate::Result
                     state
                         .client
                         .send_request(wrk.index, state.requested, block_size),
-                    30,
+                    5,
                 )
                 .await?;
                 state.backlog += 1;
