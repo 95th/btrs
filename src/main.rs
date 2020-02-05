@@ -1,16 +1,18 @@
+use btrs::bitfield::BitField;
 use btrs::magnet::MagnetUri;
 use btrs::peer;
 use btrs::torrent::TorrentFile;
 use futures::StreamExt;
 use log::debug;
+use std::collections::VecDeque;
 use std::sync::Arc;
 use tokio::fs;
 use tokio::sync::{mpsc, Mutex};
 
-#[tokio::main(core_threads = 1)]
+#[tokio::main]
 async fn main() -> btrs::Result<()> {
     env_logger::init();
-    magnet().await
+    torrent_file().await
 }
 
 pub async fn magnet() -> btrs::Result<()> {
@@ -28,7 +30,9 @@ pub async fn torrent_file() -> btrs::Result<()> {
     let torrent = torrent_file.into_torrent().await?;
 
     let torrent = Arc::new(torrent);
-    let work_queue = Arc::new(Mutex::new(torrent.piece_iter().collect()));
+    let work_queue: VecDeque<_> = torrent.piece_iter().collect();
+    let num_pieces = work_queue.len();
+    let work_queue = Arc::new(Mutex::new(work_queue));
     let (result_tx, mut result_rx) = mpsc::channel(200);
 
     for peer in torrent.peers.iter().chain(torrent.peers6.iter()) {
@@ -45,10 +49,15 @@ pub async fn torrent_file() -> btrs::Result<()> {
     }
 
     let mut file = vec![0; torrent.length];
+    let mut bitfield = BitField::new(num_pieces);
 
     while let Some(piece) = result_rx.next().await {
+        if bitfield.get(piece.index) {
+            panic!("Duplicate piece downloaded: {}", piece.index);
+        }
         let bounds = torrent.piece_bounds(piece.index);
         file[bounds].copy_from_slice(&piece.buf);
+        bitfield.set(piece.index, true);
     }
 
     Ok(())
