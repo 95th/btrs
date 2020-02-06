@@ -96,17 +96,10 @@ impl Torrent {
         mut result_tx: Sender<Piece>,
     ) -> crate::Result<()> {
         let mut client = timeout(Client::new_tcp(peer.addr), 3).await?;
-        timeout(
-            async {
-                client.handshake(&self.info_hash, &self.peer_id).await?;
-                client.recv_bitfield().await?;
-                client.send_unchoke().await?;
-                client.send_interested().await?;
-                Ok::<_, crate::Error>(())
-            },
-            10,
-        )
-        .await?;
+        client.handshake(&self.info_hash, &self.peer_id).await?;
+        client.recv_bitfield().await?;
+        client.send_unchoke().await?;
+        client.send_interested().await?;
 
         loop {
             debug!("Get piece of work");
@@ -169,13 +162,10 @@ async fn attempt_download(client: &mut Client, wrk: &PieceWork) -> crate::Result
             while state.backlog < MAX_BACKLOG && state.requested < wrk.len {
                 let block_size = MAX_BLOCK_SIZE.min(wrk.len - state.requested);
 
-                timeout(
-                    state
-                        .client
-                        .send_request(wrk.index, state.requested, block_size),
-                    5,
-                )
-                .await?;
+                let request = state
+                    .client
+                    .send_request(wrk.index, state.requested, block_size);
+                timeout(request, 5).await?;
                 state.backlog += 1;
                 state.requested += block_size;
             }
