@@ -176,7 +176,6 @@ async fn attempt_download(client: &mut Client, wrk: &PieceWork) -> crate::Result
     Ok(state.buf)
 }
 
-#[derive(Debug)]
 struct PieceProgress<'a> {
     index: usize,
     client: &'a mut Client,

@@ -7,16 +7,14 @@ use crate::msg::{self, Message, MessageKind};
 use crate::peer::PeerId;
 use bencode::Value;
 use log::trace;
-use std::fmt::Debug;
 use std::net::SocketAddr;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
 
-pub trait Connection: AsyncRead + AsyncWrite + Send + Debug + Unpin {}
+pub trait Connection: AsyncRead + AsyncWrite + Unpin {}
 
-impl<T> Connection for T where T: AsyncRead + AsyncWrite + Send + Debug + Unpin {}
+impl<T> Connection for T where T: AsyncRead + AsyncWrite + Unpin {}
 
-#[derive(Debug)]
 pub struct Client {
     conn: Box<dyn Connection>,
     pub choked: bool,
