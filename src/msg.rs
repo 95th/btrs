@@ -1,6 +1,7 @@
 use crate::bitfield::BitField;
 use crate::util::read_u32;
-use bencode::{Value, ValueRef};
+use ben::Node;
+use bencode::Value;
 use log::trace;
 use std::collections::BTreeMap;
 use std::convert::TryFrom;
@@ -210,7 +211,7 @@ pub fn ext(id: u8, data: &Value) -> Message {
 
 pub struct ExtendedMessage<'a> {
     pub id: u8,
-    pub value: ValueRef<'a>,
+    pub value: Node<'a>,
     pub rest: &'a [u8],
 }
 
@@ -223,7 +224,7 @@ mod msg_type {
 impl ExtendedMessage<'_> {
     pub fn new(data: &[u8]) -> Result<ExtendedMessage, &'static str> {
         let id = data[0];
-        let (value, i) = ValueRef::decode_prefix(&data[1..])
+        let (value, i) = Node::parse_prefix(&data[1..])
             .map_err(|_| "Invalid bencoded data in extended message")?;
 
         let rest = &data[i + 1..];
@@ -236,36 +237,35 @@ impl ExtendedMessage<'_> {
 
     pub fn metadata(&self) -> Option<Metadata> {
         let dict = self.value.as_dict()?;
-        let m = dict.get("m")?.as_dict()?;
-        let id = m.get("ut_metadata")?.as_int()? as u8;
-        let len = dict.get("metadata_size")?.as_int()? as usize;
+        let m = dict.get_dict(b"m")?;
+        let id = m.get_int(b"ut_metadata")? as u8;
+        let len = dict.get_int(b"metadata_size")? as usize;
         Some(Metadata { id, len })
     }
 
     pub fn data(&self, expected_piece: i64) -> Result<&[u8], &'static str> {
         let dict = self.value.as_dict().ok_or("Not a dict")?;
-        let msg_type = dict
-            .get("msg_type")
-            .and_then(|v| v.as_int())
-            .ok_or("Msg type attr not found")?;
+
+        let mut msg_type = -1;
+        let mut piece = -1;
+        let mut total_size = -1;
+
+        for (k, v) in dict.iter() {
+            match k {
+                b"msg_type" => msg_type = v.as_int().ok_or("msg_type is not int")?,
+                b"piece" => piece = v.as_int().ok_or("piece is not int")?,
+                b"total_size" => total_size = v.as_int().ok_or("total_size is not int")?,
+                _ => {}
+            }
+        }
 
         if msg_type != msg_type::DATA {
             return Err("Not a DATA message");
         }
 
-        let piece = dict
-            .get("piece")
-            .and_then(|v| v.as_int())
-            .ok_or("Piece attr not found")?;
-
         if piece != expected_piece {
             return Err("Not the right piece");
         }
-
-        let total_size = dict
-            .get("total_size")
-            .and_then(|v| v.as_int())
-            .ok_or("Total size attr not found")?;
 
         if self.rest.len() as i64 != total_size {
             return Err("Incorrect size");
@@ -316,13 +316,13 @@ impl MetadataMsg {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::BTreeMap;
 
     #[test]
     fn extended_new() {
         let ext = ExtendedMessage::new(&[0, b'd', b'e', 1, 2, 3, 4]).unwrap();
         assert_eq!(0, ext.id);
-        assert_eq!(ValueRef::with_dict(BTreeMap::new()), ext.value);
+        assert!(ext.value.is_dict());
+        assert_eq!(b"", ext.value.data());
         assert_eq!(&[1, 2, 3, 4], ext.rest);
     }
 }
