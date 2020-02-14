@@ -1,6 +1,6 @@
 use crate::metainfo::InfoHash;
 use crate::peer::{Peer, PeerId};
-use bencode::ValueRef;
+use ben::Node;
 use log::debug;
 use reqwest::Client;
 use std::convert::TryInto;
@@ -29,34 +29,30 @@ pub async fn announce(
         .await?
         .bytes()
         .await?;
-    let value = ValueRef::decode(&data)?;
+    let value = Node::parse(&data)?;
     let value = value.as_dict().ok_or("not a dict")?;
     let interval = value
-        .get("interval")
+        .get(b"interval")
         .and_then(|v| v.as_int())
         .and_then(|n| n.try_into().ok())
         .unwrap_or(0);
 
-    let peers = match value.get("peers") {
+    let peers = match value.get(b"peers") {
         Some(peers) if peers.is_list() => {
             let mut v = vec![];
-            for peer in peers.as_list().unwrap() {
+            for peer in peers.as_list().unwrap().iter() {
                 let peer = peer.as_dict().ok_or("Peer not a dict")?;
                 let ip = peer
-                    .get("ip")
-                    .and_then(|ip| ip.as_str())
+                    .get_str(b"ip")
                     .ok_or("IP not present")
                     .and_then(|v| v.parse().map_err(|_| "Invalid IP/DNS name"))?;
-                let port = peer
-                    .get("port")
-                    .ok_or("Port not present")
-                    .and_then(|port| port.as_int().ok_or("Invalid port number"))?;
+                let port = peer.get_int(b"port").ok_or("Port not present")?;
                 v.push(Peer::new(ip, port as u16));
             }
             v
         }
         Some(peers) => {
-            let peers = peers.as_bytes().unwrap_or(&[]);
+            let peers = peers.data();
             if peers.len() % 6 != 0 {
                 return Err("Invalid peer len".into());
             }
@@ -68,10 +64,7 @@ pub async fn announce(
 
     debug!("Found {} peers (v4)", peers.len());
 
-    let peers6 = value
-        .get("peers6")
-        .and_then(|v| v.as_bytes())
-        .unwrap_or(&[]);
+    let peers6 = value.get(b"peers6").map(|v| v.data()).unwrap_or_default();
     if peers6.len() % 18 != 0 {
         return Err("Invalid peer len".into());
     }

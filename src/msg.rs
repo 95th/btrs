@@ -202,7 +202,7 @@ pub fn ext_handshake() -> Message {
 
 pub fn ext(id: u8, data: &Value) -> Message {
     let mut payload = vec![id];
-    data.encode(&mut payload).unwrap();
+    data.write(&mut payload);
     Message {
         kind: MessageKind::Extended,
         payload,
@@ -246,27 +246,17 @@ impl ExtendedMessage<'_> {
     pub fn data(&self, expected_piece: i64) -> Result<&[u8], &'static str> {
         let dict = self.value.as_dict().ok_or("Not a dict")?;
 
-        let mut msg_type = -1;
-        let mut piece = -1;
-        let mut total_size = -1;
-
-        for (k, v) in dict.iter() {
-            match k {
-                b"msg_type" => msg_type = v.as_int().ok_or("msg_type is not int")?,
-                b"piece" => piece = v.as_int().ok_or("piece is not int")?,
-                b"total_size" => total_size = v.as_int().ok_or("total_size is not int")?,
-                _ => {}
-            }
-        }
-
+        let msg_type = dict.get_int(b"msg_type").ok_or("msg_type is not int")?;
         if msg_type != msg_type::DATA {
             return Err("Not a DATA message");
         }
 
+        let piece = dict.get_int(b"piece").ok_or("piece is not int")?;
         if piece != expected_piece {
             return Err("Not the right piece");
         }
 
+        let total_size = dict.get_int(b"total_size").ok_or("total_size is not int")?;
         if self.rest.len() as i64 != total_size {
             return Err("Incorrect size");
         }

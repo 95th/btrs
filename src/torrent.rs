@@ -5,6 +5,7 @@ use crate::metainfo::InfoHash;
 use crate::msg::MessageKind;
 use crate::peer::{self, Peer, PeerId};
 use crate::work::{Piece, PieceWork, WorkQueue};
+use ben::Node;
 use log::{debug, info};
 use sha1::Sha1;
 use std::convert::TryInto;
@@ -26,20 +27,17 @@ pub struct TorrentFile {
 
 impl TorrentFile {
     pub fn parse(bytes: impl AsRef<[u8]>) -> Option<TorrentFile> {
-        let value = bencode::ValueRef::decode(bytes.as_ref()).ok()?;
+        let value = Node::parse(bytes.as_ref()).ok()?;
         let dict = value.as_dict()?;
-        let announce = dict.get("announce")?.as_str()?;
-        let info_dict = dict.get("info")?.as_dict()?;
-        let info_bytes = dict.get("info")?.encode_to_vec();
+        let announce = dict.get_str(b"announce")?;
+        let info_bytes = dict.get(b"info")?.data();
         let info_hash = Sha1::from(info_bytes).digest().bytes().into();
 
-        let length = info_dict.get("length")?.as_int()?;
-        let name = info_dict
-            .get("name")
-            .and_then(|n| n.as_str())
-            .unwrap_or_default();
-        let piece_len = info_dict.get("piece length")?.as_int()?;
-        let pieces = info_dict.get("pieces")?.as_bytes()?;
+        let info_dict = dict.get_dict(b"info")?;
+        let length = info_dict.get_int(b"length")?;
+        let name = info_dict.get_str(b"name").unwrap_or_default();
+        let piece_len = info_dict.get_int(b"piece length")?;
+        let pieces = info_dict.get(b"pieces")?.data();
 
         let torrent = TorrentFile {
             announce: announce.to_owned(),

@@ -6,7 +6,7 @@ fn encode_dict() {
     let mut m = BTreeMap::new();
     m.insert("hello", Value::with_str("world"));
     let v = Value::with_dict(m);
-    assert_eq!("d5:hello5:worlde", v.to_string());
+    assert_eq!(b"d5:hello5:worlde", &v.to_vec()[..]);
 }
 
 #[test]
@@ -32,5 +32,5 @@ fn encode_list() {
         Value::with_str("hello"),
         Value::with_str("world"),
     ]);
-    assert_eq!("li100e5:hello5:worlde", v.to_string());
+    assert_eq!(b"li100e5:hello5:worlde", &v.to_vec()[..]);
 }
