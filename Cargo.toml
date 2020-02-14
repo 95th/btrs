@@ -4,13 +4,9 @@ version = "0.1.0"
 authors = ["Gurwinder Singh <vargwin@gmail.com>"]
 edition = "2018"
 
-[workspace]
-members = ["bencode"]
-
 [dependencies]
 url = "2.1.1"
 data-encoding = "2.1.2"
-bencode = { path = "./bencode" }
 sha1 = { version = "0.6.0", features = ["std"] }
 tokio = { version = "0.2.11", features = ["full"] }
 reqwest = "0.10.1"

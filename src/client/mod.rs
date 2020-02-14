@@ -5,7 +5,7 @@ use crate::client::handshake::Handshake;
 use crate::metainfo::InfoHash;
 use crate::msg::{self, Message, MessageKind};
 use crate::peer::PeerId;
-use bencode::Value;
+use ben::WriteNode;
 use log::trace;
 use std::net::SocketAddr;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
@@ -111,7 +111,7 @@ impl Client {
         msg::ext_handshake().write(&mut self.conn).await
     }
 
-    pub async fn send_ext(&mut self, id: u8, value: &Value) -> crate::Result<()> {
+    pub async fn send_ext(&mut self, id: u8, value: &WriteNode) -> crate::Result<()> {
         trace!("Send extended message");
         msg::ext(id, value).write(&mut self.conn).await
     }

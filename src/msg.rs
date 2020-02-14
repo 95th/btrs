@@ -1,7 +1,6 @@
 use crate::bitfield::BitField;
 use crate::util::read_u32;
-use ben::Node;
-use bencode::Value;
+use ben::{Node, WriteNode};
 use log::trace;
 use std::collections::BTreeMap;
 use std::convert::TryFrom;
@@ -200,9 +199,9 @@ pub fn ext_handshake() -> Message {
     }
 }
 
-pub fn ext(id: u8, data: &Value) -> Message {
+pub fn ext(id: u8, data: &WriteNode) -> Message {
     let mut payload = vec![id];
-    data.write(&mut payload);
+    data.write(&mut payload).unwrap();
     Message {
         kind: MessageKind::Extended,
         payload,
@@ -282,24 +281,24 @@ pub enum MetadataMsg {
 }
 
 impl MetadataMsg {
-    pub fn as_value(&self) -> Value {
+    pub fn as_value(&self) -> WriteNode {
         let mut dict = BTreeMap::new();
-        match self {
+        match *self {
             Self::Request(piece) => {
-                dict.insert("msg_type", Value::with_int(msg_type::REQUEST));
-                dict.insert("piece", Value::with_int(*piece));
+                dict.insert("msg_type", msg_type::REQUEST.into());
+                dict.insert("piece", piece.into());
             }
             Self::Reject(piece) => {
-                dict.insert("msg_type", Value::with_int(msg_type::REJECT));
-                dict.insert("piece", Value::with_int(*piece));
+                dict.insert("msg_type", msg_type::REJECT.into());
+                dict.insert("piece", piece.into());
             }
             Self::Data(piece, total_size) => {
-                dict.insert("msg_type", Value::with_int(msg_type::DATA));
-                dict.insert("piece", Value::with_int(*piece));
-                dict.insert("total_size", Value::with_int(*total_size));
+                dict.insert("msg_type", msg_type::DATA.into());
+                dict.insert("piece", piece.into());
+                dict.insert("total_size", total_size.into());
             }
         }
-        Value::with_dict(dict)
+        dict.into()
     }
 }
 
