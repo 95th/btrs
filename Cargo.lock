@@ -41,7 +41,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 [[package]]
 name = "ben"
 version = "0.1.7"
-source = "git+https://github.com/95th/ben#085cb2624e20b589cfec43174647826ec88a6805"
+source = "git+https://github.com/95th/ben#a40c0194212e2569971d285954cb9d9252b3eb86"
 
 [[package]]
 name = "bitflags"

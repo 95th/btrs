@@ -29,6 +29,8 @@ pub async fn torrent_file() -> btrs::Result<()> {
     let torrent_file = TorrentFile::parse(buf).ok_or("Unable to parse torrent file")?;
     let torrent = torrent_file.into_torrent().await?;
 
+    // torrent.worker().connect_all().await;
+
     let work_queue: VecDeque<_> = torrent.piece_iter().collect();
     let num_pieces = work_queue.len();
     let work_queue = Mutex::new(work_queue);

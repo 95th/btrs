@@ -64,14 +64,8 @@ impl<T> From<SendError<T>> for Error {
 
 impl From<ben::Error> for Error {
     fn from(e: ben::Error) -> Self {
-        use ben::Error::*;
         Self {
-            err: match e {
-                Incomplete => "Incomplete Bencoded string".into(),
-                Invalid => "Invalid Bencoded string".into(),
-                NoMemory => "No memory left to parse".into(),
-                Overflow => "Data overflow".into(),
-            },
+            err: e.to_string().into(),
         }
     }
 }
