@@ -199,7 +199,7 @@ pub fn ext_handshake() -> Message {
     }
 }
 
-pub fn ext(id: u8, data: &Encoder) -> Message {
+pub fn ext(id: u8, data: Encoder) -> Message {
     let mut payload = vec![id];
     data.write(&mut payload).unwrap();
     Message {
@@ -280,19 +280,19 @@ pub enum MetadataMsg {
     Data(i64, i64),
 }
 
-impl MetadataMsg {
-    pub fn as_value(&self) -> Encoder {
+impl From<MetadataMsg> for Encoder {
+    fn from(msg: MetadataMsg) -> Self {
         let mut dict = BTreeMap::new();
-        match *self {
-            Self::Request(piece) => {
+        match msg {
+            MetadataMsg::Request(piece) => {
                 dict.insert("msg_type", msg_type::REQUEST.into());
                 dict.insert("piece", piece.into());
             }
-            Self::Reject(piece) => {
+            MetadataMsg::Reject(piece) => {
                 dict.insert("msg_type", msg_type::REJECT.into());
                 dict.insert("piece", piece.into());
             }
-            Self::Data(piece, total_size) => {
+            MetadataMsg::Data(piece, total_size) => {
                 dict.insert("msg_type", msg_type::DATA.into());
                 dict.insert("piece", piece.into());
                 dict.insert("total_size", total_size.into());

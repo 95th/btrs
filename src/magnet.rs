@@ -119,7 +119,7 @@ impl MagnetUri {
         let mut buf = vec![0; remaining];
         while remaining > 0 {
             let m = MetadataMsg::Request(piece);
-            client.send_ext(metadata.id, &m.as_value()).await?;
+            client.send_ext(metadata.id, m.into()).await?;
             let msg = client
                 .read()
                 .await?

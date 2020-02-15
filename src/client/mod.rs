@@ -111,7 +111,7 @@ impl Client {
         msg::ext_handshake().write(&mut self.conn).await
     }
 
-    pub async fn send_ext(&mut self, id: u8, value: &Encoder) -> crate::Result<()> {
+    pub async fn send_ext(&mut self, id: u8, value: Encoder) -> crate::Result<()> {
         trace!("Send extended message");
         msg::ext(id, value).write(&mut self.conn).await
     }
