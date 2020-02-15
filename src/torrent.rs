@@ -1,4 +1,5 @@
 use crate::announce::{announce, AnnounceResponse};
+use crate::bitfield::BitField;
 use crate::client::Client;
 use crate::future::timeout;
 use crate::metainfo::InfoHash;
@@ -6,8 +7,11 @@ use crate::msg::MessageKind;
 use crate::peer::{self, Peer, PeerId};
 use crate::work::{Piece, PieceWork, WorkQueue};
 use ben::Node;
+use futures::stream::FuturesUnordered;
+use futures::StreamExt;
 use log::{debug, info};
 use sha1::Sha1;
+use std::collections::VecDeque;
 use std::convert::TryInto;
 use tokio::sync::mpsc::Sender;
 
@@ -87,6 +91,16 @@ impl Torrent {
         PieceIter::new(self)
     }
 
+    pub fn worker(&self) -> TorrentWorker<'_> {
+        let work: VecDeque<_> = self.piece_iter().collect();
+        TorrentWorker {
+            torrent: self,
+            bits: BitField::new(work.len()),
+            work: WorkQueue::new(work),
+            connected: vec![],
+        }
+    }
+
     pub async fn start_worker(
         &self,
         peer: &Peer,
@@ -143,6 +157,41 @@ impl Torrent {
                 .await?;
         }
         Ok(())
+    }
+}
+
+pub struct TorrentWorker<'a> {
+    torrent: &'a Torrent,
+    bits: BitField,
+    work: WorkQueue,
+    connected: Vec<Client>,
+}
+
+impl<'a> TorrentWorker<'a> {
+    pub async fn connect_all(&mut self) -> usize {
+        let info_hash = &self.torrent.info_hash;
+        let peer_id = &self.torrent.peer_id;
+        let mut clients: FuturesUnordered<_> = self
+            .torrent
+            .peers
+            .iter()
+            .chain(self.torrent.peers6.iter())
+            .map(|peer| async move {
+                let mut client = timeout(Client::new_tcp(peer.addr), 3).await?;
+                client.handshake(info_hash, peer_id).await?;
+                Ok::<_, crate::Error>(client)
+            })
+            .collect();
+
+        while let Some(result) = clients.next().await {
+            match result {
+                Ok(client) => self.connected.push(client),
+                Err(e) => debug!("Error occurred: {}", e),
+            }
+        }
+
+        debug!("{} peers connected", self.connected.len());
+        self.connected.len()
     }
 }
 

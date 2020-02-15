@@ -29,6 +29,8 @@ pub async fn announce(
         .await?
         .bytes()
         .await?;
+
+    debug!("Announce response: {:?}", data);
     let value = Node::parse(&data)?;
     let value = value.as_dict().ok_or("not a dict")?;
     let interval = value
