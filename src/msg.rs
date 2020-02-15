@@ -1,6 +1,6 @@
 use crate::bitfield::BitField;
 use crate::util::read_u32;
-use ben::{Node, WriteNode};
+use ben::{Encoder, Node};
 use log::trace;
 use std::collections::BTreeMap;
 use std::convert::TryFrom;
@@ -199,7 +199,7 @@ pub fn ext_handshake() -> Message {
     }
 }
 
-pub fn ext(id: u8, data: &WriteNode) -> Message {
+pub fn ext(id: u8, data: &Encoder) -> Message {
     let mut payload = vec![id];
     data.write(&mut payload).unwrap();
     Message {
@@ -281,7 +281,7 @@ pub enum MetadataMsg {
 }
 
 impl MetadataMsg {
-    pub fn as_value(&self) -> WriteNode {
+    pub fn as_value(&self) -> Encoder {
         let mut dict = BTreeMap::new();
         match *self {
             Self::Request(piece) => {
