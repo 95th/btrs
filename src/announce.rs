@@ -19,7 +19,9 @@ pub async fn announce(
     port: u16,
 ) -> crate::Result<AnnounceResponse> {
     let peer_id = std::str::from_utf8(&peer_id[..]).unwrap();
-    let url = format!("{}?info_hash={}", url, info_hash.encode_url());
+    let info_hash_encoded = info_hash.encode_url();
+    debug!("Infohash Encoded: {}", info_hash_encoded);
+    let url = format!("{}?info_hash={}", url, info_hash_encoded);
     let data = Client::new()
         .get(&url)
         .query(&[("peer_id", peer_id)])
@@ -64,7 +66,7 @@ pub async fn announce(
         None => vec![],
     };
 
-    debug!("Found {} peers (v4)", peers.len());
+    debug!("Found {} peers (v4): {:?}", peers.len(), peers);
 
     let peers6 = value.get(b"peers6").map(|v| v.data()).unwrap_or_default();
     if peers6.len() % 18 != 0 {
@@ -72,7 +74,7 @@ pub async fn announce(
     }
 
     let peers6: Vec<_> = peers6.chunks_exact(18).map(Peer::v6).collect();
-    debug!("Found {} peers (v6)", peers6.len());
+    debug!("Found {} peers (v6): {:?}", peers6.len(), peers6);
 
     Ok(AnnounceResponse {
         interval,

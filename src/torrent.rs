@@ -16,7 +16,7 @@ use std::convert::TryInto;
 use tokio::sync::mpsc::Sender;
 
 pub const HASH_LEN: usize = 20;
-const MAX_BACKLOG: usize = 5;
+const MAX_BACKLOG: usize = 20;
 const MAX_BLOCK_SIZE: usize = 16_384;
 
 #[derive(Debug)]
@@ -57,8 +57,9 @@ impl TorrentFile {
 
     pub async fn into_torrent(self) -> crate::Result<Torrent> {
         let peer_id = peer::generate_peer_id();
-        debug!("Our peer_id: {:?}", peer_id);
+        debug!("Our peer_id: {:x?}", peer_id);
 
+        debug!("Infohash: {:x?}", self.info_hash);
         let resp = announce(&self.announce, &self.info_hash, &peer_id, 6881).await?;
         let AnnounceResponse { peers, peers6, .. } = resp;
 
@@ -100,71 +101,13 @@ impl Torrent {
             connected: vec![],
         }
     }
-
-    pub async fn start_worker(
-        &self,
-        peer: &Peer,
-        work_queue: &WorkQueue,
-        mut result_tx: Sender<Piece>,
-    ) -> crate::Result<()> {
-        let mut client = timeout(Client::new_tcp(peer.addr), 3).await?;
-        client.handshake(&self.info_hash, &self.peer_id).await?;
-        client.recv_bitfield().await?;
-        client.send_unchoke().await?;
-        client.send_interested().await?;
-
-        loop {
-            debug!("Get piece of work");
-            let wrk = match work_queue.lock().await.pop_front() {
-                Some(v) => v,
-                None => break,
-            };
-
-            debug!("Got piece of work index: {}", wrk.index);
-
-            if !client.bitfield.get(wrk.index) {
-                debug!("This guy doesn't have {} piece", wrk.index);
-                work_queue.lock().await.push_back(wrk);
-                continue;
-            }
-
-            debug!("Let's download {} piece", wrk.index);
-
-            let buf = match attempt_download(&mut client, &wrk).await {
-                Ok(v) => v,
-                Err(e) => {
-                    work_queue.lock().await.push_back(wrk);
-                    return Err(e);
-                }
-            };
-
-            debug!("Woohoo! Downloaded {} piece", wrk.index);
-
-            if !wrk.check_integrity(&buf) {
-                debug!("Dang it! Bad piece: {}", wrk.index);
-                work_queue.lock().await.push_back(wrk);
-                continue;
-            }
-
-            debug!("Woohoo! Verified {} piece", wrk.index);
-
-            client.send_have(wrk.index).await?;
-            result_tx
-                .send(Piece {
-                    index: wrk.index,
-                    buf,
-                })
-                .await?;
-        }
-        Ok(())
-    }
 }
 
 pub struct TorrentWorker<'a> {
     torrent: &'a Torrent,
-    bits: BitField,
-    work: WorkQueue,
-    connected: Vec<Client>,
+    pub bits: BitField,
+    pub work: WorkQueue,
+    pub connected: Vec<Client>,
 }
 
 impl<'a> TorrentWorker<'a> {
@@ -193,6 +136,80 @@ impl<'a> TorrentWorker<'a> {
         debug!("{} peers connected", self.connected.len());
         self.connected.len()
     }
+
+    pub async fn run_worker(&mut self, result_tx: Sender<Piece>) {
+        let work = &self.work;
+        let mut futures = self
+            .connected
+            .iter_mut()
+            .map(|client| download(client, work, result_tx.clone()))
+            .collect::<FuturesUnordered<_>>();
+
+        while let Some(result) = futures.next().await {
+            if let Err(e) = result {
+                debug!("Error occurred: {}", e);
+            }
+        }
+    }
+}
+
+async fn download(
+    client: &mut Client,
+    work: &WorkQueue,
+    mut result_tx: Sender<Piece>,
+) -> crate::Result<()> {
+    client.send_unchoke().await?;
+    client.send_interested().await?;
+
+    loop {
+        if client.choked {
+            let _ = client.read().await?;
+            continue;
+        }
+
+        debug!("Get piece of work; remaining: {}", work.borrow().len());
+        let wrk = match work.borrow_mut().pop_front() {
+            Some(v) => v,
+            None => break,
+        };
+
+        debug!("Got piece of work index: {}", wrk.index);
+
+        // if !client.bitfield.get(wrk.index) {
+        //     debug!("This guy doesn't have {} piece", wrk.index);
+        //     work.borrow_mut().push_back(wrk);
+        //     continue;
+        // }
+
+        debug!("Let's download {} piece", wrk.index);
+
+        let buf = match attempt_download(client, &wrk).await {
+            Ok(v) => v,
+            Err(e) => {
+                work.borrow_mut().push_back(wrk);
+                return Err(e);
+            }
+        };
+
+        debug!("Woohoo! Downloaded {} piece", wrk.index);
+
+        if !wrk.check_integrity(&buf) {
+            debug!("Dang it! Bad piece: {}", wrk.index);
+            work.borrow_mut().push_back(wrk);
+            continue;
+        }
+
+        info!("Woohoo! Downloaded and Verified {} piece", wrk.index);
+
+        client.send_have(wrk.index).await?;
+        result_tx
+            .send(Piece {
+                index: wrk.index,
+                buf,
+            })
+            .await?;
+    }
+    Ok(())
 }
 
 async fn attempt_download(client: &mut Client, wrk: &PieceWork) -> crate::Result<Vec<u8>> {
@@ -219,7 +236,7 @@ async fn attempt_download(client: &mut Client, wrk: &PieceWork) -> crate::Result
         }
         timeout(state.read_msg(), 30).await?;
     }
-    info!("Piece downloaded: {}", wrk.index);
+    debug!("Piece downloaded: {}", wrk.index);
     Ok(state.buf)
 }
 
@@ -234,21 +251,10 @@ struct PieceProgress<'a> {
 
 impl PieceProgress<'_> {
     async fn read_msg(&mut self) -> crate::Result<()> {
-        let msg = match self.client.read().await? {
-            Some(msg) => msg,
-            None => return Ok(()), // Keep-alive
-        };
-
+        let msg = self.client.read_in_loop().await?;
         debug!("We got message: {:?}", msg.kind);
 
         match msg.kind {
-            MessageKind::Choke => self.client.choked = true,
-            MessageKind::Unchoke => self.client.choked = false,
-            MessageKind::Have => {
-                let index = msg.parse_have()?;
-                debug!("This guy has {} piece", index);
-                self.client.bitfield.set(index, true);
-            }
             MessageKind::Piece => {
                 let n = msg.parse_piece(self.index, &mut self.buf)?;
                 debug!("Yay! we downloaded {} bytes", n);

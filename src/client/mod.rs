@@ -6,6 +6,7 @@ use crate::metainfo::InfoHash;
 use crate::msg::{self, Message, MessageKind};
 use crate::peer::PeerId;
 use ben::Encoder;
+use log::debug;
 use log::trace;
 use std::net::SocketAddr;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
@@ -46,13 +47,48 @@ impl Client {
     }
 
     pub async fn read(&mut self) -> crate::Result<Option<Message>> {
-        trace!("Read message");
-        msg::read(&mut self.conn).await
+        let msg = match msg::read(&mut self.conn).await? {
+            Some(msg) => msg,
+            None => return Ok(None), // Keep-alive
+        };
+
+        debug!("We got message: {:?}", msg.kind);
+
+        match msg.kind {
+            MessageKind::Choke => {
+                self.choked = true;
+                return Ok(None);
+            }
+            MessageKind::Unchoke => {
+                self.choked = false;
+                return Ok(None);
+            }
+            MessageKind::Bitfield => {
+                debug!("Received bitfield: {:?}", msg.payload);
+                self.bitfield = msg.payload.into();
+                return Ok(None);
+            }
+            MessageKind::Have => {
+                let index = msg.parse_have()?;
+                debug!("This guy has {} piece", index);
+                self.bitfield.set(index, true);
+                return Ok(None);
+            }
+            _ => return Ok(Some(msg)),
+        }
+    }
+
+    pub async fn read_in_loop(&mut self) -> crate::Result<Message> {
+        loop {
+            if let Some(msg) = self.read().await? {
+                return Ok(msg);
+            }
+        }
     }
 
     pub async fn recv_bitfield(&mut self) -> crate::Result<()> {
         trace!("Receive Bitfield");
-        match self.read().await? {
+        match msg::read(&mut self.conn).await? {
             Some(Message {
                 kind: MessageKind::Bitfield,
                 payload,

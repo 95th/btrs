@@ -97,11 +97,7 @@ impl MagnetUri {
         client.handshake(&self.info_hash, peer_id).await?;
         client.send_ext_handshake().await?;
 
-        let msg = client
-            .read()
-            .await?
-            .ok_or("Expected Extended Handshake, Got keep-alive")?;
-
+        let msg = client.read_in_loop().await?;
         let ext = msg.parse_ext()?;
 
         if !ext.is_handshake() {
@@ -120,10 +116,7 @@ impl MagnetUri {
         while remaining > 0 {
             let m = MetadataMsg::Request(piece);
             client.send_ext(metadata.id, m.into()).await?;
-            let msg = client
-                .read()
-                .await?
-                .ok_or("Expected Extended message, Got keep-alive")?;
+            let msg = client.read_in_loop().await?;
 
             let ext = msg.parse_ext()?;
             if ext.id != metadata.id {

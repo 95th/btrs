@@ -2,12 +2,11 @@ use btrs::bitfield::BitField;
 use btrs::magnet::MagnetUri;
 use btrs::peer;
 use btrs::torrent::TorrentFile;
-use futures::stream::FuturesUnordered;
+use btrs::work::Piece;
 use futures::StreamExt;
 use log::debug;
-use std::collections::VecDeque;
 use tokio::fs;
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::mpsc;
 
 #[tokio::main]
 async fn main() -> btrs::Result<()> {
@@ -29,21 +28,15 @@ pub async fn torrent_file() -> btrs::Result<()> {
     let torrent_file = TorrentFile::parse(buf).ok_or("Unable to parse torrent file")?;
     let torrent = torrent_file.into_torrent().await?;
 
-    // torrent.worker().connect_all().await;
+    let mut worker = torrent.worker();
+    let count = worker.connect_all().await;
+    if count == 0 {
+        return Err("No peer connected".into());
+    }
 
-    let work_queue: VecDeque<_> = torrent.piece_iter().collect();
-    let num_pieces = work_queue.len();
-    let work_queue = Mutex::new(work_queue);
-    let (result_tx, mut result_rx) = mpsc::channel(200);
+    let num_pieces = worker.work.borrow().len();
 
-    let mut tasks = torrent
-        .peers
-        .iter()
-        .chain(&torrent.peers6)
-        .map(|peer| torrent.start_worker(&peer, &work_queue, result_tx.clone()))
-        .collect::<FuturesUnordered<_>>();
-
-    drop(result_tx);
+    let (result_tx, mut result_rx) = mpsc::channel::<Piece>(200);
 
     let len = torrent.length;
     let piece_len = torrent.piece_len;
@@ -61,14 +54,11 @@ pub async fn torrent_file() -> btrs::Result<()> {
             file[start..end].copy_from_slice(&piece.buf);
             bitfield.set(piece.index, true);
         }
+        file
     });
 
-    while let Some(result) = tasks.next().await {
-        if let Err(e) = result {
-            debug!("{}", e);
-        }
-    }
-
-    handle.await.unwrap();
+    worker.run_worker(result_tx).await;
+    let file = handle.await.unwrap();
+    println!("File downloaded; size: {}", file.len());
     Ok(())
 }

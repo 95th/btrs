@@ -1,9 +1,9 @@
 use crate::metainfo::InfoHash;
 use sha1::Sha1;
+use std::cell::RefCell;
 use std::collections::VecDeque;
-use tokio::sync::Mutex;
 
-pub type WorkQueue = Mutex<VecDeque<PieceWork>>;
+pub type WorkQueue = RefCell<VecDeque<PieceWork>>;
 
 pub struct PieceWork {
     pub index: usize,
