@@ -311,7 +311,7 @@ mod tests {
         let ext = ExtendedMessage::new(&[0, b'd', b'e', 1, 2, 3, 4]).unwrap();
         assert_eq!(0, ext.id);
         assert!(ext.value.is_dict());
-        assert_eq!(b"", ext.value.data());
+        assert_eq!(b"de", ext.value.data());
         assert_eq!(&[1, 2, 3, 4], ext.rest);
     }
 }
