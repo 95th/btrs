@@ -17,6 +17,14 @@ impl BitField {
         Self::with_value(len, false)
     }
 
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.arr
+    }
+
+    pub fn as_bytes_mut(&mut self) -> &mut [u8] {
+        &mut self.arr
+    }
+
     pub fn with_value(len: usize, val: bool) -> Self {
         let arr_len = (len as f64 / 8.0).ceil() as usize;
         let v = if val { !0 } else { 0 };

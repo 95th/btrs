@@ -1,210 +1,258 @@
-use crate::bitfield::BitField;
-use crate::util::read_u32;
 use ben::{Encoder, Node};
+use log::debug;
 use log::trace;
 use std::collections::BTreeMap;
-use std::convert::TryFrom;
-use std::fmt;
-use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
+use std::io;
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 const METADATA_PIECE_LEN: usize = 16384;
 
-#[derive(Debug, Copy, Clone, PartialEq)]
-#[repr(u8)]
-pub enum MessageKind {
-    Choke = 0,
-    Unchoke = 1,
-    Interested = 2,
-    NotInterested = 3,
-    Have = 4,
-    Bitfield = 5,
-    Request = 6,
-    Piece = 7,
-    Cancel = 8,
-    Extended = 20,
-}
-
-impl TryFrom<u8> for MessageKind {
-    type Error = &'static str;
-
-    fn try_from(value: u8) -> Result<Self, Self::Error> {
-        use MessageKind::*;
-
-        Ok(match value {
-            0 => Choke,
-            1 => Unchoke,
-            2 => Interested,
-            3 => NotInterested,
-            4 => Have,
-            5 => Bitfield,
-            6 => Request,
-            7 => Piece,
-            8 => Cancel,
-            20 => Extended,
-            _ => return Err("Invalid Message Kind"),
-        })
-    }
-}
-
-pub struct Message {
-    pub kind: MessageKind,
-    pub payload: Vec<u8>,
-}
-
-impl fmt::Debug for Message {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Message")
-            .field("kind", &self.kind)
-            .field("payload", &"..")
-            .finish()
-    }
+#[derive(Debug)]
+pub enum Message {
+    Choke,
+    Unchoke,
+    Interested,
+    NotInterested,
+    Have { index: u32 },
+    Bitfield { len: u32 },
+    Request { index: u32, begin: u32, len: u32 },
+    Piece { index: u32, begin: u32, len: u32 },
+    Cancel { index: u32, begin: u32, len: u32 },
+    Extended { len: u32 },
+    Unknown { id: u8, len: u32 },
 }
 
 impl Message {
-    pub fn new(kind: MessageKind, payload: Vec<u8>) -> Self {
-        Self { kind, payload }
+    pub fn type_id(&self) -> u8 {
+        use Message::*;
+        match self {
+            Choke => 0,
+            Unchoke => 1,
+            Interested => 2,
+            NotInterested => 3,
+            Have { .. } => 4,
+            Bitfield { .. } => 5,
+            Request { .. } => 6,
+            Piece { .. } => 7,
+            Cancel { .. } => 8,
+            Extended { .. } => 20,
+            Unknown { .. } => panic!("Not sendable"),
+        }
     }
 
-    pub async fn write<W>(&self, writer: &mut W) -> crate::Result<()>
+    pub async fn write<W>(&self, writer: &mut W) -> io::Result<()>
     where
         W: AsyncWrite + Unpin,
     {
-        let len = self.payload.len() as u32 + 1; // +1 for MessageKind
-        writer.write_u32(len).await?;
-        writer.write_u8(self.kind as u8).await?;
-        writer.write_all(&self.payload).await?;
+        use Message::*;
+
+        match *self {
+            Choke | Unchoke | Interested | NotInterested | Extended { len: 0 } => {
+                writer.write_u32(1).await?;
+                writer.write_u8(self.type_id()).await?;
+            }
+            Have { index } => {
+                writer.write_u32(5).await?;
+                writer.write_u8(self.type_id()).await?;
+                writer.write_u32(index).await?;
+            }
+            Request { index, begin, len } | Cancel { index, begin, len } => {
+                writer.write_u32(13).await?;
+                writer.write_u8(self.type_id()).await?;
+                writer.write_u32(index).await?;
+                writer.write_u32(begin).await?;
+                writer.write_u32(len).await?;
+            }
+            _ => {}
+        }
         Ok(())
     }
 
-    pub fn parse_piece(&self, index: usize, buf: &mut [u8]) -> Result<usize, &'static str> {
-        if self.kind != MessageKind::Piece {
-            return Err("Not a Piece message");
-        }
+    pub async fn write_buf<W>(&self, writer: &mut W, data: &[u8]) -> io::Result<()>
+    where
+        W: AsyncWrite + Unpin,
+    {
+        use Message::*;
 
-        if self.payload.len() < 8 {
-            return Err("Message too short");
+        match *self {
+            Bitfield { .. } => {
+                writer.write_u32(data.len() as u32 + 1).await?;
+                writer.write_u8(self.type_id()).await?;
+                writer.write_all(data).await?;
+            }
+            Piece { index, begin, .. } => {
+                writer.write_u32(data.len() as u32 + 13).await?;
+                writer.write_u8(self.type_id()).await?;
+                writer.write_u32(index).await?;
+                writer.write_u32(begin).await?;
+                writer.write_all(data).await?
+            }
+            _ => {}
         }
-
-        let parsed_idx = read_u32(&self.payload[..4]) as usize;
-        if parsed_idx != index {
-            return Err("Piece Index mismatch");
-        }
-
-        let begin = read_u32(&self.payload[4..8]) as usize;
-        if begin >= buf.len() {
-            return Err("Begin offset too high");
-        }
-
-        let data = &self.payload[8..];
-        if begin + data.len() > buf.len() {
-            return Err("Data too large");
-        }
-
-        buf[begin..][..data.len()].copy_from_slice(data);
-        Ok(data.len())
+        Ok(())
     }
 
-    pub fn parse_have(&self) -> Result<usize, &'static str> {
-        if self.kind != MessageKind::Have {
-            return Err("Not a Have message");
+    pub async fn write_ext<W>(&self, writer: &mut W, id: u8, data: &[u8]) -> io::Result<()>
+    where
+        W: AsyncWrite + Unpin,
+    {
+        use Message::*;
+        if let Bitfield { .. } = self {
+            writer.write_u32(data.len() as u32 + 2).await?;
+            writer.write_u8(self.type_id()).await?;
+            writer.write_u8(id).await?;
+            writer.write_all(&data).await?;
         }
-
-        if self.payload.len() != 4 {
-            return Err("Message has incorrect length payload");
-        }
-
-        let index = read_u32(&self.payload) as usize;
-        Ok(index)
+        Ok(())
     }
 
-    pub fn parse_bitfield(self) -> Result<BitField, &'static str> {
-        if self.kind != MessageKind::Bitfield {
-            return Err("Not a bitfield message");
+    pub async fn read<R>(reader: &mut R) -> crate::Result<Option<Self>>
+    where
+        R: AsyncRead + Unpin,
+    {
+        let mut len = reader.read_u32().await?;
+        if len == 0 {
+            // Keep-alive
+            return Ok(None);
         }
+        len -= 1;
 
-        Ok(self.payload.into())
+        let id = reader.read_u8().await?;
+        debug!("got id: {}", id);
+
+        let msg = match id {
+            0 => Self::Choke,
+            1 => Self::Unchoke,
+            2 => Self::Interested,
+            3 => Self::NotInterested,
+            4 => Self::Have {
+                index: reader.read_u32().await?,
+            },
+            5 => Self::Bitfield { len },
+            6 => Self::Request {
+                index: reader.read_u32().await?,
+                begin: reader.read_u32().await?,
+                len: reader.read_u32().await?,
+            },
+            7 => {
+                if len <= 8 {
+                    return Err("Invalid Piece length".into());
+                }
+                Self::Piece {
+                    index: reader.read_u32().await?,
+                    begin: reader.read_u32().await?,
+                    len: len - 8,
+                }
+            }
+            8 => Self::Cancel {
+                index: reader.read_u32().await?,
+                begin: reader.read_u32().await?,
+                len: reader.read_u32().await?,
+            },
+            20 => Self::Extended { len },
+            id => Self::Unknown { id, len },
+        };
+
+        Ok(Some(msg))
     }
 
-    pub fn parse_ext(&self) -> Result<ExtendedMessage<'_>, &'static str> {
-        if self.kind != MessageKind::Extended {
-            trace!("Expected extended msg, got {:?}", self.kind);
-            return Err("Not an Extended message");
+    pub async fn read_discard<R>(&self, rdr: &mut R) -> io::Result<()>
+    where
+        R: AsyncRead + Unpin,
+    {
+        use Message::*;
+        trace!("read_consume");
+        if let Piece { len, .. } | Bitfield { len } | Extended { len } | Unknown { len, .. } = *self
+        {
+            let total = len as usize;
+            trace!("have to ignore {} bytes", total);
+            let mut done = 0;
+            let mut buf = [0u8; 1024];
+            while done < total {
+                let n = (total - done).min(1024);
+                trace!("Reading ignore bytes: {}", n);
+                rdr.read_exact(&mut buf[..n]).await?;
+                done += n;
+            }
         }
+        Ok(())
+    }
 
-        if self.payload.is_empty() {
-            return Err("Extended message can't have empty payload");
+    pub async fn read_piece<R>(
+        &self,
+        request_idx: u32,
+        rdr: &mut R,
+        buf: &mut [u8],
+    ) -> crate::Result<()>
+    where
+        R: AsyncRead + Unpin,
+    {
+        match *self {
+            Message::Piece { index, begin, len } => {
+                if request_idx != index {
+                    return Err("Piece Index mismatch".into());
+                }
+
+                let begin = begin as usize;
+                if begin > buf.len() {
+                    return Err("Begin offset too high".into());
+                }
+
+                let len = len as usize;
+                debug!("Reading piece message of len: {}", len);
+                if begin + len > buf.len() {
+                    return Err("Data too large".into());
+                }
+
+                rdr.read_exact(&mut buf[begin..][..len]).await?;
+                Ok(())
+            }
+            _ => Err("Not a piece".into()),
         }
-
-        ExtendedMessage::new(&self.payload)
-    }
-}
-
-pub async fn read<R>(reader: &mut R) -> crate::Result<Option<Message>>
-where
-    R: AsyncRead + Unpin,
-{
-    use tokio::io::AsyncReadExt;
-    let len = reader.read_u32().await?;
-    if len == 0 {
-        // Keep-alive
-        return Ok(None);
     }
 
-    let b = reader.read_u8().await?;
-    let kind = MessageKind::try_from(b)?;
+    pub async fn read_bitfield<R>(&self, rdr: &mut R, buf: &mut [u8]) -> crate::Result<()>
+    where
+        R: AsyncRead + Unpin,
+    {
+        match *self {
+            Message::Bitfield { len } => {
+                let len = len as usize;
+                debug!("Reading bitfield message of len: {}", len);
+                if len > buf.len() {
+                    return Err("Data too large".into());
+                }
 
-    let payload = if len == 1 {
-        vec![]
-    } else {
-        let mut payload = vec![0; (len - 1) as usize];
-        reader.read_exact(&mut payload).await?;
-        payload
-    };
-
-    Ok(Some(Message { kind, payload }))
-}
-
-pub fn request(index: u32, begin: u32, length: u32) -> Message {
-    let mut payload = vec![0; 12];
-    payload[..4].copy_from_slice(&index.to_be_bytes());
-    payload[4..8].copy_from_slice(&begin.to_be_bytes());
-    payload[8..].copy_from_slice(&length.to_be_bytes());
-    Message::new(MessageKind::Request, payload)
-}
-
-pub fn interested() -> Message {
-    Message::new(MessageKind::Interested, vec![])
-}
-
-pub fn not_interested() -> Message {
-    Message::new(MessageKind::NotInterested, vec![])
-}
-
-pub fn choke() -> Message {
-    Message::new(MessageKind::Choke, vec![])
-}
-
-pub fn unchoke() -> Message {
-    Message::new(MessageKind::Unchoke, vec![])
-}
-
-pub fn have(index: u32) -> Message {
-    Message::new(MessageKind::Have, index.to_be_bytes().to_vec())
-}
-
-pub fn ext_handshake() -> Message {
-    Message {
-        kind: MessageKind::Extended,
-        payload: vec![0],
+                rdr.read_exact(&mut buf[..len]).await?;
+                Ok(())
+            }
+            _ => Err("Not a piece".into()),
+        }
     }
-}
 
-pub fn ext(id: u8, data: Encoder) -> Message {
-    let mut payload = vec![id];
-    data.write(&mut payload).unwrap();
-    Message {
-        kind: MessageKind::Extended,
-        payload,
+    pub async fn read_ext<'a, R>(
+        &self,
+        rdr: &mut R,
+        buf: &'a mut Vec<u8>,
+    ) -> crate::Result<ExtendedMessage<'a>>
+    where
+        R: AsyncRead + Unpin,
+    {
+        match *self {
+            Self::Extended { len } => {
+                let len = len as usize;
+                debug!("Reading ext message of len: {}", len);
+                if len > buf.len() {
+                    return Err("Data too large".into());
+                }
+
+                buf.resize(len as usize, 0);
+                rdr.read_exact(buf).await?;
+                let msg = ExtendedMessage::new(buf)?;
+                Ok(msg)
+            }
+            _ => Err("Not an Extended message".into()),
+        }
     }
 }
 

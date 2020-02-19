@@ -98,7 +98,8 @@ impl MagnetUri {
         client.send_ext_handshake().await?;
 
         let msg = client.read_in_loop().await?;
-        let ext = msg.parse_ext()?;
+        let mut ext_buf = vec![];
+        let ext = msg.read_ext(&mut client.conn, &mut ext_buf).await?;
 
         if !ext.is_handshake() {
             return Err("Expected Extended Handshake".into());
@@ -118,7 +119,7 @@ impl MagnetUri {
             client.send_ext(metadata.id, m.into()).await?;
             let msg = client.read_in_loop().await?;
 
-            let ext = msg.parse_ext()?;
+            let ext = msg.read_ext(&mut client.conn, &mut ext_buf).await?;
             if ext.id != metadata.id {
                 return Err("Expected Metadata message".into());
             }

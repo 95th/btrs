@@ -3,7 +3,7 @@ use crate::bitfield::BitField;
 use crate::client::Client;
 use crate::future::timeout;
 use crate::metainfo::InfoHash;
-use crate::msg::MessageKind;
+use crate::msg::Message;
 use crate::peer::{self, Peer, PeerId};
 use crate::work::{Piece, PieceWork, WorkQueue};
 use ben::Node;
@@ -163,7 +163,10 @@ async fn download(
 
     loop {
         if client.choked {
-            let _ = client.read().await?;
+            if let Some(msg) = client.read().await? {
+                debug!("Ignoring: {:?}", msg);
+                msg.read_discard(&mut client.conn).await?;
+            }
             continue;
         }
 
@@ -214,7 +217,7 @@ async fn download(
 
 async fn attempt_download(client: &mut Client, wrk: &PieceWork) -> crate::Result<Vec<u8>> {
     let mut state = PieceProgress {
-        index: wrk.index,
+        index: wrk.index as u32,
         client,
         buf: vec![0; wrk.len],
         downloaded: 0,
@@ -241,7 +244,7 @@ async fn attempt_download(client: &mut Client, wrk: &PieceWork) -> crate::Result
 }
 
 struct PieceProgress<'a> {
-    index: usize,
+    index: u32,
     client: &'a mut Client,
     buf: Vec<u8>,
     downloaded: usize,
@@ -252,13 +255,14 @@ struct PieceProgress<'a> {
 impl PieceProgress<'_> {
     async fn read_msg(&mut self) -> crate::Result<()> {
         let msg = self.client.read_in_loop().await?;
-        debug!("We got message: {:?}", msg.kind);
+        debug!("We got message: {:?}", msg);
 
-        match msg.kind {
-            MessageKind::Piece => {
-                let n = msg.parse_piece(self.index, &mut self.buf)?;
-                debug!("Yay! we downloaded {} bytes", n);
-                self.downloaded += n;
+        match msg {
+            Message::Piece { len, .. } => {
+                msg.read_piece(self.index, &mut self.client.conn, &mut self.buf)
+                    .await?;
+                debug!("Yay! we downloaded {} bytes", len);
+                self.downloaded += len as usize;
                 self.backlog -= 1;
             }
             _ => {}
