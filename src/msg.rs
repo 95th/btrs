@@ -7,7 +7,7 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 const METADATA_PIECE_LEN: usize = 16384;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Message {
     Choke,
     Unchoke,
@@ -353,6 +353,7 @@ impl From<MetadataMsg> for Encoder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Cursor;
 
     #[test]
     fn extended_new() {
@@ -361,5 +362,23 @@ mod tests {
         assert!(ext.value.is_dict());
         assert_eq!(b"de", ext.value.data());
         assert_eq!(&[1, 2, 3, 4], ext.rest);
+    }
+
+    #[tokio::test]
+    async fn read_piece() {
+        let v = [0, 0, 0, 12, 7, 0, 0, 0, 1, 0, 0, 0, 0, 1, 2, 3];
+        let mut c = Cursor::new(&v);
+        let m = Message::read(&mut c).await.unwrap().unwrap();
+        assert_eq!(
+            Message::Piece {
+                index: 1,
+                begin: 0,
+                len: 3
+            },
+            m
+        );
+        let mut d = [0; 3];
+        m.read_piece(1, &mut c, &mut d).await.unwrap();
+        assert_eq!(&[1, 2, 3], &d[..]);
     }
 }
