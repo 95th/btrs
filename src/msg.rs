@@ -381,4 +381,22 @@ mod tests {
         m.read_piece(1, &mut c, &mut d).await.unwrap();
         assert_eq!(&[1, 2, 3], &d[..]);
     }
+
+    #[tokio::test]
+    async fn read_discard_piece() {
+        let v = [0, 0, 0, 12, 7, 0, 0, 0, 1, 0, 0, 0, 0, 1, 2, 3];
+        let mut c = Cursor::new(&v);
+        let m = Message::read(&mut c).await.unwrap().unwrap();
+        assert_eq!(
+            Message::Piece {
+                index: 1,
+                begin: 0,
+                len: 3
+            },
+            m
+        );
+        m.read_discard(&mut c).await.unwrap();
+        let n = c.read(&mut [0]).await.unwrap();
+        assert_eq!(0, n);
+    }
 }
