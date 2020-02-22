@@ -170,12 +170,12 @@ async fn download(
         }
 
         debug!("Get piece of work; remaining: {}", work.borrow().len());
-        let wrk = match work.borrow_mut().pop_front() {
+        let piece = match work.borrow_mut().pop_front() {
             Some(v) => v,
             None => break,
         };
 
-        debug!("Got piece of work index: {}", wrk.index);
+        debug!("Got piece of work index: {}", piece.index);
 
         // if !client.bitfield.get(wrk.index) {
         //     debug!("This guy doesn't have {} piece", wrk.index);
@@ -183,30 +183,30 @@ async fn download(
         //     continue;
         // }
 
-        debug!("Let's download {:?}", wrk);
+        debug!("Let's download {:?}", piece);
 
-        let buf = match attempt_download(client, &wrk).await {
+        let buf = match attempt_download(client, &piece).await {
             Ok(v) => v,
             Err(e) => {
-                work.borrow_mut().push_back(wrk);
+                work.borrow_mut().push_back(piece);
                 return Err(e);
             }
         };
 
-        debug!("Woohoo! Downloaded {} piece", wrk.index);
+        debug!("Woohoo! Downloaded {} piece", piece.index);
 
-        if !wrk.check_integrity(&buf) {
-            debug!("Dang it! Bad piece: {}", wrk.index);
-            work.borrow_mut().push_back(wrk);
+        if !piece.check_integrity(&buf) {
+            debug!("Dang it! Bad piece: {}", piece.index);
+            work.borrow_mut().push_back(piece);
             continue;
         }
 
-        info!("Woohoo! Downloaded and Verified {} piece", wrk.index);
+        info!("Woohoo! Downloaded and Verified {} piece", piece.index);
 
-        client.send_have(wrk.index).await?;
+        client.send_have(piece.index).await?;
         result_tx
             .send(Piece {
-                index: wrk.index,
+                index: piece.index,
                 buf,
             })
             .await?;

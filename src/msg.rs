@@ -363,40 +363,134 @@ mod tests {
         assert_eq!(b"de", ext.value.data());
         assert_eq!(&[1, 2, 3, 4], ext.rest);
     }
-
     #[tokio::test]
-    async fn read_piece() {
-        let v = [0, 0, 0, 12, 7, 0, 0, 0, 1, 0, 0, 0, 0, 1, 2, 3];
+    async fn read_discard_piece() {
+        let v = [
+            0, 0, 0, 12, 7, 0x01, 0x02, 0x03, 0x04, 0x04, 0x03, 0x02, 0x01, 1, 2, 3,
+        ];
         let mut c = Cursor::new(&v);
         let m = Message::read(&mut c).await.unwrap().unwrap();
         assert_eq!(
             Message::Piece {
-                index: 1,
+                index: 0x01020304,
+                begin: 0x04030201,
+                len: 3
+            },
+            m
+        );
+        m.read_discard(&mut c).await.unwrap();
+        assert_eq!(v.len(), c.position() as usize);
+    }
+
+    #[tokio::test]
+    async fn read_choke() {
+        let v = [0, 0, 0, 1, 0];
+        let mut c = Cursor::new(&v);
+        let m = Message::read(&mut c).await.unwrap().unwrap();
+        assert_eq!(Message::Choke, m);
+        assert_eq!(v.len(), c.position() as usize);
+    }
+
+    #[tokio::test]
+    async fn read_unchoke() {
+        let v = [0, 0, 0, 1, 1];
+        let mut c = Cursor::new(&v);
+        let m = Message::read(&mut c).await.unwrap().unwrap();
+        assert_eq!(Message::Unchoke, m);
+        assert_eq!(v.len(), c.position() as usize);
+    }
+
+    #[tokio::test]
+    async fn read_interested() {
+        let v = [0, 0, 0, 1, 2];
+        let mut c = Cursor::new(&v);
+        let m = Message::read(&mut c).await.unwrap().unwrap();
+        assert_eq!(Message::Interested, m);
+        assert_eq!(v.len(), c.position() as usize);
+    }
+
+    #[tokio::test]
+    async fn read_not_interested() {
+        let v = [0, 0, 0, 1, 3];
+        let mut c = Cursor::new(&v);
+        let m = Message::read(&mut c).await.unwrap().unwrap();
+        assert_eq!(Message::NotInterested, m);
+        assert_eq!(v.len(), c.position() as usize);
+    }
+
+    #[tokio::test]
+    async fn read_have() {
+        let v = [0, 0, 0, 1, 4, 0x01, 0x02, 0x03, 0x04];
+        let mut c = Cursor::new(&v);
+        let m = Message::read(&mut c).await.unwrap().unwrap();
+        assert_eq!(Message::Have { index: 0x01020304 }, m);
+        assert_eq!(v.len(), c.position() as usize);
+    }
+
+    #[tokio::test]
+    async fn read_bitfield() {
+        let v = [0, 0, 0, 5, 5, 0x01, 0x02, 0x03, 0x04];
+        let mut c = Cursor::new(&v);
+        let m = Message::read(&mut c).await.unwrap().unwrap();
+        assert_eq!(Message::Bitfield { len: 4 }, m);
+        let mut buf = [0; 4];
+        m.read_bitfield(&mut c, &mut buf).await.unwrap();
+        assert_eq!([0x01, 0x02, 0x03, 0x04], buf);
+        assert_eq!(v.len(), c.position() as usize);
+    }
+
+    #[tokio::test]
+    async fn read_request() {
+        let v = [
+            0, 0, 0, 12, 6, 0x01, 0x02, 0x03, 0x04, 0x01, 0x02, 0x03, 0x04, 0x01, 0x02, 0x03, 0x04,
+        ];
+        let mut c = Cursor::new(&v);
+        let m = Message::read(&mut c).await.unwrap().unwrap();
+        assert_eq!(
+            Message::Request {
+                index: 0x01020304,
+                begin: 0x01020304,
+                len: 0x01020304,
+            },
+            m
+        );
+        assert_eq!(v.len(), c.position() as usize);
+    }
+
+    #[tokio::test]
+    async fn read_piece() {
+        let v = [0, 0, 0, 12, 7, 0x01, 0x02, 0x03, 0x04, 0, 0, 0, 0, 1, 2, 3];
+        let mut c = Cursor::new(&v);
+        let m = Message::read(&mut c).await.unwrap().unwrap();
+        assert_eq!(
+            Message::Piece {
+                index: 0x01020304,
                 begin: 0,
                 len: 3
             },
             m
         );
         let mut d = [0; 3];
-        m.read_piece(1, &mut c, &mut d).await.unwrap();
+        m.read_piece(0x01020304, &mut c, &mut d).await.unwrap();
         assert_eq!(&[1, 2, 3], &d[..]);
+        assert_eq!(v.len(), c.position() as usize);
     }
 
     #[tokio::test]
-    async fn read_discard_piece() {
-        let v = [0, 0, 0, 12, 7, 0, 0, 0, 1, 0, 0, 0, 0, 1, 2, 3];
+    async fn read_cancel() {
+        let v = [
+            0, 0, 0, 12, 8, 0x01, 0x02, 0x03, 0x04, 0x01, 0x02, 0x03, 0x04, 0x01, 0x02, 0x03, 0x04,
+        ];
         let mut c = Cursor::new(&v);
         let m = Message::read(&mut c).await.unwrap().unwrap();
         assert_eq!(
-            Message::Piece {
-                index: 1,
-                begin: 0,
-                len: 3
+            Message::Cancel {
+                index: 0x01020304,
+                begin: 0x01020304,
+                len: 0x01020304,
             },
             m
         );
-        m.read_discard(&mut c).await.unwrap();
-        let n = c.read(&mut [0]).await.unwrap();
-        assert_eq!(0, n);
+        assert_eq!(v.len(), c.position() as usize);
     }
 }
