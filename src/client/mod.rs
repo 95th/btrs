@@ -5,7 +5,7 @@ use crate::client::handshake::Handshake;
 use crate::metainfo::InfoHash;
 use crate::msg::Message;
 use crate::peer::PeerId;
-use ben::Encoder;
+use ben::Entry;
 use log::debug;
 use log::trace;
 use std::io;
@@ -150,7 +150,7 @@ impl Client {
         Message::Extended { len: 0 }.write(&mut self.conn).await
     }
 
-    pub async fn send_ext(&mut self, id: u8, value: Encoder) -> io::Result<()> {
+    pub async fn send_ext(&mut self, id: u8, value: Entry) -> io::Result<()> {
         trace!("Send extended message");
         let data = value.to_vec();
         let msg = Message::Extended {

@@ -1,4 +1,4 @@
-use ben::{Encoder, Node};
+use ben::{Entry, Node};
 use log::debug;
 use log::trace;
 use std::collections::BTreeMap;
@@ -328,7 +328,7 @@ pub enum MetadataMsg {
     Data(i64, i64),
 }
 
-impl From<MetadataMsg> for Encoder {
+impl From<MetadataMsg> for Entry {
     fn from(msg: MetadataMsg) -> Self {
         let mut dict = BTreeMap::new();
         match msg {
