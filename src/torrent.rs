@@ -15,8 +15,8 @@ use std::collections::VecDeque;
 use tokio::sync::mpsc::Sender;
 
 pub const HASH_LEN: usize = 20;
-const MAX_BACKLOG: usize = 20;
-const MAX_BLOCK_SIZE: usize = 16_384;
+const MAX_BACKLOG: u32 = 20;
+const MAX_BLOCK_SIZE: u32 = 16_384;
 
 #[derive(Debug)]
 pub struct TorrentFile {
@@ -216,9 +216,9 @@ async fn download(
 
 async fn attempt_download(client: &mut Client, wrk: &PieceWork<'_>) -> crate::Result<Vec<u8>> {
     let mut state = PieceProgress {
-        index: wrk.index as u32,
+        index: wrk.index,
         client,
-        buf: vec![0; wrk.len],
+        buf: vec![0; wrk.len as usize],
         downloaded: 0,
         requested: 0,
         backlog: 0,
@@ -246,9 +246,9 @@ struct PieceProgress<'a> {
     index: u32,
     client: &'a mut Client,
     buf: Vec<u8>,
-    downloaded: usize,
-    requested: usize,
-    backlog: usize,
+    downloaded: u32,
+    requested: u32,
+    backlog: u32,
 }
 
 impl PieceProgress<'_> {
@@ -261,7 +261,7 @@ impl PieceProgress<'_> {
                 msg.read_piece(self.index, &mut self.client.conn, &mut self.buf)
                     .await?;
                 debug!("Yay! we downloaded {} bytes", len);
-                self.downloaded += len as usize;
+                self.downloaded += len;
                 self.backlog -= 1;
             }
             _ => {}
@@ -273,8 +273,8 @@ impl PieceProgress<'_> {
 
 pub struct PieceIter<'a> {
     torrent: &'a Torrent,
-    index: usize,
-    count: usize,
+    index: u32,
+    count: u32,
 }
 
 impl PieceIter<'_> {
@@ -282,7 +282,7 @@ impl PieceIter<'_> {
         PieceIter {
             torrent,
             index: 0,
-            count: torrent.piece_hashes.len() / 20,
+            count: (torrent.piece_hashes.len() / 20) as u32,
         }
     }
 }
@@ -295,14 +295,15 @@ impl<'a> Iterator for PieceIter<'a> {
             return None;
         }
 
-        let hash = &self.torrent.piece_hashes[self.index * HASH_LEN..][..HASH_LEN];
+        let hash = &self.torrent.piece_hashes[self.index as usize * HASH_LEN..][..HASH_LEN];
 
-        let start = self.index * self.torrent.piece_len;
-        let end = start + self.torrent.piece_len;
+        let piece_len = self.torrent.piece_len as u32;
+        let start = self.index * piece_len;
+        let end = start + piece_len;
 
         let piece = PieceWork {
             index: self.index,
-            len: end.min(self.torrent.length) - start,
+            len: end.min(piece_len) - start,
             hash,
         };
 

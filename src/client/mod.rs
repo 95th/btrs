@@ -102,17 +102,8 @@ impl Client {
         }
     }
 
-    pub async fn send_request(
-        &mut self,
-        index: usize,
-        begin: usize,
-        length: usize,
-    ) -> io::Result<()> {
-        let msg = Message::Request {
-            index: index as u32,
-            begin: begin as u32,
-            len: length as u32,
-        };
+    pub async fn send_request(&mut self, index: u32, begin: u32, len: u32) -> io::Result<()> {
+        let msg = Message::Request { index, begin, len };
         trace!("Send {:?}", msg);
         msg.write(&mut self.conn).await
     }
@@ -137,11 +128,9 @@ impl Client {
         Message::Unchoke.write(&mut self.conn).await
     }
 
-    pub async fn send_have(&mut self, index: usize) -> io::Result<()> {
+    pub async fn send_have(&mut self, index: u32) -> io::Result<()> {
         trace!("Send have for piece: {}", index);
-        let msg = Message::Have {
-            index: index as u32,
-        };
+        let msg = Message::Have { index };
         msg.write(&mut self.conn).await
     }
 

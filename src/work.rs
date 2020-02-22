@@ -5,8 +5,8 @@ use std::collections::VecDeque;
 pub type WorkQueue<'a> = RefCell<VecDeque<PieceWork<'a>>>;
 
 pub struct PieceWork<'a> {
-    pub index: usize,
-    pub len: usize,
+    pub index: u32,
+    pub len: u32,
     pub hash: &'a [u8],
 }
 
@@ -18,6 +18,6 @@ impl PieceWork<'_> {
 }
 
 pub struct Piece {
-    pub index: usize,
+    pub index: u32,
     pub buf: Vec<u8>,
 }

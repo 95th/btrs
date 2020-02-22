@@ -46,13 +46,14 @@ pub async fn torrent_file() -> btrs::Result<()> {
         let mut bitfield = BitField::new(num_pieces);
 
         while let Some(piece) = result_rx.next().await {
-            if bitfield.get(piece.index) {
+            let idx = piece.index as usize;
+            if bitfield.get(idx) {
                 panic!("Duplicate piece downloaded: {}", piece.index);
             }
-            let start = piece.index * piece_len;
+            let start = idx * piece_len;
             let end = len.min(start + piece_len);
             file[start..end].copy_from_slice(&piece.buf);
-            bitfield.set(piece.index, true);
+            bitfield.set(idx, true);
         }
         file
     });
