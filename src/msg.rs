@@ -110,47 +110,74 @@ impl Message {
     where
         R: AsyncRead + Unpin,
     {
-        let mut len = reader.read_u32().await?;
+        use Message::*;
+        let len = reader.read_u32().await?;
         if len == 0 {
             // Keep-alive
             return Ok(None);
         }
-        len -= 1;
 
         let id = reader.read_u8().await?;
         debug!("got id: {}", id);
 
-        let msg = match id {
-            0 => Self::Choke,
-            1 => Self::Unchoke,
-            2 => Self::Interested,
-            3 => Self::NotInterested,
-            4 => Self::Have {
-                index: reader.read_u32().await?,
-            },
-            5 => Self::Bitfield { len },
-            6 => Self::Request {
-                index: reader.read_u32().await?,
-                begin: reader.read_u32().await?,
-                len: reader.read_u32().await?,
-            },
-            7 => {
-                if len <= 8 {
-                    return Err("Invalid Piece length".into());
+        macro_rules! check {
+            ($condition: expr, $err: expr) => {
+                if $condition {
+                    return Err($err.into());
                 }
-                Self::Piece {
+            };
+        }
+
+        let msg = match id {
+            0 => {
+                check!(len != 1, "Invalid Choke");
+                Choke
+            }
+            1 => {
+                check!(len != 1, "Invalid Unchoke");
+                Unchoke
+            }
+            2 => {
+                check!(len != 1, "Invalid Interested");
+                Interested
+            }
+            3 => {
+                check!(len != 1, "Invalid NotInterested");
+                NotInterested
+            }
+            4 => {
+                check!(len != 5, "Invalid Have");
+                Have {
                     index: reader.read_u32().await?,
-                    begin: reader.read_u32().await?,
-                    len: len - 8,
                 }
             }
-            8 => Self::Cancel {
-                index: reader.read_u32().await?,
-                begin: reader.read_u32().await?,
-                len: reader.read_u32().await?,
-            },
-            20 => Self::Extended { len },
-            id => Self::Unknown { id, len },
+            5 => Bitfield { len: len - 1 },
+            6 => {
+                check!(len != 13, "Invalid Request");
+                Request {
+                    index: reader.read_u32().await?,
+                    begin: reader.read_u32().await?,
+                    len: reader.read_u32().await?,
+                }
+            }
+            7 => {
+                check!(len <= 9, "Invalid Piece");
+                Piece {
+                    index: reader.read_u32().await?,
+                    begin: reader.read_u32().await?,
+                    len: len - 9,
+                }
+            }
+            8 => {
+                check!(len != 13, "Invalid Cancel");
+                Cancel {
+                    index: reader.read_u32().await?,
+                    begin: reader.read_u32().await?,
+                    len: reader.read_u32().await?,
+                }
+            }
+            20 => Extended { len: len - 1 },
+            id => Unknown { id, len: len - 1 },
         };
 
         Ok(Some(msg))
@@ -363,6 +390,7 @@ mod tests {
         assert_eq!(b"de", ext.value.data());
         assert_eq!(&[1, 2, 3, 4], ext.rest);
     }
+
     #[tokio::test]
     async fn read_discard_piece() {
         let v = [
@@ -420,7 +448,7 @@ mod tests {
 
     #[tokio::test]
     async fn read_have() {
-        let v = [0, 0, 0, 1, 4, 0x01, 0x02, 0x03, 0x04];
+        let v = [0, 0, 0, 5, 4, 0x01, 0x02, 0x03, 0x04];
         let mut c = Cursor::new(&v);
         let m = Message::read(&mut c).await.unwrap().unwrap();
         assert_eq!(Message::Have { index: 0x01020304 }, m);
@@ -442,7 +470,7 @@ mod tests {
     #[tokio::test]
     async fn read_request() {
         let v = [
-            0, 0, 0, 12, 6, 0x01, 0x02, 0x03, 0x04, 0x01, 0x02, 0x03, 0x04, 0x01, 0x02, 0x03, 0x04,
+            0, 0, 0, 13, 6, 0x01, 0x02, 0x03, 0x04, 0x01, 0x02, 0x03, 0x04, 0x01, 0x02, 0x03, 0x04,
         ];
         let mut c = Cursor::new(&v);
         let m = Message::read(&mut c).await.unwrap().unwrap();
@@ -479,7 +507,7 @@ mod tests {
     #[tokio::test]
     async fn read_cancel() {
         let v = [
-            0, 0, 0, 12, 8, 0x01, 0x02, 0x03, 0x04, 0x01, 0x02, 0x03, 0x04, 0x01, 0x02, 0x03, 0x04,
+            0, 0, 0, 13, 8, 0x01, 0x02, 0x03, 0x04, 0x01, 0x02, 0x03, 0x04, 0x01, 0x02, 0x03, 0x04,
         ];
         let mut c = Cursor::new(&v);
         let m = Message::read(&mut c).await.unwrap().unwrap();
