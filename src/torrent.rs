@@ -106,7 +106,7 @@ impl Torrent {
 pub struct TorrentWorker<'a> {
     torrent: &'a Torrent,
     pub bits: BitField,
-    pub work: WorkQueue,
+    pub work: WorkQueue<'a>,
     pub connected: Vec<Client>,
 }
 
@@ -155,7 +155,7 @@ impl<'a> TorrentWorker<'a> {
 
 async fn download(
     client: &mut Client,
-    work: &WorkQueue,
+    work: &WorkQueue<'_>,
     mut result_tx: Sender<Piece>,
 ) -> crate::Result<()> {
     client.send_unchoke().await?;
@@ -215,7 +215,7 @@ async fn download(
     Ok(())
 }
 
-async fn attempt_download(client: &mut Client, wrk: &PieceWork) -> crate::Result<Vec<u8>> {
+async fn attempt_download(client: &mut Client, wrk: &PieceWork<'_>) -> crate::Result<Vec<u8>> {
     let mut state = PieceProgress {
         index: wrk.index as u32,
         client,
@@ -288,8 +288,8 @@ impl PieceIter<'_> {
     }
 }
 
-impl Iterator for PieceIter<'_> {
-    type Item = PieceWork;
+impl<'a> Iterator for PieceIter<'a> {
+    type Item = PieceWork<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.index >= self.count {
