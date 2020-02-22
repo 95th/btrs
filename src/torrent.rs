@@ -12,7 +12,6 @@ use futures::StreamExt;
 use log::{debug, info};
 use sha1::Sha1;
 use std::collections::VecDeque;
-use std::convert::TryInto;
 use tokio::sync::mpsc::Sender;
 
 pub const HASH_LEN: usize = 20;
@@ -296,8 +295,7 @@ impl<'a> Iterator for PieceIter<'a> {
             return None;
         }
 
-        let bytes = &self.torrent.piece_hashes[self.index * HASH_LEN..][..HASH_LEN];
-        let hash = bytes.try_into().unwrap();
+        let hash = &self.torrent.piece_hashes[self.index * HASH_LEN..][..HASH_LEN];
 
         let start = self.index * self.torrent.piece_len;
         let end = start + self.torrent.piece_len;
