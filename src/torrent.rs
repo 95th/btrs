@@ -183,7 +183,7 @@ async fn download(
         //     continue;
         // }
 
-        debug!("Let's download {} piece", wrk.index);
+        debug!("Let's download {:?}", wrk);
 
         let buf = match attempt_download(client, &wrk).await {
             Ok(v) => v,
@@ -303,7 +303,7 @@ impl<'a> Iterator for PieceIter<'a> {
 
         let piece = PieceWork {
             index: self.index,
-            len: end.min(piece_len) - start,
+            len: end.min(self.torrent.length as u32) - start,
             hash,
         };
 

@@ -4,6 +4,7 @@ use std::collections::VecDeque;
 
 pub type WorkQueue<'a> = RefCell<VecDeque<PieceWork<'a>>>;
 
+#[derive(Debug)]
 pub struct PieceWork<'a> {
     pub index: u32,
     pub len: u32,
