@@ -521,4 +521,17 @@ mod tests {
         );
         assert_eq!(v.len(), c.position() as usize);
     }
+
+    #[tokio::test]
+    async fn read_extended() {
+        let v = [0, 0, 0, 4, 20, 1, b'd', b'e'];
+        let mut c = Cursor::new(&v);
+        let m = Message::read(&mut c).await.unwrap().unwrap();
+        assert_eq!(Message::Extended { len: 3 }, m);
+        let mut buf = vec![0; 3];
+        let ext = m.read_ext(&mut c, &mut buf).await.unwrap();
+        assert!(!ext.is_handshake());
+        assert!(ext.metadata().is_none());
+        assert_eq!(v.len(), c.position() as usize);
+    }
 }
