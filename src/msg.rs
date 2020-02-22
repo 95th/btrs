@@ -120,7 +120,7 @@ impl Message {
         let id = reader.read_u8().await?;
         debug!("got id: {}", id);
 
-        macro_rules! check {
+        macro_rules! err_if {
             ($condition: expr, $err: expr) => {
                 if $condition {
                     return Err($err.into());
@@ -130,30 +130,30 @@ impl Message {
 
         let msg = match id {
             0 => {
-                check!(len != 1, "Invalid Choke");
+                err_if!(len != 1, "Invalid Choke");
                 Choke
             }
             1 => {
-                check!(len != 1, "Invalid Unchoke");
+                err_if!(len != 1, "Invalid Unchoke");
                 Unchoke
             }
             2 => {
-                check!(len != 1, "Invalid Interested");
+                err_if!(len != 1, "Invalid Interested");
                 Interested
             }
             3 => {
-                check!(len != 1, "Invalid NotInterested");
+                err_if!(len != 1, "Invalid NotInterested");
                 NotInterested
             }
             4 => {
-                check!(len != 5, "Invalid Have");
+                err_if!(len != 5, "Invalid Have");
                 Have {
                     index: reader.read_u32().await?,
                 }
             }
             5 => Bitfield { len: len - 1 },
             6 => {
-                check!(len != 13, "Invalid Request");
+                err_if!(len != 13, "Invalid Request");
                 Request {
                     index: reader.read_u32().await?,
                     begin: reader.read_u32().await?,
@@ -161,7 +161,7 @@ impl Message {
                 }
             }
             7 => {
-                check!(len <= 9, "Invalid Piece");
+                err_if!(len <= 9, "Invalid Piece");
                 Piece {
                     index: reader.read_u32().await?,
                     begin: reader.read_u32().await?,
@@ -169,7 +169,7 @@ impl Message {
                 }
             }
             8 => {
-                check!(len != 13, "Invalid Cancel");
+                err_if!(len != 13, "Invalid Cancel");
                 Cancel {
                     index: reader.read_u32().await?,
                     begin: reader.read_u32().await?,
