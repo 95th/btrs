@@ -168,12 +168,11 @@ async fn download(
     client.send_interested().await?;
 
     while client.choked {
-        trace!("Choked, waiting for unchoke");
+        trace!("We're choked. Waiting for unchoke");
         if let Some(msg) = client.read().await? {
             debug!("Ignoring: {:?}", msg);
             msg.read_discard(&mut client.conn).await?;
         }
-        continue;
     }
 
     let mut dl = VecDeque::new();
@@ -206,7 +205,7 @@ async fn attempt_download<'a>(
             }
         }
 
-        trace!("Pending states: {}", dl.len());
+        trace!("Pending pieces: {}", dl.len());
         if dl.is_empty() && backlog == 0 {
             break;
         }
