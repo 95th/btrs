@@ -178,8 +178,7 @@ async fn download(
 
     let mut dl = VecDeque::new();
     if let Err(e) = attempt_download(client, &work, result_tx, &mut dl).await {
-        let w = &mut work.borrow_mut();
-        w.extend(dl.into_iter().map(|p| p.piece));
+        work.borrow_mut().extend(dl.into_iter().map(|p| p.piece));
         return Err(e);
     };
 
