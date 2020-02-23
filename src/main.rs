@@ -5,23 +5,36 @@ use btrs::torrent::TorrentFile;
 use btrs::work::Piece;
 use futures::StreamExt;
 use log::debug;
-use std::env;
 use tokio::fs;
 use tokio::sync::mpsc;
 
+use clap::{App, Arg};
+
 #[tokio::main]
 async fn main() -> btrs::Result<()> {
+    let m = App::new("BT rust")
+        .version("0.1")
+        .author("95th")
+        .about("Bittorrent client in Rust")
+        .arg(
+            Arg::with_name("torrent/magnet")
+                .help("The torrent file path or Magnet link")
+                .required(true)
+                .index(1),
+        )
+        .get_matches();
+
+    let input = m.value_of("torrent/magnet").unwrap();
     env_logger::init();
-    if let Some(f) = env::args().skip(1).next() {
-        torrent_file(f).await
+    if input.starts_with("magnet") {
+        magnet(input).await
     } else {
-        println!("Please provide a torrent file");
-        Ok(())
+        torrent_file(input).await
     }
 }
 
-pub async fn magnet() -> btrs::Result<()> {
-    let magnet = MagnetUri::parse_lenient("magnet:?xt=urn:btih:4GCTIH7RBHVFS6YKBYQAGGW4QJ26JREV&tr=http%3A%2F%2Fnyaa.tracker.wf%3A7777%2Fannounce&tr=http%3A%2F%2Fanidex.moe%3A6969%2Fannounce&tr=udp%3A%2F%2Ftracker.uw0.xyz%3A6969&tr=http%3A%2F%2Ftracker.anirena.com%3A80%2Fannounce&tr=udp%3A%2F%2Fopen.stealth.si%3A80%2Fannounce&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=udp%3A%2F%2Ftracker.coppersurfer.tk%3A6969%2Fannounce&tr=udp%3A%2F%2Fexodus.desync.com%3A6969%2Fannounce")?;
+pub async fn magnet(uri: &str) -> btrs::Result<()> {
+    let magnet = MagnetUri::parse_lenient(uri)?;
     let peer_id = peer::generate_peer_id();
     debug!("Our peer_id: {:?}", peer_id);
 
@@ -29,7 +42,7 @@ pub async fn magnet() -> btrs::Result<()> {
     todo!()
 }
 
-pub async fn torrent_file(file: String) -> btrs::Result<()> {
+pub async fn torrent_file(file: &str) -> btrs::Result<()> {
     let buf = fs::read(file).await?;
     let torrent_file = TorrentFile::parse(buf).ok_or("Unable to parse torrent file")?;
     let torrent = torrent_file.into_torrent().await?;
