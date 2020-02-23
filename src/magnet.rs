@@ -2,7 +2,7 @@ use crate::announce::announce;
 use crate::client::Client;
 use crate::future::timeout;
 use crate::metainfo::InfoHash;
-use crate::msg::MetadataMsg;
+use crate::msg::{Message, MetadataMsg};
 use crate::peer::{Peer, PeerId};
 use crate::torrent::Torrent;
 use futures::stream::FuturesUnordered;
@@ -97,9 +97,16 @@ impl MagnetUri {
         client.handshake(&self.info_hash, peer_id).await?;
         client.send_ext_handshake().await?;
 
-        let msg = client.read_in_loop().await?;
         let mut ext_buf = vec![];
-        let ext = msg.read_ext(&mut client.conn, &mut ext_buf).await?;
+        let ext = loop {
+            let msg = client.read_in_loop().await?;
+            if let Message::Extended { .. } = msg {
+                let ext = msg.read_ext(&mut client.conn, &mut ext_buf).await?;
+                break ext;
+            } else {
+                msg.read_discard(&mut client.conn).await?;
+            }
+        };
 
         if !ext.is_handshake() {
             return Err("Expected Extended Handshake".into());
@@ -119,15 +126,19 @@ impl MagnetUri {
             client.send_ext(metadata.id, m.into()).await?;
             let msg = client.read_in_loop().await?;
 
-            let ext = msg.read_ext(&mut client.conn, &mut ext_buf).await?;
-            if ext.id != metadata.id {
-                return Err("Expected Metadata message".into());
-            }
+            if let Message::Extended { .. } = msg {
+                let ext = msg.read_ext(&mut client.conn, &mut ext_buf).await?;
+                if ext.id != metadata.id {
+                    return Err("Expected Metadata message".into());
+                }
 
-            let data = ext.data(piece)?;
-            buf.extend(data);
-            remaining -= data.len();
-            piece += 1;
+                let data = ext.data(piece)?;
+                buf.extend(data);
+                remaining -= data.len();
+                piece += 1;
+            } else {
+                msg.read_discard(&mut client.conn).await?;
+            }
         }
 
         Ok(buf)

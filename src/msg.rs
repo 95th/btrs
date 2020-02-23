@@ -260,10 +260,7 @@ impl Message {
             Self::Extended { len } => {
                 let len = len as usize;
                 debug!("Reading ext message of len: {}", len);
-                if len > buf.len() {
-                    return Err("Data too large".into());
-                }
-
+                buf.clear();
                 buf.resize(len as usize, 0);
                 rdr.read_exact(buf).await?;
                 let msg = ExtendedMessage::new(buf)?;
