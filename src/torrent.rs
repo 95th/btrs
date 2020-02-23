@@ -177,6 +177,7 @@ async fn download(
 
     let mut dl = VecDeque::new();
     if let Err(e) = attempt_download(client, &work, result_tx, &mut dl).await {
+        // In case of failure, put the pending pieces back into the queue
         work.borrow_mut().extend(dl.into_iter().map(|p| p.piece));
         return Err(e);
     };
