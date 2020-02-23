@@ -205,21 +205,12 @@ impl Message {
         Ok(())
     }
 
-    pub async fn read_piece<R>(
-        &self,
-        request_idx: u32,
-        rdr: &mut R,
-        buf: &mut [u8],
-    ) -> crate::Result<()>
+    pub async fn read_piece<R>(&self, rdr: &mut R, buf: &mut [u8]) -> crate::Result<()>
     where
         R: AsyncRead + Unpin,
     {
         match *self {
-            Message::Piece { index, begin, len } => {
-                if request_idx != index {
-                    return Err("Piece Index mismatch".into());
-                }
-
+            Message::Piece { begin, len, .. } => {
                 let begin = begin as usize;
                 if begin > buf.len() {
                     return Err("Begin offset too high".into());
@@ -499,7 +490,7 @@ mod tests {
             m
         );
         let mut d = [0; 3];
-        m.read_piece(0x01020304, &mut c, &mut d).await.unwrap();
+        m.read_piece(&mut c, &mut d).await.unwrap();
         assert_eq!(&[1, 2, 3], &d[..]);
         assert_eq!(v.len(), c.position() as usize);
     }

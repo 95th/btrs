@@ -9,13 +9,13 @@ use crate::work::{Piece, PieceWork, WorkQueue};
 use ben::Node;
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
-use log::{debug, info};
+use log::{debug, error, info, trace};
 use sha1::Sha1;
 use std::collections::VecDeque;
 use tokio::sync::mpsc::Sender;
 
 pub const HASH_LEN: usize = 20;
-const MAX_BACKLOG: u32 = 20;
+const MAX_BACKLOG: u32 = 50;
 const MAX_BLOCK_SIZE: u32 = 16_384;
 
 #[derive(Debug)]
@@ -152,123 +152,119 @@ impl<'a> TorrentWorker<'a> {
     }
 }
 
+struct PieceProgress<'a> {
+    piece: PieceWork<'a>,
+    buf: Vec<u8>,
+    downloaded: u32,
+    requested: u32,
+}
+
 async fn download(
     client: &mut Client,
     work: &WorkQueue<'_>,
-    mut result_tx: Sender<Piece>,
+    result_tx: Sender<Piece>,
 ) -> crate::Result<()> {
     client.send_unchoke().await?;
     client.send_interested().await?;
 
-    loop {
-        if client.choked {
-            if let Some(msg) = client.read().await? {
-                debug!("Ignoring: {:?}", msg);
-                msg.read_discard(&mut client.conn).await?;
-            }
-            continue;
+    while client.choked {
+        trace!("Choked, waiting for unchoke");
+        if let Some(msg) = client.read().await? {
+            debug!("Ignoring: {:?}", msg);
+            msg.read_discard(&mut client.conn).await?;
         }
-
-        debug!("Get piece of work; remaining: {}", work.borrow().len());
-        let piece = match work.borrow_mut().pop_front() {
-            Some(v) => v,
-            None => break,
-        };
-
-        debug!("Got piece of work index: {}", piece.index);
-
-        // if !client.bitfield.get(wrk.index) {
-        //     debug!("This guy doesn't have {} piece", wrk.index);
-        //     work.borrow_mut().push_back(wrk);
-        //     continue;
-        // }
-
-        debug!("Let's download {:?}", piece);
-
-        let buf = match attempt_download(client, &piece).await {
-            Ok(v) => v,
-            Err(e) => {
-                work.borrow_mut().push_back(piece);
-                return Err(e);
-            }
-        };
-
-        debug!("Woohoo! Downloaded {} piece", piece.index);
-
-        if !piece.check_integrity(&buf) {
-            debug!("Dang it! Bad piece: {}", piece.index);
-            work.borrow_mut().push_back(piece);
-            continue;
-        }
-
-        info!("Woohoo! Downloaded and Verified {} piece", piece.index);
-
-        client.send_have(piece.index).await?;
-        result_tx
-            .send(Piece {
-                index: piece.index,
-                buf,
-            })
-            .await?;
+        continue;
     }
+
+    let mut dl = VecDeque::new();
+    if let Err(e) = attempt_download(client, &work, result_tx, &mut dl).await {
+        let w = &mut work.borrow_mut();
+        w.extend(dl.into_iter().map(|p| p.piece));
+        return Err(e);
+    };
+
     Ok(())
 }
 
-async fn attempt_download(client: &mut Client, wrk: &PieceWork<'_>) -> crate::Result<Vec<u8>> {
-    let mut state = PieceProgress {
-        index: wrk.index,
-        client,
-        buf: vec![0; wrk.len as usize],
-        downloaded: 0,
-        requested: 0,
-        backlog: 0,
-    };
-    while state.downloaded < wrk.len {
-        if !state.client.choked {
-            while state.backlog < MAX_BACKLOG && state.requested < wrk.len {
-                let block_size = MAX_BLOCK_SIZE.min(wrk.len - state.requested);
-
-                let request = state
-                    .client
-                    .send_request(wrk.index, state.requested, block_size);
-                timeout(request, 5).await?;
-                state.backlog += 1;
-                state.requested += block_size;
+async fn attempt_download<'a>(
+    client: &mut Client,
+    work: &WorkQueue<'a>,
+    mut result_tx: Sender<Piece>,
+    dl: &mut VecDeque<PieceProgress<'a>>,
+) -> crate::Result<()> {
+    trace!("attempt_download");
+    let mut backlog = 0;
+    loop {
+        if backlog < MAX_BACKLOG {
+            if let Some(piece) = work.borrow_mut().pop_front() {
+                let buf = vec![0; piece.len as usize];
+                dl.push_back(PieceProgress {
+                    piece,
+                    buf,
+                    downloaded: 0,
+                    requested: 0,
+                });
             }
         }
-        timeout(state.read_msg(), 30).await?;
-    }
-    debug!("Piece downloaded: {}", wrk.index);
-    Ok(state.buf)
-}
 
-struct PieceProgress<'a> {
-    index: u32,
-    client: &'a mut Client,
-    buf: Vec<u8>,
-    downloaded: u32,
-    requested: u32,
-    backlog: u32,
-}
-
-impl PieceProgress<'_> {
-    async fn read_msg(&mut self) -> crate::Result<()> {
-        let msg = self.client.read_in_loop().await?;
-        debug!("We got message: {:?}", msg);
-
-        match msg {
-            Message::Piece { len, .. } => {
-                msg.read_piece(self.index, &mut self.client.conn, &mut self.buf)
-                    .await?;
-                debug!("Yay! we downloaded {} bytes", len);
-                self.downloaded += len;
-                self.backlog -= 1;
-            }
-            _ => {}
+        trace!("Pending states: {}", dl.len());
+        if dl.is_empty() && backlog == 0 {
+            break;
         }
 
-        Ok(())
+        if backlog < MAX_BACKLOG && !client.choked {
+            for s in dl.iter_mut() {
+                while backlog < MAX_BACKLOG && s.requested < s.piece.len {
+                    let block_size = MAX_BLOCK_SIZE.min(s.piece.len - s.requested);
+                    let request = client.send_request(s.piece.index, s.requested, block_size);
+                    timeout(request, 5).await?;
+
+                    backlog += 1;
+                    s.requested += block_size;
+                }
+            }
+        }
+
+        trace!("Current backlog: {}", backlog);
+        let msg = timeout(client.read_in_loop(), 30).await?;
+        if let Message::Piece { index, len, .. } = msg {
+            if let Some(i) = dl.iter().position(|s| s.piece.index == index) {
+                let mut state = dl.swap_remove_back(i).unwrap();
+                msg.read_piece(&mut client.conn, &mut state.buf).await?;
+                state.downloaded += len;
+                backlog -= 1;
+                trace!(
+                    "current state index {}: {}/{}",
+                    index,
+                    state.downloaded,
+                    state.piece.len
+                );
+                if state.downloaded < state.piece.len {
+                    // Not done yet
+                    dl.push_back(state);
+                } else {
+                    trace!("Piece downloaded: {}", state.piece.index);
+                    if !state.piece.check_integrity(&state.buf) {
+                        error!("Bad piece: Hash mismatch for {}", state.piece.index);
+                        work.borrow_mut().push_back(state.piece);
+                        continue;
+                    }
+
+                    info!("Downloaded and Verified {} piece", state.piece.index);
+
+                    client.send_have(state.piece.index).await?;
+                    let piece = Piece {
+                        index: state.piece.index,
+                        buf: state.buf,
+                    };
+                    result_tx.send(piece).await?;
+                }
+            } else {
+                return Err("Received a piece that was not requested".into());
+            }
+        }
     }
+    Ok(())
 }
 
 pub struct PieceIter<'a> {
