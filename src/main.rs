@@ -5,13 +5,19 @@ use btrs::torrent::TorrentFile;
 use btrs::work::Piece;
 use futures::StreamExt;
 use log::debug;
+use std::env;
 use tokio::fs;
 use tokio::sync::mpsc;
 
 #[tokio::main]
 async fn main() -> btrs::Result<()> {
     env_logger::init();
-    torrent_file().await
+    if let Some(f) = env::args().skip(1).next() {
+        torrent_file(f).await
+    } else {
+        println!("Please provide a torrent file");
+        Ok(())
+    }
 }
 
 pub async fn magnet() -> btrs::Result<()> {
@@ -23,8 +29,8 @@ pub async fn magnet() -> btrs::Result<()> {
     todo!()
 }
 
-pub async fn torrent_file() -> btrs::Result<()> {
-    let buf = fs::read("t.torrent").await?;
+pub async fn torrent_file(file: String) -> btrs::Result<()> {
+    let buf = fs::read(file).await?;
     let torrent_file = TorrentFile::parse(buf).ok_or("Unable to parse torrent file")?;
     let torrent = torrent_file.into_torrent().await?;
 
