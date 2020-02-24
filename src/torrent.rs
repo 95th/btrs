@@ -16,6 +16,7 @@ use tokio::sync::mpsc::Sender;
 
 pub const HASH_LEN: usize = 20;
 const MAX_BACKLOG: u32 = 50;
+const MIN_BACKLOG: u32 = 5;
 const MAX_BLOCK_SIZE: u32 = 16_384;
 
 #[derive(Debug)]
@@ -166,6 +167,7 @@ async fn download(
 ) -> crate::Result<()> {
     client.send_unchoke().await?;
     client.send_interested().await?;
+    client.flush().await?;
 
     while client.choked {
         trace!("We're choked. Waiting for unchoke");
@@ -211,17 +213,18 @@ async fn attempt_download<'a>(
             break;
         }
 
-        if backlog < MAX_BACKLOG && !client.choked {
+        if backlog < MIN_BACKLOG && !client.choked {
             for s in dl.iter_mut() {
                 while backlog < MAX_BACKLOG && s.requested < s.piece.len {
                     let block_size = MAX_BLOCK_SIZE.min(s.piece.len - s.requested);
                     let request = client.send_request(s.piece.index, s.requested, block_size);
-                    timeout(request, 5).await?;
+                    request.await?;
 
                     backlog += 1;
                     s.requested += block_size;
                 }
             }
+            client.flush().await?;
         }
 
         trace!("Current backlog: {}", backlog);

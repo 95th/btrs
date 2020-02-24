@@ -10,7 +10,7 @@ use log::debug;
 use log::trace;
 use std::io;
 use std::net::SocketAddr;
-use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, BufStream};
 use tokio::net::TcpStream;
 
 pub trait Connection: AsyncRead + AsyncWrite + Unpin {}
@@ -18,7 +18,7 @@ pub trait Connection: AsyncRead + AsyncWrite + Unpin {}
 impl<T> Connection for T where T: AsyncRead + AsyncWrite + Unpin {}
 
 pub struct Client {
-    pub conn: Box<dyn Connection>,
+    pub conn: BufStream<Box<dyn Connection>>,
     pub choked: bool,
     pub bitfield: BitField,
 }
@@ -32,7 +32,7 @@ impl Client {
 
     pub fn new(conn: Box<dyn Connection>) -> Self {
         Self {
-            conn,
+            conn: BufStream::new(conn),
             choked: true,
             bitfield: BitField::default(),
         }
@@ -100,6 +100,11 @@ impl Client {
             }
             msg => Err(format!("Invalid message: Expected Bitfield, got: {:?}", msg).into()),
         }
+    }
+
+    pub async fn flush(&mut self) -> io::Result<()> {
+        trace!("flush");
+        self.conn.flush().await
     }
 
     pub async fn send_request(&mut self, index: u32, begin: u32, len: u32) -> io::Result<()> {

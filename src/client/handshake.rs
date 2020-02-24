@@ -58,7 +58,7 @@ where
         self.conn.write_all(&self.extensions).await?;
         self.conn.write_all(self.info_hash.as_ref()).await?;
         self.conn.write_all(&self.peer_id[..]).await?;
-        Ok(())
+        self.conn.flush().await
     }
 
     pub async fn read(&mut self) -> crate::Result<HandshakeResult> {

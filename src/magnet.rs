@@ -96,6 +96,7 @@ impl MagnetUri {
         let mut client = Client::new_tcp(peer.addr).await?;
         client.handshake(&self.info_hash, peer_id).await?;
         client.send_ext_handshake().await?;
+        client.flush().await?;
 
         let mut ext_buf = vec![];
         let ext = loop {
@@ -124,6 +125,7 @@ impl MagnetUri {
         while remaining > 0 {
             let m = MetadataMsg::Request(piece);
             client.send_ext(metadata.id, m.into()).await?;
+            client.flush().await?;
             let msg = client.read_in_loop().await?;
 
             if let Message::Extended { .. } = msg {
