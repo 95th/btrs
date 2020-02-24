@@ -9,6 +9,7 @@ use futures::stream::FuturesUnordered;
 use futures::stream::StreamExt;
 use log::debug;
 use std::net::SocketAddr;
+use tokio::io::AsyncWriteExt;
 
 #[derive(Debug, Default)]
 pub struct MagnetUri {
@@ -102,10 +103,10 @@ impl MagnetUri {
         let ext = loop {
             let msg = client.read_in_loop().await?;
             if let Message::Extended { .. } = msg {
-                let ext = msg.read_ext(&mut client.conn, &mut ext_buf).await?;
+                let ext = msg.read_ext(&mut client, &mut ext_buf).await?;
                 break ext;
             } else {
-                msg.read_discard(&mut client.conn).await?;
+                msg.read_discard(&mut client).await?;
             }
         };
 
@@ -129,7 +130,7 @@ impl MagnetUri {
             let msg = client.read_in_loop().await?;
 
             if let Message::Extended { .. } = msg {
-                let ext = msg.read_ext(&mut client.conn, &mut ext_buf).await?;
+                let ext = msg.read_ext(&mut client, &mut ext_buf).await?;
                 if ext.id != metadata.id {
                     return Err("Expected Metadata message".into());
                 }
@@ -139,7 +140,7 @@ impl MagnetUri {
                 remaining -= data.len();
                 piece += 1;
             } else {
-                msg.read_discard(&mut client.conn).await?;
+                msg.read_discard(&mut client).await?;
             }
         }
 

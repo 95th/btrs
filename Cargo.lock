@@ -61,6 +61,7 @@ name = "btrs"
 version = "0.1.0"
 dependencies = [
  "ben 0.1.7 (git+https://github.com/95th/ben)",
+ "bytes 0.5.4 (registry+https://github.com/rust-lang/crates.io-index)",
  "clap 2.33.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "data-encoding 2.1.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "env_logger 0.7.1 (registry+https://github.com/rust-lang/crates.io-index)",

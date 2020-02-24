@@ -12,6 +12,7 @@ use futures::StreamExt;
 use log::{debug, error, info, trace};
 use sha1::Sha1;
 use std::collections::VecDeque;
+use tokio::io::AsyncWriteExt;
 use tokio::sync::mpsc::Sender;
 
 pub const HASH_LEN: usize = 20;
@@ -173,7 +174,7 @@ async fn download(
         trace!("We're choked. Waiting for unchoke");
         if let Some(msg) = client.read().await? {
             debug!("Ignoring: {:?}", msg);
-            msg.read_discard(&mut client.conn).await?;
+            msg.read_discard(client).await?;
         }
     }
 
@@ -232,7 +233,7 @@ async fn attempt_download<'a>(
         if let Message::Piece { index, len, .. } = msg {
             if let Some(i) = dl.iter().position(|s| s.piece.index == index) {
                 let mut state = dl.swap_remove_back(i).unwrap();
-                msg.read_piece(&mut client.conn, &mut state.buf).await?;
+                msg.read_piece(client, &mut state.buf).await?;
                 state.downloaded += len;
                 backlog -= 1;
                 trace!(
