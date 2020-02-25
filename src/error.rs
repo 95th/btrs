@@ -2,10 +2,15 @@ use std::borrow::Cow;
 use std::fmt;
 use std::io;
 use tokio::sync::mpsc::error::SendError;
+use tokio::time::Elapsed;
 
 #[derive(Debug)]
-pub struct Error {
-    err: Cow<'static, str>,
+pub enum Error {
+    Generic(Cow<'static, str>),
+    Io(io::Error),
+    Bencode(ben::Error),
+    Reqwest(reqwest::Error),
+    Timer(Elapsed),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -14,58 +19,48 @@ impl std::error::Error for Error {}
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Error: {}", self.err)
+        write!(f, "{:?}", self)
     }
 }
 
 impl From<reqwest::Error> for Error {
     fn from(e: reqwest::Error) -> Self {
-        Self {
-            err: e.to_string().into(),
-        }
+        Self::Reqwest(e)
     }
 }
 
-impl From<tokio::time::Elapsed> for Error {
-    fn from(e: tokio::time::Elapsed) -> Self {
-        Self {
-            err: e.to_string().into(),
-        }
+impl From<Elapsed> for Error {
+    fn from(e: Elapsed) -> Self {
+        Self::Timer(e)
     }
 }
 
 impl From<io::Error> for Error {
     fn from(e: io::Error) -> Self {
-        Self {
-            err: e.to_string().into(),
-        }
+        Self::Io(e)
     }
 }
 
 impl From<&'static str> for Error {
     fn from(err: &'static str) -> Self {
-        Self { err: err.into() }
+        Self::Generic(err.into())
     }
 }
 
 impl From<String> for Error {
     fn from(err: String) -> Self {
-        Self { err: err.into() }
+        Self::Generic(err.into())
     }
 }
 
 impl<T> From<SendError<T>> for Error {
     fn from(_: SendError<T>) -> Self {
-        Self {
-            err: "Send error occured".into(),
-        }
+        Self::Generic("Send error occured".into())
     }
 }
 
 impl From<ben::Error> for Error {
     fn from(e: ben::Error) -> Self {
-        Self {
-            err: e.to_string().into(),
-        }
+        Self::Bencode(e)
     }
 }
