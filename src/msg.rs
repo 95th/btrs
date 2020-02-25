@@ -188,7 +188,7 @@ impl Message {
         R: AsyncRead + Unpin,
     {
         use Message::*;
-        trace!("read_consume");
+        trace!("read_discard: {:?}", self);
         if let Piece { len, .. } | Bitfield { len } | Extended { len } | Unknown { len, .. } = *self
         {
             let total = len as usize;
