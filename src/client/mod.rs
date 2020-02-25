@@ -17,8 +17,13 @@ use std::task::{Context, Poll};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, BufStream};
 use tokio::net::TcpStream;
 
+pub trait AsyncStream: AsyncRead + AsyncWrite + Unpin {}
+
+impl<T: AsyncRead + AsyncWrite + Unpin> AsyncStream for T {}
+
 pub enum Connection {
     Tcp(BufStream<TcpStream>),
+    Other(Box<dyn AsyncStream>),
 }
 
 pub struct Client {
@@ -31,6 +36,7 @@ impl AsyncRead for Client {
     unsafe fn prepare_uninitialized_buffer(&self, buf: &mut [MaybeUninit<u8>]) -> bool {
         match &self.conn {
             Connection::Tcp(c) => c.prepare_uninitialized_buffer(buf),
+            Connection::Other(c) => c.prepare_uninitialized_buffer(buf),
         }
     }
 
@@ -41,6 +47,7 @@ impl AsyncRead for Client {
     ) -> Poll<io::Result<usize>> {
         match &mut self.conn {
             Connection::Tcp(c) => Pin::new(c).poll_read(cx, buf),
+            Connection::Other(c) => Pin::new(c).poll_read(cx, buf),
         }
     }
 
@@ -54,6 +61,7 @@ impl AsyncRead for Client {
     {
         match &mut self.conn {
             Connection::Tcp(c) => Pin::new(c).poll_read_buf(cx, buf),
+            Connection::Other(c) => Pin::new(c).poll_read_buf(cx, buf),
         }
     }
 }
@@ -66,12 +74,14 @@ impl AsyncWrite for Client {
     ) -> Poll<Result<usize, io::Error>> {
         match &mut self.conn {
             Connection::Tcp(c) => Pin::new(c).poll_write(cx, buf),
+            Connection::Other(c) => Pin::new(c).poll_write(cx, buf),
         }
     }
 
     fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
         match &mut self.conn {
             Connection::Tcp(c) => Pin::new(c).poll_flush(cx),
+            Connection::Other(c) => Pin::new(c).poll_flush(cx),
         }
     }
 
@@ -81,6 +91,7 @@ impl AsyncWrite for Client {
     ) -> Poll<Result<(), io::Error>> {
         match &mut self.conn {
             Connection::Tcp(c) => Pin::new(c).poll_shutdown(cx),
+            Connection::Other(c) => Pin::new(c).poll_shutdown(cx),
         }
     }
 
@@ -94,6 +105,7 @@ impl AsyncWrite for Client {
     {
         match &mut self.conn {
             Connection::Tcp(c) => Pin::new(c).poll_write_buf(cx, buf),
+            Connection::Other(c) => Pin::new(c).poll_write_buf(cx, buf),
         }
     }
 }

@@ -1,9 +1,10 @@
+use crate::client::AsyncStream;
 use crate::metainfo::InfoHash;
 use crate::peer::{Extensions, PeerId};
 use log::trace;
 use std::convert::TryInto;
 use std::io;
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 const PROTOCOL: &[u8] = b"\x13BitTorrent protocol";
 
@@ -23,7 +24,7 @@ pub struct HandshakeResult {
 
 impl<'a, C> Handshake<'a, C>
 where
-    C: AsyncRead + AsyncWrite + Unpin,
+    C: AsyncStream,
 {
     pub fn new(conn: &'a mut C, info_hash: &'a InfoHash, peer_id: &'a PeerId) -> Self {
         Self::with_extensions(conn, info_hash, peer_id, Default::default())

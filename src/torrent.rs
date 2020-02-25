@@ -16,8 +16,8 @@ use tokio::io::AsyncWriteExt;
 use tokio::sync::mpsc::Sender;
 
 pub const HASH_LEN: usize = 20;
-const MAX_BACKLOG: u32 = 50;
-const MIN_BACKLOG: u32 = 5;
+const BACKLOG_HIGH_WATERMARK: u32 = 50;
+const BACK_LOW_WATERMARK: u32 = 5;
 const MAX_BLOCK_SIZE: u32 = 16_384;
 
 #[derive(Debug)]
@@ -197,7 +197,7 @@ async fn attempt_download<'a>(
     trace!("attempt_download");
     let mut backlog = 0;
     loop {
-        if backlog < MAX_BACKLOG {
+        if backlog < BACKLOG_HIGH_WATERMARK {
             if let Some(piece) = work.borrow_mut().pop_front() {
                 let buf = vec![0; piece.len as usize];
                 dl.push_back(PieceProgress {
@@ -214,18 +214,18 @@ async fn attempt_download<'a>(
             break;
         }
 
-        if backlog < MIN_BACKLOG && !client.choked {
+        if backlog < BACK_LOW_WATERMARK && !client.choked {
             for s in dl.iter_mut() {
-                while backlog < MAX_BACKLOG && s.requested < s.piece.len {
+                while backlog < BACKLOG_HIGH_WATERMARK && s.requested < s.piece.len {
                     let block_size = MAX_BLOCK_SIZE.min(s.piece.len - s.requested);
                     let request = client.send_request(s.piece.index, s.requested, block_size);
-                    request.await?;
+                    timeout(request, 5).await?;
 
                     backlog += 1;
                     s.requested += block_size;
                 }
             }
-            client.flush().await?;
+            timeout(client.flush(), 5).await?;
         }
 
         trace!("Current backlog: {}", backlog);
