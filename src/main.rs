@@ -55,7 +55,7 @@ pub async fn torrent_file(file: &str) -> btrs::Result<()> {
 
     let num_pieces = worker.work.borrow().len();
 
-    let (result_tx, mut result_rx) = mpsc::channel::<Piece>(200);
+    let (piece_tx, mut piece_rx) = mpsc::channel::<Piece>(200);
 
     let len = torrent.length;
     let piece_len = torrent.piece_len;
@@ -64,7 +64,7 @@ pub async fn torrent_file(file: &str) -> btrs::Result<()> {
         let mut file = vec![0; len];
         let mut bitfield = BitField::new(num_pieces);
 
-        while let Some(piece) = result_rx.next().await {
+        while let Some(piece) = piece_rx.next().await {
             let idx = piece.index as usize;
             if bitfield.get(idx) {
                 panic!("Duplicate piece downloaded: {}", piece.index);
@@ -77,7 +77,7 @@ pub async fn torrent_file(file: &str) -> btrs::Result<()> {
         file
     });
 
-    worker.run_worker(result_tx).await;
+    worker.run_worker(piece_tx).await;
     let file = handle.await.unwrap();
     println!("File downloaded; size: {}", file.len());
     Ok(())
