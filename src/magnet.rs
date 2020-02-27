@@ -97,16 +97,16 @@ impl MagnetUri {
         let mut client = Client::new_tcp(peer.addr).await?;
         client.handshake(&self.info_hash, peer_id).await?;
         client.send_ext_handshake().await?;
-        client.flush().await?;
+        client.conn.flush().await?;
 
         let mut ext_buf = vec![];
         let ext = loop {
             let msg = client.read_in_loop().await?;
             if let Message::Extended { .. } = msg {
-                let ext = msg.read_ext(&mut client, &mut ext_buf).await?;
+                let ext = msg.read_ext(&mut client.conn, &mut ext_buf).await?;
                 break ext;
             } else {
-                msg.read_discard(&mut client).await?;
+                msg.read_discard(&mut client.conn).await?;
             }
         };
 
@@ -126,11 +126,11 @@ impl MagnetUri {
         while remaining > 0 {
             let m = MetadataMsg::Request(piece);
             client.send_ext(metadata.id, m.into()).await?;
-            client.flush().await?;
+            client.conn.flush().await?;
             let msg = client.read_in_loop().await?;
 
             if let Message::Extended { .. } = msg {
-                let ext = msg.read_ext(&mut client, &mut ext_buf).await?;
+                let ext = msg.read_ext(&mut client.conn, &mut ext_buf).await?;
                 if ext.id != metadata.id {
                     return Err("Expected Metadata message".into());
                 }
@@ -140,7 +140,7 @@ impl MagnetUri {
                 remaining -= data.len();
                 piece += 1;
             } else {
-                msg.read_discard(&mut client).await?;
+                msg.read_discard(&mut client.conn).await?;
             }
         }
 

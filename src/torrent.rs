@@ -1,6 +1,6 @@
 use crate::announce::{announce, AnnounceResponse};
 use crate::bitfield::BitField;
-use crate::client::Client;
+use crate::client::{AsyncStream, Client, Connection};
 use crate::future::timeout;
 use crate::metainfo::InfoHash;
 use crate::msg::Message;
@@ -93,7 +93,7 @@ impl Torrent {
         PieceIter::new(self)
     }
 
-    pub fn worker(&self) -> TorrentWorker<'_> {
+    pub fn worker<C>(&self) -> TorrentWorker<'_, C> {
         let work: VecDeque<_> = self.piece_iter().collect();
         TorrentWorker {
             torrent: self,
@@ -104,14 +104,14 @@ impl Torrent {
     }
 }
 
-pub struct TorrentWorker<'a> {
+pub struct TorrentWorker<'a, C> {
     torrent: &'a Torrent,
     pub bits: BitField,
     pub work: WorkQueue<'a>,
-    pub connected: Vec<Client>,
+    pub connected: Vec<Client<C>>,
 }
 
-impl<'a> TorrentWorker<'a> {
+impl<'a> TorrentWorker<'a, Connection> {
     pub async fn connect_all(&mut self) -> usize {
         let info_hash = &self.torrent.info_hash;
         let peer_id = &self.torrent.peer_id;
@@ -137,7 +137,9 @@ impl<'a> TorrentWorker<'a> {
         debug!("{} peers connected", self.connected.len());
         self.connected.len()
     }
+}
 
+impl<'a, C: AsyncStream> TorrentWorker<'a, C> {
     pub async fn run_worker(&mut self, piece_tx: Sender<Piece>) {
         let work = &self.work;
         let mut futures = self
@@ -167,29 +169,29 @@ struct PieceProgress<'a> {
     requested: u32,
 }
 
-struct Download<'a, 'p> {
-    client: &'a mut Client,
+struct Download<'a, 'p, C> {
+    client: &'a mut Client<C>,
     work: &'a WorkQueue<'p>,
     piece_tx: Sender<Piece>,
     queue: VecDeque<PieceProgress<'p>>,
     backlog: u32,
 }
 
-impl<'a, 'p> Download<'a, 'p> {
+impl<'a, 'p, C: AsyncStream> Download<'a, 'p, C> {
     async fn new(
-        client: &'a mut Client,
+        client: &'a mut Client<C>,
         work: &'a WorkQueue<'p>,
         piece_tx: Sender<Piece>,
-    ) -> crate::Result<Download<'a, 'p>> {
+    ) -> crate::Result<Download<'a, 'p, C>> {
         client.send_unchoke().await?;
         client.send_interested().await?;
-        client.flush().await?;
+        client.conn.flush().await?;
 
         while client.choked {
             trace!("We're choked. Waiting for unchoke");
             if let Some(msg) = client.read().await? {
                 debug!("Ignoring: {:?}", msg);
-                msg.read_discard(client).await?;
+                msg.read_discard(&mut client.conn).await?;
             }
         }
 
@@ -238,7 +240,7 @@ impl<'a, 'p> Download<'a, 'p> {
         let (index, len) = match msg {
             Message::Piece { index, len, .. } => (index, len),
             _ => {
-                msg.read_discard(&mut self.client).await?;
+                msg.read_discard(&mut self.client.conn).await?;
                 return Ok(());
             }
         };
@@ -249,7 +251,7 @@ impl<'a, 'p> Download<'a, 'p> {
         };
 
         let mut piece_progress = self.queue.swap_remove_back(i).unwrap();
-        msg.read_piece(self.client, &mut piece_progress.buf).await?;
+        msg.read_piece(&mut self.client.conn, &mut piece_progress.buf).await?;
         piece_progress.downloaded += len;
         self.backlog -= 1;
         trace!(
@@ -320,7 +322,7 @@ impl<'a, 'p> Download<'a, 'p> {
             }
         }
         trace!("Flushing the client");
-        timeout(self.client.flush(), 5).await
+        timeout(self.client.conn.flush(), 5).await
     }
 }
 

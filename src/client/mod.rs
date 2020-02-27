@@ -1,3 +1,4 @@
+mod conn;
 mod handshake;
 
 use crate::bitfield::BitField;
@@ -6,118 +7,30 @@ use crate::metainfo::InfoHash;
 use crate::msg::Message;
 use crate::peer::PeerId;
 use ben::Entry;
-use bytes::{Buf, BufMut};
+pub use conn::{AsyncStream, Connection};
 use log::debug;
 use log::trace;
 use std::io;
-use std::mem::MaybeUninit;
 use std::net::SocketAddr;
-use std::pin::Pin;
-use std::task::{Context, Poll};
-use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, BufStream};
+use tokio::io::{AsyncWriteExt, BufStream};
 use tokio::net::TcpStream;
 
-pub trait AsyncStream: AsyncRead + AsyncWrite + Unpin {}
-
-impl<T: AsyncRead + AsyncWrite + Unpin> AsyncStream for T {}
-
-pub enum Connection {
-    Tcp(BufStream<TcpStream>),
-    Other(Box<dyn AsyncStream>),
-}
-
-pub struct Client {
-    pub conn: Connection,
+pub struct Client<C> {
+    pub conn: C,
     pub choked: bool,
     pub bitfield: BitField,
 }
 
-impl AsyncRead for Client {
-    unsafe fn prepare_uninitialized_buffer(&self, buf: &mut [MaybeUninit<u8>]) -> bool {
-        match &self.conn {
-            Connection::Tcp(c) => c.prepare_uninitialized_buffer(buf),
-            Connection::Other(c) => c.prepare_uninitialized_buffer(buf),
-        }
-    }
-
-    fn poll_read(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buf: &mut [u8],
-    ) -> Poll<io::Result<usize>> {
-        match &mut self.conn {
-            Connection::Tcp(c) => Pin::new(c).poll_read(cx, buf),
-            Connection::Other(c) => Pin::new(c).poll_read(cx, buf),
-        }
-    }
-
-    fn poll_read_buf<B: BufMut>(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buf: &mut B,
-    ) -> Poll<io::Result<usize>>
-    where
-        Self: Sized,
-    {
-        match &mut self.conn {
-            Connection::Tcp(c) => Pin::new(c).poll_read_buf(cx, buf),
-            Connection::Other(c) => Pin::new(c).poll_read_buf(cx, buf),
-        }
-    }
-}
-
-impl AsyncWrite for Client {
-    fn poll_write(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buf: &[u8],
-    ) -> Poll<Result<usize, io::Error>> {
-        match &mut self.conn {
-            Connection::Tcp(c) => Pin::new(c).poll_write(cx, buf),
-            Connection::Other(c) => Pin::new(c).poll_write(cx, buf),
-        }
-    }
-
-    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
-        match &mut self.conn {
-            Connection::Tcp(c) => Pin::new(c).poll_flush(cx),
-            Connection::Other(c) => Pin::new(c).poll_flush(cx),
-        }
-    }
-
-    fn poll_shutdown(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Result<(), io::Error>> {
-        match &mut self.conn {
-            Connection::Tcp(c) => Pin::new(c).poll_shutdown(cx),
-            Connection::Other(c) => Pin::new(c).poll_shutdown(cx),
-        }
-    }
-
-    fn poll_write_buf<B: Buf>(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buf: &mut B,
-    ) -> Poll<Result<usize, io::Error>>
-    where
-        Self: Sized,
-    {
-        match &mut self.conn {
-            Connection::Tcp(c) => Pin::new(c).poll_write_buf(cx, buf),
-            Connection::Other(c) => Pin::new(c).poll_write_buf(cx, buf),
-        }
-    }
-}
-
-impl Client {
+impl Client<Connection> {
     pub async fn new_tcp(addr: SocketAddr) -> crate::Result<Self> {
         trace!("Create new TCP client to {:?}", addr);
         let conn = TcpStream::connect(addr).await?;
         Ok(Client::new(Connection::Tcp(BufStream::new(conn))))
     }
+}
 
-    pub fn new(conn: Connection) -> Self {
+impl<C: AsyncStream> Client<C> {
+    pub fn new(conn: C) -> Self {
         Self {
             conn,
             choked: true,
@@ -126,7 +39,7 @@ impl Client {
     }
 
     pub async fn handshake(&mut self, info_hash: &InfoHash, peer_id: &PeerId) -> crate::Result<()> {
-        let mut handshake = Handshake::new(self, info_hash, peer_id);
+        let mut handshake = Handshake::new(&mut self.conn, info_hash, peer_id);
         handshake.set_extended(true);
         handshake.write().await?;
         let result = handshake.read().await?;
@@ -136,7 +49,7 @@ impl Client {
 
     pub async fn read(&mut self) -> crate::Result<Option<Message>> {
         trace!("Client::read");
-        let msg = match Message::read(self).await? {
+        let msg = match Message::read(&mut self.conn).await? {
             Some(msg) => msg,
             None => return Ok(None), // Keep-alive
         };
@@ -154,7 +67,7 @@ impl Client {
             }
             Message::Bitfield { len } => {
                 let mut v = vec![0; len as usize];
-                msg.read_bitfield(self, &mut v).await?;
+                msg.read_bitfield(&mut self.conn, &mut v).await?;
                 self.bitfield = v.into();
                 return Ok(None);
             }
@@ -179,38 +92,38 @@ impl Client {
     pub async fn send_request(&mut self, index: u32, begin: u32, len: u32) -> io::Result<()> {
         let msg = Message::Request { index, begin, len };
         trace!("Send {:?}", msg);
-        msg.write(self).await
+        msg.write(&mut self.conn).await
     }
 
     pub async fn send_interested(&mut self) -> io::Result<()> {
         trace!("Send interested");
-        Message::Interested.write(self).await
+        Message::Interested.write(&mut self.conn).await
     }
 
     pub async fn send_not_interested(&mut self) -> io::Result<()> {
         trace!("Send not interested");
-        Message::NotInterested.write(self).await
+        Message::NotInterested.write(&mut self.conn).await
     }
 
     pub async fn send_choke(&mut self) -> io::Result<()> {
         trace!("Send choke");
-        Message::Choke.write(self).await
+        Message::Choke.write(&mut self.conn).await
     }
 
     pub async fn send_unchoke(&mut self) -> io::Result<()> {
         trace!("Send unchoke");
-        Message::Unchoke.write(self).await
+        Message::Unchoke.write(&mut self.conn).await
     }
 
     pub async fn send_have(&mut self, index: u32) -> io::Result<()> {
         trace!("Send have for piece: {}", index);
         let msg = Message::Have { index };
-        msg.write(self).await
+        msg.write(&mut self.conn).await
     }
 
     pub async fn send_ext_handshake(&mut self) -> io::Result<()> {
         trace!("Send extended handshake");
-        Message::Extended { len: 0 }.write(self).await
+        Message::Extended { len: 0 }.write(&mut self.conn).await
     }
 
     pub async fn send_ext(&mut self, id: u8, value: Entry) -> io::Result<()> {
@@ -219,12 +132,65 @@ impl Client {
         let msg = Message::Extended {
             len: data.len() as u32,
         };
-        msg.write_ext(self, id, &data).await
+        msg.write_ext(&mut self.conn, id, &data).await
     }
 
     pub async fn send_keep_alive(&mut self) -> crate::Result<()> {
         trace!("Send Keep-alive message");
-        self.write_u32(0).await?;
+        self.conn.write_u32(0).await?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Cursor;
+
+    #[tokio::test]
+    async fn keep_alive() {
+        let mut data = vec![];
+        let mut tx = Client::new(Cursor::new(&mut data));
+        tx.send_keep_alive().await.unwrap();
+
+        let mut rx = Client::new(Cursor::new(&mut data));
+        assert_eq!(None, rx.read().await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn choke() {
+        let mut data = vec![];
+        let mut tx = Client::new(Cursor::new(&mut data));
+        tx.send_choke().await.unwrap();
+
+        let mut rx = Client::new(Cursor::new(data));
+        rx.choked = false;
+        assert_eq!(None, rx.read().await.unwrap());
+        assert!(rx.choked);
+    }
+
+    #[tokio::test]
+    async fn unchoke() {
+        let mut data = vec![];
+        let mut tx = Client::new(Cursor::new(&mut data));
+        tx.send_unchoke().await.unwrap();
+
+        let mut rx = Client::new(Cursor::new(data));
+        assert!(rx.choked);
+        assert_eq!(None, rx.read().await.unwrap());
+        assert!(!rx.choked);
+    }
+
+    #[tokio::test]
+    async fn have() {
+        let mut data = vec![];
+        let mut tx = Client::new(Cursor::new(&mut data));
+        tx.send_have(1).await.unwrap();
+
+        let mut rx = Client::new(Cursor::new(data));
+        rx.bitfield = BitField::new(2);
+        assert!(!rx.bitfield.get(1));
+        assert_eq!(None, rx.read().await.unwrap());
+        assert!(rx.bitfield.get(1));
     }
 }
