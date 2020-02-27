@@ -251,7 +251,8 @@ impl<'a, 'p, C: AsyncStream> Download<'a, 'p, C> {
         };
 
         let mut piece_progress = self.queue.swap_remove_back(i).unwrap();
-        msg.read_piece(&mut self.client.conn, &mut piece_progress.buf).await?;
+        msg.read_piece(&mut self.client.conn, &mut piece_progress.buf)
+            .await?;
         piece_progress.downloaded += len;
         self.backlog -= 1;
         trace!(

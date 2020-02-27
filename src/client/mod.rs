@@ -210,8 +210,6 @@ mod tests {
         let mut tx = Client::new(Cursor::new(&mut data));
         tx.send_piece(1, 0, b"1234").await.unwrap();
 
-        println!("{:?}", data);
-
         let mut rx = Client::new(Cursor::new(data));
         let piece = rx.read().await.unwrap().unwrap();
         assert_eq!(
@@ -232,8 +230,6 @@ mod tests {
         let mut data = vec![];
         let mut tx = Client::new(Cursor::new(&mut data));
         tx.send_request(1, 0, 4).await.unwrap();
-
-        println!("{:?}", data);
 
         let mut rx = Client::new(Cursor::new(data));
         let piece = rx.read().await.unwrap().unwrap();
