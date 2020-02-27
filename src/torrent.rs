@@ -16,8 +16,8 @@ use tokio::io::AsyncWriteExt;
 use tokio::sync::mpsc::Sender;
 
 pub const HASH_LEN: usize = 20;
-const BACKLOG_HIGH_WATERMARK: u32 = 50;
-const BACK_LOW_WATERMARK: u32 = 5;
+const BACKLOG_HI_WATERMARK: u32 = 100;
+const BACKLOG_LO_WATERMARK: u32 = 10;
 const MAX_BLOCK_SIZE: u32 = 16_384;
 
 #[derive(Debug)]
@@ -287,7 +287,7 @@ impl<'a, 'p> Download<'a, 'p> {
     }
 
     fn pick_pieces(&mut self) {
-        if self.backlog >= BACKLOG_HIGH_WATERMARK {
+        if self.backlog >= BACKLOG_HI_WATERMARK {
             return;
         }
 
@@ -303,12 +303,12 @@ impl<'a, 'p> Download<'a, 'p> {
     }
 
     async fn fill_backlog(&mut self) -> crate::Result<()> {
-        if self.backlog >= BACK_LOW_WATERMARK || self.client.choked {
+        if self.backlog >= BACKLOG_LO_WATERMARK || self.client.choked {
             return Ok(());
         }
 
         for s in self.queue.iter_mut() {
-            while self.backlog < BACKLOG_HIGH_WATERMARK && s.requested < s.piece.len {
+            while self.backlog < BACKLOG_HI_WATERMARK && s.requested < s.piece.len {
                 let block_size = MAX_BLOCK_SIZE.min(s.piece.len - s.requested);
                 let request = self
                     .client
@@ -319,6 +319,7 @@ impl<'a, 'p> Download<'a, 'p> {
                 s.requested += block_size;
             }
         }
+        trace!("Flushing the client");
         timeout(self.client.flush(), 5).await
     }
 }
