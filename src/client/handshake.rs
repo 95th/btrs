@@ -22,10 +22,7 @@ pub struct HandshakeResult {
     pub peer_id: PeerId,
 }
 
-impl<'a, C> Handshake<'a, C>
-where
-    C: AsyncStream,
-{
+impl<'a, C: AsyncStream> Handshake<'a, C> {
     pub fn new(conn: &'a mut C, info_hash: &'a InfoHash, peer_id: &'a PeerId) -> Self {
         Self::with_extensions(conn, info_hash, peer_id, Default::default())
     }

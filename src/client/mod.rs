@@ -15,13 +15,13 @@ use std::net::SocketAddr;
 use tokio::io::{AsyncWriteExt, BufStream};
 use tokio::net::TcpStream;
 
-pub struct Client<C> {
+pub struct Client<C = Connection> {
     pub conn: C,
     pub choked: bool,
     pub bitfield: BitField,
 }
 
-impl Client<Connection> {
+impl Client {
     pub async fn new_tcp(addr: SocketAddr) -> crate::Result<Self> {
         trace!("Create new TCP client to {:?}", addr);
         let conn = TcpStream::connect(addr).await?;
