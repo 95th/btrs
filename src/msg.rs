@@ -81,7 +81,7 @@ impl Message {
                 writer.write_all(data).await?;
             }
             Piece { index, begin, .. } => {
-                writer.write_u32(data.len() as u32 + 13).await?;
+                writer.write_u32(data.len() as u32 + 9).await?;
                 writer.write_u8(self.type_id()).await?;
                 writer.write_u32(index).await?;
                 writer.write_u32(begin).await?;
@@ -118,7 +118,7 @@ impl Message {
         }
 
         let id = reader.read_u8().await?;
-        debug!("got id: {}", id);
+        trace!("got id: {}", id);
 
         macro_rules! err_if {
             ($condition: expr, $err: expr) => {

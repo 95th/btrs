@@ -121,6 +121,16 @@ impl<C: AsyncStream> Client<C> {
         msg.write(&mut self.conn).await
     }
 
+    pub async fn send_piece(&mut self, index: u32, begin: u32, buf: &[u8]) -> io::Result<()> {
+        trace!("Send have for piece: {}", index);
+        let msg = Message::Piece {
+            index,
+            begin,
+            len: buf.len() as u32,
+        };
+        msg.write_buf(&mut self.conn, buf).await
+    }
+
     pub async fn send_ext_handshake(&mut self) -> io::Result<()> {
         trace!("Send extended handshake");
         Message::Extended { len: 0 }.write(&mut self.conn).await
@@ -192,5 +202,48 @@ mod tests {
         assert!(!rx.bitfield.get(1));
         assert_eq!(None, rx.read().await.unwrap());
         assert!(rx.bitfield.get(1));
+    }
+
+    #[tokio::test]
+    async fn piece() {
+        let mut data = vec![];
+        let mut tx = Client::new(Cursor::new(&mut data));
+        tx.send_piece(1, 0, b"1234").await.unwrap();
+
+        println!("{:?}", data);
+
+        let mut rx = Client::new(Cursor::new(data));
+        let piece = rx.read().await.unwrap().unwrap();
+        assert_eq!(
+            Message::Piece {
+                index: 1,
+                begin: 0,
+                len: 4,
+            },
+            piece
+        );
+        let mut buf = [0; 4];
+        piece.read_piece(&mut rx.conn, &mut buf).await.unwrap();
+        assert_eq!(b"1234", &buf);
+    }
+
+    #[tokio::test]
+    async fn request() {
+        let mut data = vec![];
+        let mut tx = Client::new(Cursor::new(&mut data));
+        tx.send_request(1, 0, 4).await.unwrap();
+
+        println!("{:?}", data);
+
+        let mut rx = Client::new(Cursor::new(data));
+        let piece = rx.read().await.unwrap().unwrap();
+        assert_eq!(
+            Message::Request {
+                index: 1,
+                begin: 0,
+                len: 4,
+            },
+            piece
+        );
     }
 }
