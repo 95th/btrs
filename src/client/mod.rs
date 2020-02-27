@@ -76,7 +76,9 @@ impl<C: AsyncStream> Client<C> {
                 self.bitfield.set(index as usize, true);
                 return Ok(None);
             }
-            _ => return Ok(Some(msg)),
+            _ => {
+                return Ok(Some(msg));
+            }
         }
     }
 
@@ -91,6 +93,12 @@ impl<C: AsyncStream> Client<C> {
 
     pub async fn send_request(&mut self, index: u32, begin: u32, len: u32) -> io::Result<()> {
         let msg = Message::Request { index, begin, len };
+        trace!("Send {:?}", msg);
+        msg.write(&mut self.conn).await
+    }
+
+    pub async fn send_cancel(&mut self, index: u32, begin: u32, len: u32) -> io::Result<()> {
+        let msg = Message::Cancel { index, begin, len };
         trace!("Send {:?}", msg);
         msg.write(&mut self.conn).await
     }
@@ -119,6 +127,14 @@ impl<C: AsyncStream> Client<C> {
         trace!("Send have for piece: {}", index);
         let msg = Message::Have { index };
         msg.write(&mut self.conn).await
+    }
+
+    pub async fn send_bitfield(&mut self, buf: &[u8]) -> io::Result<()> {
+        trace!("Send bitfield");
+        let msg = Message::Bitfield {
+            len: buf.len() as u32,
+        };
+        msg.write_buf(&mut self.conn, buf).await
     }
 
     pub async fn send_piece(&mut self, index: u32, begin: u32, buf: &[u8]) -> io::Result<()> {
@@ -192,6 +208,28 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn interested() {
+        let mut data = vec![];
+        let mut tx = Client::new(Cursor::new(&mut data));
+        tx.send_interested().await.unwrap();
+
+        let mut rx = Client::new(Cursor::new(data));
+        let msg = rx.read().await.unwrap().unwrap();
+        assert_eq!(Message::Interested, msg);
+    }
+
+    #[tokio::test]
+    async fn not_interested() {
+        let mut data = vec![];
+        let mut tx = Client::new(Cursor::new(&mut data));
+        tx.send_not_interested().await.unwrap();
+
+        let mut rx = Client::new(Cursor::new(data));
+        let msg = rx.read().await.unwrap().unwrap();
+        assert_eq!(Message::NotInterested, msg);
+    }
+
+    #[tokio::test]
     async fn have() {
         let mut data = vec![];
         let mut tx = Client::new(Cursor::new(&mut data));
@@ -205,23 +243,35 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn bitfield() {
+        let mut data = vec![];
+        let mut tx = Client::new(Cursor::new(&mut data));
+        let buf = b"1234";
+        tx.send_bitfield(buf).await.unwrap();
+
+        let mut rx = Client::new(Cursor::new(data));
+        assert_eq!(None, rx.read().await.unwrap());
+        assert_eq!(b"1234", &rx.bitfield.as_bytes());
+    }
+
+    #[tokio::test]
     async fn piece() {
         let mut data = vec![];
         let mut tx = Client::new(Cursor::new(&mut data));
         tx.send_piece(1, 0, b"1234").await.unwrap();
 
         let mut rx = Client::new(Cursor::new(data));
-        let piece = rx.read().await.unwrap().unwrap();
+        let msg = rx.read().await.unwrap().unwrap();
         assert_eq!(
             Message::Piece {
                 index: 1,
                 begin: 0,
                 len: 4,
             },
-            piece
+            msg
         );
         let mut buf = [0; 4];
-        piece.read_piece(&mut rx.conn, &mut buf).await.unwrap();
+        msg.read_piece(&mut rx.conn, &mut buf).await.unwrap();
         assert_eq!(b"1234", &buf);
     }
 
@@ -232,14 +282,58 @@ mod tests {
         tx.send_request(1, 0, 4).await.unwrap();
 
         let mut rx = Client::new(Cursor::new(data));
-        let piece = rx.read().await.unwrap().unwrap();
+        let msg = rx.read().await.unwrap().unwrap();
         assert_eq!(
             Message::Request {
                 index: 1,
                 begin: 0,
                 len: 4,
             },
-            piece
+            msg
         );
+    }
+
+    #[tokio::test]
+    async fn cancel() {
+        let mut data = vec![];
+        let mut tx = Client::new(Cursor::new(&mut data));
+        tx.send_cancel(1, 0, 4).await.unwrap();
+
+        let mut rx = Client::new(Cursor::new(data));
+        let msg = rx.read().await.unwrap().unwrap();
+        assert_eq!(
+            Message::Cancel {
+                index: 1,
+                begin: 0,
+                len: 4,
+            },
+            msg
+        );
+    }
+
+    #[tokio::test]
+    async fn extended_handshake() {
+        let mut data = vec![];
+        let mut tx = Client::new(Cursor::new(&mut data));
+        tx.send_ext_handshake().await.unwrap();
+
+        let mut rx = Client::new(Cursor::new(data));
+        let msg = rx.read().await.unwrap().unwrap();
+        assert_eq!(Message::Extended { len: 0 }, msg);
+    }
+
+    #[tokio::test]
+    async fn extended() {
+        let mut data = vec![];
+        let mut tx = Client::new(Cursor::new(&mut data));
+        tx.send_ext(1, Entry::Int(100)).await.unwrap();
+
+        let mut rx = Client::new(Cursor::new(data));
+        let msg = rx.read().await.unwrap().unwrap();
+        assert_eq!(Message::Extended { len: 6 }, msg);
+
+        let mut buf = vec![];
+        let ext_msg = msg.read_ext(&mut rx.conn, &mut buf).await.unwrap();
+        assert_eq!(100, ext_msg.node().as_int().unwrap());
     }
 }

@@ -97,7 +97,7 @@ impl Message {
         W: AsyncWrite + Unpin,
     {
         use Message::*;
-        if let Bitfield { .. } = self {
+        if let Extended { .. } = self {
             writer.write_u32(data.len() as u32 + 2).await?;
             writer.write_u8(self.type_id()).await?;
             writer.write_u8(id).await?;
@@ -295,6 +295,10 @@ impl ExtendedMessage<'_> {
 
     pub fn is_handshake(&self) -> bool {
         self.id == 0
+    }
+
+    pub fn node(&self) -> &Node<'_> {
+        &self.value
     }
 
     pub fn metadata(&self) -> Option<Metadata> {
