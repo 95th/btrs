@@ -29,5 +29,6 @@ pub mod msg;
 pub mod peer;
 pub mod torrent;
 pub mod work;
+pub mod kademlia;
 
 pub use error::*;
