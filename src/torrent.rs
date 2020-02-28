@@ -18,7 +18,7 @@ use tokio::sync::mpsc::Sender;
 pub const HASH_LEN: usize = 20;
 const BACKLOG_HI_WATERMARK: u32 = 100;
 const BACKLOG_LO_WATERMARK: u32 = 10;
-const MAX_BLOCK_SIZE: u32 = 16_384;
+const MAX_BLOCK_SIZE: u32 = 0x4000;
 
 #[derive(Debug)]
 pub struct TorrentFile {

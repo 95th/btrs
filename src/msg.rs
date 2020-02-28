@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use std::io;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
-const METADATA_PIECE_LEN: usize = 16384;
+const METADATA_PIECE_LEN: usize = 0x4000;
 
 #[derive(Debug, PartialEq)]
 pub enum Message {
@@ -36,7 +36,10 @@ impl Message {
             Piece { .. } => 7,
             Cancel { .. } => 8,
             Extended { .. } => 20,
-            Unknown { .. } => panic!("Not sendable"),
+            Unknown { .. } => {
+                debug_assert!(false, "Can't be here");
+                u8::max_value()
+            }
         }
     }
 
