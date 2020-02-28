@@ -21,6 +21,7 @@ impl NodeId {
     }
 
     pub fn min_dist_exp(&self, ids: &[Self]) -> u32 {
+        debug_assert_ne!(ids.len(), 0);
         ids.iter().map(|id| self.dist_exp(id)).min().unwrap_or(160)
     }
 
