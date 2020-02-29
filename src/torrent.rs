@@ -354,7 +354,7 @@ impl<'a, 'p, C: AsyncStream> Download<'a, 'p, C> {
         self.rate.add_sample(block_per_sec);
 
         let rate = self.rate.mean() as u32;
-        if rate > BACKLOG_LO_WATERMARK {
+        if rate >= BACKLOG_LO_WATERMARK {
             self.high_watermark = rate;
         }
 

@@ -19,7 +19,7 @@
 pub const CLIENT_NAME: &str = "95th 0.1";
 
 pub mod announce;
-mod avg;
+pub mod avg;
 pub mod bitfield;
 pub mod client;
 mod error;
