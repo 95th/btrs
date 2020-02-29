@@ -8,7 +8,6 @@ use crate::msg::Message;
 use crate::peer::PeerId;
 use ben::Entry;
 pub use conn::{AsyncStream, Connection};
-use log::debug;
 use log::trace;
 use std::io;
 use std::net::SocketAddr;
@@ -54,7 +53,7 @@ impl<C: AsyncStream> Client<C> {
             None => return Ok(None), // Keep-alive
         };
 
-        debug!("We got message: {:?}", msg);
+        trace!("We got message: {:?}", msg);
 
         match msg {
             Message::Choke => {
@@ -72,7 +71,7 @@ impl<C: AsyncStream> Client<C> {
                 return Ok(None);
             }
             Message::Have { index } => {
-                debug!("This guy has {} piece", index);
+                trace!("This guy has {} piece", index);
                 self.bitfield.set(index as usize, true);
                 return Ok(None);
             }

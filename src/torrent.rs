@@ -238,7 +238,7 @@ impl<'a, 'p, C: AsyncStream> Download<'a, 'p, C> {
                 .borrow_mut()
                 .extend(self.in_progress.into_iter().map(|p| p.piece));
             return Err(e);
-        };
+        }
         Ok(())
     }
 
@@ -263,7 +263,7 @@ impl<'a, 'p, C: AsyncStream> Download<'a, 'p, C> {
     }
 
     async fn handle_msg(&mut self) -> crate::Result<()> {
-        let msg = timeout(self.client.read_in_loop(), 30).await?;
+        let msg = timeout(self.client.read_in_loop(), 5).await?;
 
         let (index, len) = match msg {
             Message::Piece { index, len, .. } => (index, len),
@@ -359,7 +359,7 @@ impl<'a, 'p, C: AsyncStream> Download<'a, 'p, C> {
     }
 
     fn adjust_watermark(&mut self) {
-        trace!("Old high watermark: {}", self.high_watermark);
+        debug!("Old high watermark: {}", self.high_watermark);
 
         let millis = (Instant::now() - self.last_requested).as_millis();
         if millis == 0 {
@@ -378,7 +378,7 @@ impl<'a, 'p, C: AsyncStream> Download<'a, 'p, C> {
             self.high_watermark = rate;
         }
 
-        trace!("New high watermark: {}", self.high_watermark);
+        debug!("New high watermark: {}", self.high_watermark);
     }
 }
 

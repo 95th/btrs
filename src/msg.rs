@@ -1,5 +1,4 @@
 use ben::{Entry, Node};
-use log::debug;
 use log::trace;
 use std::collections::BTreeMap;
 use std::io;
@@ -220,7 +219,7 @@ impl Message {
                 }
 
                 let len = len as usize;
-                debug!("Reading piece message of len: {}", len);
+                trace!("Reading piece message of len: {}", len);
                 if begin + len > buf.len() {
                     return Err("Data too large".into());
                 }
@@ -239,7 +238,7 @@ impl Message {
         match *self {
             Message::Bitfield { len } => {
                 let len = len as usize;
-                debug!("Reading bitfield message of len: {}", len);
+                trace!("Reading bitfield message of len: {}", len);
                 if len > buf.len() {
                     return Err("Data too large".into());
                 }
@@ -262,7 +261,7 @@ impl Message {
         match *self {
             Self::Extended { len } => {
                 let len = len as usize;
-                debug!("Reading ext message of len: {}", len);
+                trace!("Reading ext message of len: {}", len);
                 buf.clear();
                 buf.resize(len as usize, 0);
                 rdr.read_exact(buf).await?;

@@ -5,6 +5,7 @@ use btrs::torrent::TorrentFile;
 use btrs::work::Piece;
 use futures::StreamExt;
 use log::debug;
+use std::time::{Duration, Instant};
 use tokio::fs;
 use tokio::sync::mpsc;
 
@@ -63,6 +64,8 @@ pub async fn torrent_file(file: &str) -> btrs::Result<()> {
     let handle = tokio::spawn(async move {
         let mut file = vec![0; len];
         let mut bitfield = BitField::new(num_pieces);
+        let mut downloaded = 0;
+        let mut tick = Instant::now();
 
         while let Some(piece) = piece_rx.next().await {
             let idx = piece.index as usize;
@@ -73,6 +76,17 @@ pub async fn torrent_file(file: &str) -> btrs::Result<()> {
             let end = len.min(start + piece_len);
             file[start..end].copy_from_slice(&piece.buf);
             bitfield.set(idx, true);
+
+            downloaded += piece.buf.len();
+            let now = Instant::now();
+            if now - tick >= Duration::from_secs(1) {
+                println!(
+                    "{} kBps",
+                    downloaded / 1000 / (now - tick).as_secs() as usize
+                );
+                downloaded = 0;
+                tick = now;
+            }
         }
         file
     });
