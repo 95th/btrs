@@ -60,10 +60,10 @@ impl From<SocketAddr> for Peer {
 }
 
 pub fn generate_peer_id() -> Box<PeerId> {
-    let mut buf = Box::new(*b"-UT3100-000000000000");
+    let mut buf = *b"-UT3100-000000000000";
     rand::thread_rng()
         .sample_iter(&Alphanumeric)
         .zip(&mut buf[8..])
         .for_each(|(c, b)| *b = c as u8);
-    buf
+    Box::new(buf)
 }
