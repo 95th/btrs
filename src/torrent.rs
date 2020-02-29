@@ -172,14 +172,31 @@ struct PieceProgress<'a> {
 }
 
 struct Download<'a, 'p, C> {
+    /// Peer connection
     client: &'a mut Client<C>,
+
+    /// Common piece queue from where we pick the pieces to download
     work: &'a WorkQueue<'p>,
+
+    /// Channel to send the completed and verified pieces
     piece_tx: Sender<Piece>,
+
+    /// In-progress pieces
     queue: VecDeque<PieceProgress<'p>>,
+
+    /// Current pending block requests
     backlog: u32,
+
+    /// Max number of blocks that can be requested at once
     high_watermark: u32,
+
+    /// Piece block request count since last request
     last_requested_blocks: u32,
+
+    /// Last time we requested pieces from this peer
     last_requested: Instant,
+
+    /// Block download rate
     rate: SlidingAvg,
 }
 
@@ -233,6 +250,8 @@ impl<'a, 'p, C: AsyncStream> Download<'a, 'p, C> {
 
             trace!("Pending pieces: {}", self.queue.len());
             if self.queue.is_empty() && self.backlog == 0 {
+                // No new pieces to download and no pending requests
+                // We're done
                 break;
             }
 
@@ -301,6 +320,8 @@ impl<'a, 'p, C: AsyncStream> Download<'a, 'p, C> {
 
     fn pick_pieces(&mut self) {
         if self.backlog >= self.high_watermark {
+            // We need to wait for the backlog to come down to pick
+            // new pieces
             return;
         }
 
@@ -316,7 +337,10 @@ impl<'a, 'p, C: AsyncStream> Download<'a, 'p, C> {
     }
 
     async fn fill_backlog(&mut self) -> crate::Result<()> {
-        if self.backlog >= BACKLOG_LO_WATERMARK || self.client.choked {
+        if self.client.choked || self.backlog >= BACKLOG_LO_WATERMARK {
+            // Either
+            // - Choked - Wait for peer to send us an Unchoke
+            // - Too many pending requests - Wait for peer to send us already requested pieces.
             return Ok(());
         }
 
@@ -334,24 +358,27 @@ impl<'a, 'p, C: AsyncStream> Download<'a, 'p, C> {
                 s.requested += block_size;
             }
         }
-        trace!("Flushing the client");
         self.last_requested = Instant::now();
         self.last_requested_blocks = self.backlog;
+
+        trace!("Flushing the client");
         timeout(self.client.conn.flush(), 5).await
     }
 
     fn adjust_watermark(&mut self) {
         trace!("Old high watermark: {}", self.high_watermark);
 
-        let now = Instant::now();
+        let millis = (Instant::now() - self.last_requested).as_millis();
+        if millis == 0 {
+            // Too high speed!
+            return;
+        }
+
         let blocks_done = self.last_requested_blocks - self.backlog;
-        let millis = (now - self.last_requested).as_millis();
-        let block_per_sec = if millis > 0 {
-            (1000 * blocks_done as u128 / millis) as i32
-        } else {
-            blocks_done as i32
-        };
-        self.rate.add_sample(block_per_sec);
+        let blocks_per_sec = (1000 * blocks_done as u128 / millis) as i32;
+
+        // Update the average block download rate
+        self.rate.add_sample(blocks_per_sec);
 
         let rate = self.rate.mean() as u32;
         if rate >= BACKLOG_LO_WATERMARK {
