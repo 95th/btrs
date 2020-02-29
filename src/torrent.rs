@@ -1,4 +1,5 @@
 use crate::announce::{announce, AnnounceResponse};
+use crate::avg::SlidingAvg;
 use crate::bitfield::BitField;
 use crate::client::{AsyncStream, Client, Connection};
 use crate::future::timeout;
@@ -12,11 +13,12 @@ use futures::StreamExt;
 use log::{debug, error, info, trace};
 use sha1::Sha1;
 use std::collections::VecDeque;
+use std::time::Instant;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::mpsc::Sender;
 
 pub const HASH_LEN: usize = 20;
-const BACKLOG_HI_WATERMARK: u32 = 100;
+const BACKLOG_HI_WATERMARK: u32 = 20;
 const BACKLOG_LO_WATERMARK: u32 = 10;
 const MAX_BLOCK_SIZE: u32 = 0x4000;
 
@@ -175,6 +177,10 @@ struct Download<'a, 'p, C> {
     piece_tx: Sender<Piece>,
     queue: VecDeque<PieceProgress<'p>>,
     backlog: u32,
+    high_watermark: u32,
+    last_requested_blocks: u32,
+    last_requested: Instant,
+    rate: SlidingAvg,
 }
 
 impl<'a, 'p, C: AsyncStream> Download<'a, 'p, C> {
@@ -202,6 +208,10 @@ impl<'a, 'p, C: AsyncStream> Download<'a, 'p, C> {
             piece_tx,
             queue,
             backlog: 0,
+            high_watermark: BACKLOG_HI_WATERMARK,
+            last_requested_blocks: 0,
+            last_requested: Instant::now(),
+            rate: SlidingAvg::new(10),
         })
     }
 
@@ -290,7 +300,7 @@ impl<'a, 'p, C: AsyncStream> Download<'a, 'p, C> {
     }
 
     fn pick_pieces(&mut self) {
-        if self.backlog >= BACKLOG_HI_WATERMARK {
+        if self.backlog >= self.high_watermark {
             return;
         }
 
@@ -310,8 +320,10 @@ impl<'a, 'p, C: AsyncStream> Download<'a, 'p, C> {
             return Ok(());
         }
 
+        self.adjust_watermark();
+
         for s in self.queue.iter_mut() {
-            while self.backlog < BACKLOG_HI_WATERMARK && s.requested < s.piece.len {
+            while self.backlog < self.high_watermark && s.requested < s.piece.len {
                 let block_size = MAX_BLOCK_SIZE.min(s.piece.len - s.requested);
                 let request = self
                     .client
@@ -323,7 +335,30 @@ impl<'a, 'p, C: AsyncStream> Download<'a, 'p, C> {
             }
         }
         trace!("Flushing the client");
+        self.last_requested = Instant::now();
+        self.last_requested_blocks = self.backlog;
         timeout(self.client.conn.flush(), 5).await
+    }
+
+    fn adjust_watermark(&mut self) {
+        trace!("Old high watermark: {}", self.high_watermark);
+
+        let now = Instant::now();
+        let blocks_done = self.last_requested_blocks - self.backlog;
+        let millis = (now - self.last_requested).as_millis();
+        let block_per_sec = if millis > 0 {
+            (1000 * blocks_done as u128 / millis) as i32
+        } else {
+            blocks_done as i32
+        };
+        self.rate.add_sample(block_per_sec);
+
+        let rate = self.rate.mean() as u32;
+        if rate > BACKLOG_LO_WATERMARK {
+            self.high_watermark = rate;
+        }
+
+        trace!("New high watermark: {}", self.high_watermark);
     }
 }
 
