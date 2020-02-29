@@ -164,7 +164,7 @@ impl<'a, C: AsyncStream> TorrentWorker<'a, C> {
     }
 }
 
-struct PieceProgress<'a> {
+struct PieceInProgress<'a> {
     piece: PieceWork<'a>,
     buf: Vec<u8>,
     downloaded: u32,
@@ -182,7 +182,7 @@ struct Download<'a, 'p, C> {
     piece_tx: Sender<Piece>,
 
     /// In-progress pieces
-    queue: VecDeque<PieceProgress<'p>>,
+    in_progress: VecDeque<PieceInProgress<'p>>,
 
     /// Current pending block requests
     backlog: u32,
@@ -218,12 +218,11 @@ impl<'a, 'p, C: AsyncStream> Download<'a, 'p, C> {
             }
         }
 
-        let queue = VecDeque::new();
         Ok(Download {
             client,
             work,
             piece_tx,
-            queue,
+            in_progress: VecDeque::new(),
             backlog: 0,
             high_watermark: BACKLOG_HI_WATERMARK,
             last_requested_blocks: 0,
@@ -237,7 +236,7 @@ impl<'a, 'p, C: AsyncStream> Download<'a, 'p, C> {
             // In case of failure, put the pending pieces back into the queue
             self.work
                 .borrow_mut()
-                .extend(self.queue.into_iter().map(|p| p.piece));
+                .extend(self.in_progress.into_iter().map(|p| p.piece));
             return Err(e);
         };
         Ok(())
@@ -248,8 +247,8 @@ impl<'a, 'p, C: AsyncStream> Download<'a, 'p, C> {
         loop {
             self.pick_pieces();
 
-            trace!("Pending pieces: {}", self.queue.len());
-            if self.queue.is_empty() && self.backlog == 0 {
+            trace!("Pending pieces: {}", self.in_progress.len());
+            if self.in_progress.is_empty() && self.backlog == 0 {
                 // No new pieces to download and no pending requests
                 // We're done
                 break;
@@ -274,33 +273,27 @@ impl<'a, 'p, C: AsyncStream> Download<'a, 'p, C> {
             }
         };
 
-        let i = match self.queue.iter().position(|s| s.piece.index == index) {
+        let i = match self.in_progress.iter().position(|s| s.piece.index == index) {
             Some(i) => i,
             _ => return Err("Received a piece that was not requested".into()),
         };
 
-        let mut piece_progress = self.queue.swap_remove_back(i).unwrap();
-        msg.read_piece(&mut self.client.conn, &mut piece_progress.buf)
-            .await?;
-        piece_progress.downloaded += len;
+        let mut p = self.in_progress.swap_remove_back(i).unwrap();
+        msg.read_piece(&mut self.client.conn, &mut p.buf).await?;
+        p.downloaded += len;
         self.backlog -= 1;
-        trace!(
-            "current index {}: {}/{}",
-            index,
-            piece_progress.downloaded,
-            piece_progress.piece.len
-        );
+        trace!("current index {}: {}/{}", index, p.downloaded, p.piece.len);
 
-        if piece_progress.downloaded < piece_progress.piece.len {
+        if p.downloaded < p.piece.len {
             // Not done yet
-            self.queue.push_back(piece_progress);
+            self.in_progress.push_back(p);
             return Ok(());
         }
 
-        self.piece_done(piece_progress).await
+        self.piece_done(p).await
     }
 
-    async fn piece_done(&mut self, state: PieceProgress<'p>) -> crate::Result<()> {
+    async fn piece_done(&mut self, state: PieceInProgress<'p>) -> crate::Result<()> {
         trace!("Piece downloaded: {}", state.piece.index);
         if !state.piece.check_integrity(&state.buf) {
             error!("Bad piece: Hash mismatch for {}", state.piece.index);
@@ -327,7 +320,7 @@ impl<'a, 'p, C: AsyncStream> Download<'a, 'p, C> {
 
         if let Some(piece) = self.work.borrow_mut().pop_front() {
             let buf = vec![0; piece.len as usize];
-            self.queue.push_back(PieceProgress {
+            self.in_progress.push_back(PieceInProgress {
                 piece,
                 buf,
                 downloaded: 0,
@@ -346,7 +339,7 @@ impl<'a, 'p, C: AsyncStream> Download<'a, 'p, C> {
 
         self.adjust_watermark();
 
-        for s in self.queue.iter_mut() {
+        for s in self.in_progress.iter_mut() {
             while self.backlog < self.high_watermark && s.requested < s.piece.len {
                 let block_size = MAX_BLOCK_SIZE.min(s.piece.len - s.requested);
                 let request = self
