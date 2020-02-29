@@ -58,26 +58,24 @@ impl<C: AsyncStream> Client<C> {
         match msg {
             Message::Choke => {
                 self.choked = true;
-                return Ok(None);
+                Ok(None)
             }
             Message::Unchoke => {
                 self.choked = false;
-                return Ok(None);
+                Ok(None)
             }
             Message::Bitfield { len } => {
                 let mut v = vec![0; len as usize];
                 msg.read_bitfield(&mut self.conn, &mut v).await?;
                 self.bitfield = v.into();
-                return Ok(None);
+                Ok(None)
             }
             Message::Have { index } => {
                 trace!("This guy has {} piece", index);
                 self.bitfield.set(index as usize, true);
-                return Ok(None);
+                Ok(None)
             }
-            _ => {
-                return Ok(Some(msg));
-            }
+            _ => Ok(Some(msg)),
         }
     }
 

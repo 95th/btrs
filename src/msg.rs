@@ -394,8 +394,8 @@ mod tests {
         let m = Message::read(&mut c).await.unwrap().unwrap();
         assert_eq!(
             Message::Piece {
-                index: 0x01020304,
-                begin: 0x04030201,
+                index: 0x0102_0304,
+                begin: 0x0403_0201,
                 len: 3
             },
             m
@@ -445,7 +445,7 @@ mod tests {
         let v = [0, 0, 0, 5, 4, 0x01, 0x02, 0x03, 0x04];
         let mut c = Cursor::new(&v);
         let m = Message::read(&mut c).await.unwrap().unwrap();
-        assert_eq!(Message::Have { index: 0x01020304 }, m);
+        assert_eq!(Message::Have { index: 0x0102_0304 }, m);
         assert_eq!(v.len(), c.position() as usize);
     }
 
@@ -470,9 +470,9 @@ mod tests {
         let m = Message::read(&mut c).await.unwrap().unwrap();
         assert_eq!(
             Message::Request {
-                index: 0x01020304,
-                begin: 0x01020304,
-                len: 0x01020304,
+                index: 0x0102_0304,
+                begin: 0x0102_0304,
+                len: 0x0102_0304,
             },
             m
         );
@@ -486,7 +486,7 @@ mod tests {
         let m = Message::read(&mut c).await.unwrap().unwrap();
         assert_eq!(
             Message::Piece {
-                index: 0x01020304,
+                index: 0x0102_0304,
                 begin: 0,
                 len: 3
             },
@@ -507,9 +507,9 @@ mod tests {
         let m = Message::read(&mut c).await.unwrap().unwrap();
         assert_eq!(
             Message::Cancel {
-                index: 0x01020304,
-                begin: 0x01020304,
-                len: 0x01020304,
+                index: 0x0102_0304,
+                begin: 0x0102_0304,
+                len: 0x0102_0304,
             },
             m
         );
