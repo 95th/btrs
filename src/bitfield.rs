@@ -37,10 +37,14 @@ impl BitField {
     }
 
     pub fn get(&self, idx: usize) -> bool {
-        assert!(idx < self.len);
-        let i = idx / 8;
-        let offset = idx % 8;
-        (self.arr[i] & 1 << offset) != 0
+        debug_assert!(idx < self.len);
+        if idx < self.len {
+            let i = idx / 8;
+            let offset = idx % 8;
+            (self.arr[i] & 1 << offset) != 0
+        } else {
+            false
+        }
     }
 
     pub fn set(&mut self, idx: usize, value: bool) -> bool {
