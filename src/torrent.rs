@@ -19,8 +19,8 @@ use tokio::io::AsyncWriteExt;
 use tokio::sync::mpsc::Sender;
 
 pub const HASH_LEN: usize = 20;
-const BACKLOG_HI_WATERMARK: u32 = 500;
-const BACKLOG_LO_WATERMARK: u32 = 2;
+const MAX_REQUESTS: u32 = 500;
+const MIN_REQUESTS: u32 = 2;
 const MAX_BLOCK_SIZE: u32 = 0x4000;
 
 #[derive(Debug)]
@@ -189,7 +189,7 @@ struct Download<'a, 'p, C> {
     backlog: u32,
 
     /// Max number of blocks that can be requested at once
-    high_watermark: u32,
+    max_requests: u32,
 
     /// Piece block request count since last request
     last_requested_blocks: u32,
@@ -225,7 +225,7 @@ impl<'a, 'p, C: AsyncStream> Download<'a, 'p, C> {
             piece_tx,
             in_progress: HashMap::new(),
             backlog: 0,
-            high_watermark: BACKLOG_LO_WATERMARK,
+            max_requests: 5,
             last_requested_blocks: 0,
             last_requested: Instant::now(),
             rate: SlidingAvg::new(10),
@@ -312,7 +312,7 @@ impl<'a, 'p, C: AsyncStream> Download<'a, 'p, C> {
     }
 
     fn pick_pieces(&mut self) {
-        if self.backlog >= self.high_watermark {
+        if self.backlog >= self.max_requests {
             // We need to wait for the backlog to come down to pick
             // new pieces
             return;
@@ -333,7 +333,7 @@ impl<'a, 'p, C: AsyncStream> Download<'a, 'p, C> {
     }
 
     async fn fill_backlog(&mut self) -> crate::Result<()> {
-        if self.client.choked || self.backlog >= BACKLOG_LO_WATERMARK {
+        if self.client.choked || self.backlog >= MIN_REQUESTS {
             // Either
             // - Choked - Wait for peer to send us an Unchoke
             // - Too many pending requests - Wait for peer to send us already requested pieces.
@@ -345,7 +345,7 @@ impl<'a, 'p, C: AsyncStream> Download<'a, 'p, C> {
         let mut need_flush = false;
 
         for s in self.in_progress.values_mut() {
-            while self.backlog < self.high_watermark && s.requested < s.piece.len {
+            while self.backlog < self.max_requests && s.requested < s.piece.len {
                 let block_size = MAX_BLOCK_SIZE.min(s.piece.len - s.requested);
                 let request = self
                     .client
@@ -370,7 +370,7 @@ impl<'a, 'p, C: AsyncStream> Download<'a, 'p, C> {
     }
 
     fn adjust_watermark(&mut self) {
-        debug!("Old high watermark: {}", self.high_watermark);
+        debug!("Old max_requests: {}", self.max_requests);
 
         let millis = (Instant::now() - self.last_requested).as_millis();
         if millis == 0 {
@@ -385,11 +385,11 @@ impl<'a, 'p, C: AsyncStream> Download<'a, 'p, C> {
         self.rate.add_sample(blocks_per_sec);
 
         let rate = self.rate.mean() as u32;
-        if rate >= BACKLOG_LO_WATERMARK {
-            self.high_watermark = rate.min(BACKLOG_HI_WATERMARK);
+        if rate > MIN_REQUESTS {
+            self.max_requests = rate.min(MAX_REQUESTS);
         }
 
-        debug!("New high watermark: {}", self.high_watermark);
+        debug!("New max_requests: {}", self.max_requests);
     }
 }
 
