@@ -12,6 +12,7 @@ use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use log::{debug, error, info, trace};
 use sha1::Sha1;
+use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::time::Instant;
 use tokio::io::AsyncWriteExt;
@@ -182,7 +183,7 @@ struct Download<'a, 'p, C> {
     piece_tx: Sender<Piece>,
 
     /// In-progress pieces
-    in_progress: VecDeque<PieceInProgress<'p>>,
+    in_progress: HashMap<u32, PieceInProgress<'p>>,
 
     /// Current pending block requests
     backlog: u32,
@@ -222,12 +223,12 @@ impl<'a, 'p, C: AsyncStream> Download<'a, 'p, C> {
             client,
             work,
             piece_tx,
-            in_progress: VecDeque::new(),
+            in_progress: HashMap::new(),
             backlog: 0,
             high_watermark: BACKLOG_HI_WATERMARK,
             last_requested_blocks: 0,
             last_requested: Instant::now(),
-            rate: SlidingAvg::new(10),
+            rate: SlidingAvg::new(20),
         })
     }
 
@@ -236,7 +237,7 @@ impl<'a, 'p, C: AsyncStream> Download<'a, 'p, C> {
             // In case of failure, put the pending pieces back into the queue
             self.work
                 .borrow_mut()
-                .extend(self.in_progress.into_iter().map(|p| p.piece));
+                .extend(self.in_progress.into_iter().map(|(_idx, p)| p.piece));
             return Err(e);
         }
         Ok(())
@@ -273,12 +274,11 @@ impl<'a, 'p, C: AsyncStream> Download<'a, 'p, C> {
             }
         };
 
-        let i = match self.in_progress.iter().position(|s| s.piece.index == index) {
-            Some(i) => i,
+        let mut p = match self.in_progress.remove(&index) {
+            Some(p) => p,
             _ => return Err("Received a piece that was not requested".into()),
         };
 
-        let mut p = self.in_progress.swap_remove_back(i).unwrap();
         msg.read_piece(&mut self.client.conn, &mut p.buf).await?;
         p.downloaded += len;
         self.backlog -= 1;
@@ -286,7 +286,7 @@ impl<'a, 'p, C: AsyncStream> Download<'a, 'p, C> {
 
         if p.downloaded < p.piece.len {
             // Not done yet
-            self.in_progress.push_back(p);
+            self.in_progress.insert(index, p);
             return Ok(());
         }
 
@@ -320,12 +320,15 @@ impl<'a, 'p, C: AsyncStream> Download<'a, 'p, C> {
 
         if let Some(piece) = self.work.borrow_mut().pop_front() {
             let buf = vec![0; piece.len as usize];
-            self.in_progress.push_back(PieceInProgress {
-                piece,
-                buf,
-                downloaded: 0,
-                requested: 0,
-            });
+            self.in_progress.insert(
+                piece.index,
+                PieceInProgress {
+                    piece,
+                    buf,
+                    downloaded: 0,
+                    requested: 0,
+                },
+            );
         }
     }
 
@@ -339,7 +342,7 @@ impl<'a, 'p, C: AsyncStream> Download<'a, 'p, C> {
 
         self.adjust_watermark();
 
-        for s in self.in_progress.iter_mut() {
+        for s in self.in_progress.values_mut() {
             while self.backlog < self.high_watermark && s.requested < s.piece.len {
                 let block_size = MAX_BLOCK_SIZE.min(s.piece.len - s.requested);
                 let request = self
