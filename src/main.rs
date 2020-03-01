@@ -11,7 +11,7 @@ use tokio::sync::mpsc;
 
 use clap::{App, Arg};
 
-#[tokio::main]
+#[tokio::main(basic_scheduler)]
 async fn main() -> btrs::Result<()> {
     let m = App::new("BT rust")
         .version("0.1")
