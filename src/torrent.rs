@@ -19,8 +19,8 @@ use tokio::io::AsyncWriteExt;
 use tokio::sync::mpsc::Sender;
 
 pub const HASH_LEN: usize = 20;
-const BACKLOG_HI_WATERMARK: u32 = 20;
-const BACKLOG_LO_WATERMARK: u32 = 10;
+const BACKLOG_HI_WATERMARK: u32 = 500;
+const BACKLOG_LO_WATERMARK: u32 = 2;
 const MAX_BLOCK_SIZE: u32 = 0x4000;
 
 #[derive(Debug)]
@@ -225,10 +225,10 @@ impl<'a, 'p, C: AsyncStream> Download<'a, 'p, C> {
             piece_tx,
             in_progress: HashMap::new(),
             backlog: 0,
-            high_watermark: BACKLOG_HI_WATERMARK,
+            high_watermark: BACKLOG_LO_WATERMARK,
             last_requested_blocks: 0,
             last_requested: Instant::now(),
-            rate: SlidingAvg::new(20),
+            rate: SlidingAvg::new(10),
         })
     }
 
@@ -342,6 +342,8 @@ impl<'a, 'p, C: AsyncStream> Download<'a, 'p, C> {
 
         self.adjust_watermark();
 
+        let mut need_flush = false;
+
         for s in self.in_progress.values_mut() {
             while self.backlog < self.high_watermark && s.requested < s.piece.len {
                 let block_size = MAX_BLOCK_SIZE.min(s.piece.len - s.requested);
@@ -352,13 +354,19 @@ impl<'a, 'p, C: AsyncStream> Download<'a, 'p, C> {
 
                 self.backlog += 1;
                 s.requested += block_size;
+                need_flush = true;
             }
         }
-        self.last_requested = Instant::now();
-        self.last_requested_blocks = self.backlog;
 
-        trace!("Flushing the client");
-        timeout(self.client.conn.flush(), 5).await
+        if need_flush {
+            self.last_requested_blocks = self.backlog;
+            self.last_requested = Instant::now();
+
+            trace!("Flushing the client");
+            timeout(self.client.conn.flush(), 5).await
+        } else {
+            Ok(())
+        }
     }
 
     fn adjust_watermark(&mut self) {
@@ -378,7 +386,7 @@ impl<'a, 'p, C: AsyncStream> Download<'a, 'p, C> {
 
         let rate = self.rate.mean() as u32;
         if rate >= BACKLOG_LO_WATERMARK {
-            self.high_watermark = rate;
+            self.high_watermark = rate.min(BACKLOG_HI_WATERMARK);
         }
 
         debug!("New high watermark: {}", self.high_watermark);

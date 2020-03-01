@@ -14,6 +14,8 @@ use std::net::SocketAddr;
 use tokio::io::{AsyncWriteExt, BufStream};
 use tokio::net::TcpStream;
 
+const DEFAULT_CAPACITY: usize = 1024 * 1024; // 1 Mb
+
 pub struct Client<C = Connection> {
     pub conn: C,
     pub choked: bool,
@@ -24,7 +26,11 @@ impl Client {
     pub async fn new_tcp(addr: SocketAddr) -> crate::Result<Self> {
         trace!("Create new TCP client to {:?}", addr);
         let conn = TcpStream::connect(addr).await?;
-        Ok(Client::new(Connection::Tcp(BufStream::new(conn))))
+        Ok(Client::new(Connection::Tcp(BufStream::with_capacity(
+            DEFAULT_CAPACITY,
+            DEFAULT_CAPACITY,
+            conn,
+        ))))
     }
 }
 
