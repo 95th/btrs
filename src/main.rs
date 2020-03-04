@@ -18,14 +18,14 @@ async fn main() -> btrs::Result<()> {
         .author("95th")
         .about("Bittorrent client in Rust")
         .arg(
-            Arg::with_name("torrent/magnet")
+            Arg::with_name("torrent|magnet")
                 .help("The torrent file path or Magnet link")
                 .required(true)
                 .index(1),
         )
         .get_matches();
 
-    let input = m.value_of("torrent/magnet").unwrap();
+    let input = m.value_of("torrent|magnet").unwrap();
     env_logger::init();
     if input.starts_with("magnet") {
         magnet(input).await
