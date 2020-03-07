@@ -23,6 +23,7 @@ pub mod avg;
 pub mod bitfield;
 pub mod client;
 mod error;
+pub mod fs;
 pub mod future;
 pub mod magnet;
 pub mod metainfo;
