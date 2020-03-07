@@ -1,12 +1,13 @@
 use btrs::bitfield::BitField;
+use btrs::cache::Cache;
 use btrs::magnet::MagnetUri;
 use btrs::peer;
 use btrs::torrent::TorrentFile;
 use btrs::work::Piece;
 use futures::StreamExt;
 use log::debug;
+use std::fs;
 use std::time::{Duration, Instant};
-use tokio::fs;
 use tokio::sync::mpsc;
 
 use clap::{App, Arg};
@@ -44,10 +45,11 @@ pub async fn magnet(uri: &str) -> btrs::Result<()> {
 }
 
 pub async fn torrent_file(file: &str) -> btrs::Result<()> {
-    let buf = fs::read(file).await?;
+    let buf = fs::read(file)?;
     let torrent_file = TorrentFile::parse(buf).ok_or("Unable to parse torrent file")?;
     let torrent = torrent_file.into_torrent().await?;
 
+    let torrent_name = torrent.name.clone();
     let mut worker = torrent.worker();
     let count = worker.connect_all().await;
     if count == 0 {
@@ -62,7 +64,12 @@ pub async fn torrent_file(file: &str) -> btrs::Result<()> {
     let piece_len = torrent.piece_len;
 
     let handle = tokio::spawn(async move {
-        let mut file = vec![0; len];
+        let file = fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(torrent_name)
+            .unwrap();
+        let mut cache = Cache::new(&file, 50, piece_len, len);
         let mut bitfield = BitField::new(num_pieces);
         let mut downloaded = 0;
         let mut tick = Instant::now();
@@ -72,12 +79,11 @@ pub async fn torrent_file(file: &str) -> btrs::Result<()> {
             if bitfield.get(idx) {
                 panic!("Duplicate piece downloaded: {}", piece.index);
             }
-            let start = idx * piece_len;
-            let end = len.min(start + piece_len);
-            file[start..end].copy_from_slice(&piece.buf);
+
+            cache.push(piece).unwrap();
             bitfield.set(idx, true);
 
-            downloaded += piece.buf.len();
+            downloaded += piece_len;
             let now = Instant::now();
             if now - tick >= Duration::from_secs(1) {
                 println!(
@@ -88,11 +94,12 @@ pub async fn torrent_file(file: &str) -> btrs::Result<()> {
                 tick = now;
             }
         }
+        cache.flush().unwrap();
         file
     });
 
     worker.run_worker(piece_tx).await;
     let file = handle.await.unwrap();
-    println!("File downloaded; size: {}", file.len());
+    println!("File downloaded; size: {}", file.metadata().unwrap().len());
     Ok(())
 }
