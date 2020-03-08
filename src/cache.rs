@@ -8,11 +8,11 @@ pub struct Cache<'a, F> {
     pieces: BinaryHeap<Piece>,
     piece_len: usize,
     limit: usize,
-    file: &'a F,
+    file: &'a mut F,
 }
 
 impl<F: FileExt> Cache<'_, F> {
-    pub fn new(file: &F, limit: usize, piece_len: usize) -> Cache<'_, F> {
+    pub fn new(file: &mut F, limit: usize, piece_len: usize) -> Cache<'_, F> {
         Cache {
             file,
             piece_len,

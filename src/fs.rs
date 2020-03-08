@@ -26,7 +26,7 @@ pub trait FileExt {
     /// may or may not be initialized.
     ///
     /// Note that similar to File::write, it is not an error to return a short write.
-    fn write_at(&self, buf: &[u8], offset: u64) -> io::Result<usize>;
+    fn write_at(&mut self, buf: &[u8], offset: u64) -> io::Result<usize>;
 
     fn read_exact_at(&self, mut buf: &mut [u8], mut offset: u64) -> io::Result<()> {
         while !buf.is_empty() {
@@ -51,7 +51,7 @@ pub trait FileExt {
         }
     }
 
-    fn write_all_at(&self, mut buf: &[u8], mut offset: u64) -> io::Result<()> {
+    fn write_all_at(&mut self, mut buf: &[u8], mut offset: u64) -> io::Result<()> {
         while !buf.is_empty() {
             match self.write_at(buf, offset) {
                 Ok(0) => {
@@ -78,7 +78,7 @@ impl FileExt for File {
         std::os::unix::fs::FileExt::read_at(self, buf, offset)
     }
 
-    fn write_at(&self, buf: &[u8], offset: u64) -> io::Result<usize> {
+    fn write_at(&mut self, buf: &[u8], offset: u64) -> io::Result<usize> {
         std::os::unix::fs::FileExt::write_at(self, buf, offset)
     }
 }
@@ -89,8 +89,32 @@ impl FileExt for File {
         std::os::windows::fs::FileExt::seek_read(self, buf, offset)
     }
 
-    fn write_at(&self, buf: &[u8], offset: u64) -> io::Result<usize> {
+    fn write_at(&mut self, buf: &[u8], offset: u64) -> io::Result<usize> {
         std::os::windows::fs::FileExt::seek_write(self, buf, offset)
+    }
+}
+
+impl FileExt for Vec<u8> {
+    fn read_at(&self, buf: &mut [u8], offset: u64) -> io::Result<usize> {
+        let offset = offset as usize;
+        if offset >= self.len() {
+            return Ok(0);
+        }
+
+        let len = buf.len().min(self.len() - offset);
+
+        buf[..len].copy_from_slice(&self[offset..][..len]);
+        Ok(len)
+    }
+
+    fn write_at(&mut self, buf: &[u8], offset: u64) -> io::Result<usize> {
+        let offset = offset as usize;
+        if offset >= self.len() {
+            self.resize(offset + buf.len(), 0);
+        }
+
+        self[offset..][..buf.len()].copy_from_slice(buf);
+        Ok(buf.len())
     }
 }
 
@@ -125,7 +149,7 @@ mod tests {
                 .write(true)
                 .read(true)
                 .clone();
-            let rw = check!(oo.open(&filename));
+            let mut rw = check!(oo.open(&filename));
 
             assert_eq!(check!(rw.write_at(write1.as_bytes(), 5)), write1.len());
             assert_eq!(check!(rw.read_at(&mut buf, 5)), write1.len());

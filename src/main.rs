@@ -62,12 +62,12 @@ pub async fn torrent_file(file: &str) -> btrs::Result<()> {
     let (piece_tx, mut piece_rx) = mpsc::channel::<Piece>(200);
 
     let handle = tokio::spawn(async move {
-        let file = fs::OpenOptions::new()
+        let mut file = fs::OpenOptions::new()
             .create_new(true)
             .write(true)
             .open(torrent_name)
             .unwrap();
-        let mut cache = Cache::new(&file, 50, piece_len);
+        let mut cache = Cache::new(&mut file, 50, piece_len);
         let mut bitfield = BitField::new(num_pieces);
         let mut downloaded = 0;
         let mut tick = Instant::now();
