@@ -2,18 +2,17 @@ use crate::fs::FileExt;
 use crate::work::Piece;
 use log::{debug, trace};
 use std::collections::BinaryHeap;
-use std::fs::File;
 use std::io;
 
-pub struct Cache<'a> {
+pub struct Cache<'a, F> {
     pieces: BinaryHeap<Piece>,
     piece_len: usize,
     limit: usize,
-    file: &'a File,
+    file: &'a F,
 }
 
-impl Cache<'_> {
-    pub fn new(file: &File, limit: usize, piece_len: usize) -> Cache<'_> {
+impl<F: FileExt> Cache<'_, F> {
+    pub fn new(file: &F, limit: usize, piece_len: usize) -> Cache<'_, F> {
         Cache {
             file,
             piece_len,
