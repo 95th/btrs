@@ -109,7 +109,7 @@ impl FileExt for Vec<u8> {
 
     fn write_at(&mut self, buf: &[u8], offset: u64) -> io::Result<usize> {
         let offset = offset as usize;
-        if offset >= self.len() {
+        if offset + buf.len() >= self.len() {
             self.resize(offset + buf.len(), 0);
         }
 
