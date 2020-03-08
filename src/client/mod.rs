@@ -156,11 +156,11 @@ impl<C: AsyncStream> Client<C> {
     }
 
     pub async fn send_ext(&mut self, id: u8, value: Entry) -> io::Result<()> {
-        trace!("Send extended message");
         let data = value.to_vec();
         let msg = Message::Extended {
             len: data.len() as u32,
         };
+        trace!("Send extended message : {:?} ; payload: {:?}", msg, value);
         msg.write_ext(&mut self.conn, id, &data).await
     }
 
@@ -329,14 +329,26 @@ mod tests {
     async fn extended() {
         let mut data = vec![];
         let mut tx = Client::new(Cursor::new(&mut data));
-        tx.send_ext(1, Entry::Int(100)).await.unwrap();
+        let payload = Entry::List(vec![Entry::Int(1), Entry::Int(2), Entry::Int(3)]);
+        tx.send_ext(1, payload).await.unwrap();
+
+        println!("{:?}", data);
 
         let mut rx = Client::new(Cursor::new(data));
         let msg = rx.read().await.unwrap().unwrap();
-        assert_eq!(Message::Extended { len: 6 }, msg);
+        assert_eq!(Message::Extended { len: 12 }, msg);
 
         let mut buf = vec![];
         let ext_msg = msg.read_ext(&mut rx.conn, &mut buf).await.unwrap();
-        assert_eq!(100, ext_msg.node().as_int().unwrap());
+        assert_eq!(1, ext_msg.id);
+
+        let list = ext_msg.node().as_list().unwrap();
+        assert_eq!(
+            vec![1, 2, 3],
+            list.iter()
+                .map(|n| n.as_int())
+                .collect::<Option<Vec<_>>>()
+                .unwrap()
+        );
     }
 }

@@ -103,7 +103,7 @@ impl Message {
             writer.write_u32(data.len() as u32 + 2).await?;
             writer.write_u8(self.type_id()).await?;
             writer.write_u8(id).await?;
-            writer.write_all(&data).await?;
+            writer.write_all(data).await?;
         }
         Ok(())
     }
@@ -304,6 +304,7 @@ impl ExtendedMessage<'_> {
     }
 
     pub fn metadata(&self) -> Option<Metadata> {
+        trace!("metadata: {:#?}", self.value);
         let dict = self.value.as_dict()?;
         let m = dict.get_dict(b"m")?;
         let id = m.get_int(b"ut_metadata")? as u8;
