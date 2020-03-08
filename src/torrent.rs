@@ -10,7 +10,7 @@ use crate::work::{Piece, PieceWork, WorkQueue};
 use ben::Node;
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
-use log::{debug, error, info, trace};
+use log::{debug, error, info, trace, warn};
 use sha1::Sha1;
 use std::collections::HashMap;
 use std::collections::VecDeque;
@@ -133,7 +133,7 @@ impl<'a> TorrentWorker<'a, Connection> {
         while let Some(result) = clients.next().await {
             match result {
                 Ok(client) => self.connected.push(client),
-                Err(e) => debug!("Error occurred: {}", e),
+                Err(e) => warn!("Error occurred: {}", e),
             }
         }
 
@@ -159,7 +159,7 @@ impl<'a, C: AsyncStream> TorrentWorker<'a, C> {
 
         while let Some(result) = futures.next().await {
             if let Err(e) = result {
-                debug!("Error occurred: {}", e);
+                warn!("Error occurred: {}", e);
             }
         }
     }
@@ -214,7 +214,7 @@ impl<'a, 'p, C: AsyncStream> Download<'a, 'p, C> {
         while client.choked {
             trace!("We're choked. Waiting for unchoke");
             if let Some(msg) = client.read().await? {
-                debug!("Ignoring: {:?}", msg);
+                warn!("Ignoring: {:?}", msg);
                 msg.read_discard(&mut client.conn).await?;
             }
         }

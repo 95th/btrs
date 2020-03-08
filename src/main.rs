@@ -5,7 +5,7 @@ use btrs::peer;
 use btrs::torrent::TorrentFile;
 use btrs::work::Piece;
 use futures::StreamExt;
-use log::debug;
+use log::{debug, error};
 use std::fs;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
@@ -57,11 +57,9 @@ pub async fn torrent_file(file: &str) -> btrs::Result<()> {
     }
 
     let num_pieces = worker.work.borrow().len();
+    let piece_len = torrent.piece_len;
 
     let (piece_tx, mut piece_rx) = mpsc::channel::<Piece>(200);
-
-    let len = torrent.length;
-    let piece_len = torrent.piece_len;
 
     let handle = tokio::spawn(async move {
         let file = fs::OpenOptions::new()
@@ -69,7 +67,7 @@ pub async fn torrent_file(file: &str) -> btrs::Result<()> {
             .write(true)
             .open(torrent_name)
             .unwrap();
-        let mut cache = Cache::new(&file, 50, piece_len, len);
+        let mut cache = Cache::new(&file, 50, piece_len);
         let mut bitfield = BitField::new(num_pieces);
         let mut downloaded = 0;
         let mut tick = Instant::now();
@@ -77,7 +75,7 @@ pub async fn torrent_file(file: &str) -> btrs::Result<()> {
         while let Some(piece) = piece_rx.next().await {
             let idx = piece.index as usize;
             if bitfield.get(idx) {
-                panic!("Duplicate piece downloaded: {}", piece.index);
+                error!("Duplicate piece downloaded: {}", piece.index);
             }
 
             cache.push(piece).unwrap();
@@ -95,6 +93,7 @@ pub async fn torrent_file(file: &str) -> btrs::Result<()> {
             }
         }
         cache.flush().unwrap();
+        println!("All pieces downloaded: {}", bitfield.all_true());
         file
     });
 
