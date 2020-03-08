@@ -45,19 +45,19 @@ impl Cache<'_> {
             if piece.index == curr_idx {
                 last.buf.append(&mut piece.buf);
                 continue;
-            } else {
-                trace!(
-                    "Writing index {}, {} bytes [piece len: {}, so pieces: {}]",
-                    last.index,
-                    last.buf.len(),
-                    self.piece_len,
-                    last.buf.len() / self.piece_len
-                );
-                let offset = self.index_to_offset(last.index);
-                self.file.write_all_at(&last.buf, offset as u64)?;
-                last = piece;
-                curr_idx = last.index;
             }
+
+            trace!(
+                "Writing index {}, {} bytes [piece len: {}, so pieces: {}]",
+                last.index,
+                last.buf.len(),
+                self.piece_len,
+                last.buf.len() / self.piece_len
+            );
+            let offset = self.index_to_offset(last.index);
+            self.file.write_all_at(&last.buf, offset as u64)?;
+            last = piece;
+            curr_idx = last.index;
         }
 
         trace!(
