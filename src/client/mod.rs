@@ -4,7 +4,7 @@ mod handshake;
 use crate::bitfield::BitField;
 use crate::client::handshake::Handshake;
 use crate::metainfo::InfoHash;
-use crate::msg::Message;
+use crate::msg::{Message, MetadataMsg};
 use crate::peer::PeerId;
 use ben::Entry;
 pub use conn::{AsyncStream, Connection};
@@ -150,9 +150,9 @@ impl<C: AsyncStream> Client<C> {
         msg.write_buf(&mut self.conn, buf).await
     }
 
-    pub async fn send_ext_handshake(&mut self) -> io::Result<()> {
+    pub async fn send_ext_handshake(&mut self, id: u8) -> io::Result<()> {
         trace!("Send extended handshake");
-        Message::Extended { len: 0 }.write(&mut self.conn).await
+        self.send_ext(0, MetadataMsg::Handshake(id).into()).await
     }
 
     pub async fn send_ext(&mut self, id: u8, value: Entry) -> io::Result<()> {
@@ -318,7 +318,7 @@ mod tests {
     async fn extended_handshake() {
         let mut data = vec![];
         let mut tx = Client::new(Cursor::new(&mut data));
-        tx.send_ext_handshake().await.unwrap();
+        tx.send_ext_handshake(1).await.unwrap();
 
         let mut rx = Client::new(Cursor::new(data));
         let msg = rx.read().await.unwrap().unwrap();

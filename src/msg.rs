@@ -280,7 +280,7 @@ pub struct ExtendedMessage<'a> {
 }
 
 mod msg_type {
-    pub const REQUEST: i64 = 1;
+    pub const REQUEST: i64 = 0;
     pub const DATA: i64 = 1;
     pub const REJECT: i64 = 2;
 }
@@ -313,6 +313,7 @@ impl ExtendedMessage<'_> {
     }
 
     pub fn data(&self, expected_piece: i64) -> Result<&[u8], &'static str> {
+        trace!("data: {:#?}", self.value);
         let dict = self.value.as_dict().ok_or("Not a dict")?;
 
         let msg_type = dict.get_int(b"msg_type").ok_or("msg_type is not int")?;
@@ -323,11 +324,6 @@ impl ExtendedMessage<'_> {
         let piece = dict.get_int(b"piece").ok_or("piece is not int")?;
         if piece != expected_piece {
             return Err("Not the right piece");
-        }
-
-        let total_size = dict.get_int(b"total_size").ok_or("total_size is not int")?;
-        if self.rest.len() as i64 != total_size {
-            return Err("Incorrect size");
         }
 
         if self.rest.len() > METADATA_PIECE_LEN {
@@ -345,6 +341,7 @@ pub struct Metadata {
 }
 
 pub enum MetadataMsg {
+    Handshake(u8),
     Request(i64),
     Reject(i64),
     Data(i64, i64),
@@ -354,6 +351,13 @@ impl From<MetadataMsg> for Entry {
     fn from(msg: MetadataMsg) -> Self {
         let mut dict = BTreeMap::new();
         match msg {
+            MetadataMsg::Handshake(id) => {
+                let mut m = BTreeMap::new();
+                m.insert("ut_metadata", (id as i64).into());
+                dict.insert("m", m.into());
+                dict.insert("reqq", 500.into());
+                dict.insert("p", 6881.into());
+            }
             MetadataMsg::Request(piece) => {
                 dict.insert("msg_type", msg_type::REQUEST.into());
                 dict.insert("piece", piece.into());

@@ -5,6 +5,7 @@ use crate::metainfo::InfoHash;
 use crate::msg::{Message, MetadataMsg};
 use crate::peer::{Peer, PeerId};
 use crate::torrent::Torrent;
+use ben::Node;
 use futures::stream::FuturesUnordered;
 use futures::stream::StreamExt;
 use log::debug;
@@ -28,7 +29,7 @@ impl MagnetUri {
         parser::MagnetUriParser::new_lenient().parse(s)
     }
 
-    pub async fn request_metadata(&self, peer_id: Box<PeerId>) -> Result<Torrent, &'static str> {
+    pub async fn request_metadata(&self, peer_id: Box<PeerId>) -> crate::Result<Torrent> {
         let (peers, peers6) = self.get_peers(&peer_id).await?;
 
         let mut futs: FuturesUnordered<_> = peers
@@ -42,23 +43,35 @@ impl MagnetUri {
             match result {
                 Ok(data) => {
                     drop(futs);
-                    debug!("Got metadata: {:?}", data);
+                    let node = Node::parse(&data)?;
+                    let info_dict = node.as_dict().ok_or("Not a dict")?;
+                    let length = info_dict.get_int(b"length").ok_or("`length` not found")? as usize;
+                    let name = info_dict.get_str(b"name").unwrap_or_default().to_string();
+                    let piece_len = info_dict
+                        .get_int(b"piece length")
+                        .ok_or("`piece_length` not found")?
+                        as usize;
+                    let piece_hashes = info_dict
+                        .get(b"pieces")
+                        .ok_or("`pieces` not found")?
+                        .data()
+                        .to_vec();
                     return Ok(Torrent {
                         peers,
                         peers6,
                         info_hash: self.info_hash.clone(),
                         peer_id,
-                        piece_len: 0,
-                        piece_hashes: vec![],
-                        length: 0,
-                        name: "".to_string(),
+                        piece_len,
+                        piece_hashes,
+                        length,
+                        name,
                     });
                 }
                 Err(e) => debug!("Error : {}", e),
             }
         }
 
-        Err("Metadata request failed")
+        Err("Metadata request failed".into())
     }
 
     async fn get_peers(&self, peer_id: &PeerId) -> Result<(Vec<Peer>, Vec<Peer>), &'static str> {
@@ -96,7 +109,6 @@ impl MagnetUri {
     async fn try_get(&self, peer: &Peer, peer_id: &PeerId) -> crate::Result<Vec<u8>> {
         let mut client = Client::new_tcp(peer.addr).await?;
         client.handshake(&self.info_hash, peer_id).await?;
-        client.send_ext_handshake().await?;
         client.conn.flush().await?;
 
         let mut ext_buf = vec![];
@@ -119,10 +131,11 @@ impl MagnetUri {
             .ok_or("Peer doesn't support Metadata extension")?;
 
         debug!("{:?}", metadata);
+        client.send_ext_handshake(metadata.id).await?;
 
         let mut remaining = metadata.len;
         let mut piece = 0;
-        let mut buf = vec![0; remaining];
+        let mut buf = Vec::with_capacity(remaining);
         while remaining > 0 {
             let m = MetadataMsg::Request(piece);
             client.send_ext(metadata.id, m.into()).await?;
@@ -136,6 +149,10 @@ impl MagnetUri {
                 }
 
                 let data = ext.data(piece)?;
+                if data.len() > remaining {
+                    return Err("Incorrect data length received".into());
+                }
+
                 buf.extend(data);
                 remaining -= data.len();
                 piece += 1;
