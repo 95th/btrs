@@ -316,14 +316,14 @@ impl ExtendedMessage<'_> {
         trace!("data: {:#?}", self.value);
         let dict = self.value.as_dict().ok_or("Not a dict")?;
 
-        let msg_type = dict.get_int(b"msg_type").ok_or("msg_type is not int")?;
+        let msg_type = dict.get_int(b"msg_type").ok_or("`msg_type` not found")?;
         if msg_type != msg_type::DATA {
             return Err("Not a DATA message");
         }
 
-        let piece = dict.get_int(b"piece").ok_or("piece is not int")?;
+        let piece = dict.get_int(b"piece").ok_or("`piece` not found")?;
         if piece != expected_piece {
-            return Err("Not the right piece");
+            return Err("Incorrect piece");
         }
 
         if self.rest.len() > METADATA_PIECE_LEN {
