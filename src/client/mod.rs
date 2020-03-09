@@ -322,7 +322,12 @@ mod tests {
 
         let mut rx = Client::new(Cursor::new(data));
         let msg = rx.read().await.unwrap().unwrap();
-        assert_eq!(Message::Extended { len: 0 }, msg);
+        assert_eq!(Message::Extended { len: 45 }, msg);
+
+        let mut buf = vec![];
+        let ext = msg.read_ext(&mut rx.conn, &mut buf).await.unwrap();
+        let expected = b"d1:md11:ut_metadatai1ee1:pi6881e4:reqqi500ee";
+        assert_eq!(&expected[..], ext.node().data());
     }
 
     #[tokio::test]
