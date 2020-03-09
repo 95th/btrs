@@ -11,7 +11,7 @@ members = ["dht"]
 url = "2.1.1"
 data-encoding = "2.1.2"
 sha1 = { version = "0.6.0", features = ["std"] }
-tokio = { version = "0.2.11", features = ["io-util", "net", "fs", "macros", "stream"] }
+tokio = { version = "0.2.11", features = ["io-util", "net", "macros", "stream"] }
 reqwest = "0.10.1"
 futures = "0.3.1"
 rand = "0.7.3"
