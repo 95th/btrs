@@ -2,7 +2,7 @@ use btrs::bitfield::BitField;
 use btrs::cache::Cache;
 use btrs::magnet::MagnetUri;
 use btrs::peer;
-use btrs::torrent::TorrentFile;
+use btrs::torrent::{Torrent, TorrentFile};
 use btrs::work::Piece;
 use futures::StreamExt;
 use log::{debug, error};
@@ -40,15 +40,18 @@ pub async fn magnet(uri: &str) -> btrs::Result<()> {
     let peer_id = peer::generate_peer_id();
     debug!("Our peer_id: {:?}", peer_id);
 
-    magnet.request_metadata(peer_id).await?;
-    todo!()
+    let torrent = magnet.request_metadata(peer_id).await?;
+    download(torrent).await
 }
 
 pub async fn torrent_file(file: &str) -> btrs::Result<()> {
     let buf = fs::read(file)?;
     let torrent_file = TorrentFile::parse(buf).ok_or("Unable to parse torrent file")?;
     let torrent = torrent_file.into_torrent().await?;
+    download(torrent).await
+}
 
+pub async fn download(torrent: Torrent) -> btrs::Result<()> {
     let torrent_name = torrent.name.clone();
     let mut worker = torrent.worker();
     let count = worker.connect_all().await;

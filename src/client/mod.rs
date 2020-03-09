@@ -4,7 +4,7 @@ mod handshake;
 use crate::bitfield::BitField;
 use crate::client::handshake::Handshake;
 use crate::metainfo::InfoHash;
-use crate::msg::Message;
+use crate::msg::{Message, MetadataMsg};
 use crate::peer::PeerId;
 use ben::Entry;
 pub use conn::{AsyncStream, Connection};
@@ -150,17 +150,17 @@ impl<C: AsyncStream> Client<C> {
         msg.write_buf(&mut self.conn, buf).await
     }
 
-    pub async fn send_ext_handshake(&mut self) -> io::Result<()> {
+    pub async fn send_ext_handshake(&mut self, id: u8) -> io::Result<()> {
         trace!("Send extended handshake");
-        Message::Extended { len: 0 }.write(&mut self.conn).await
+        self.send_ext(0, MetadataMsg::Handshake(id).into()).await
     }
 
     pub async fn send_ext(&mut self, id: u8, value: Entry) -> io::Result<()> {
-        trace!("Send extended message");
         let data = value.to_vec();
         let msg = Message::Extended {
             len: data.len() as u32,
         };
+        trace!("Send extended message : {:?} ; payload: {:?}", msg, value);
         msg.write_ext(&mut self.conn, id, &data).await
     }
 
@@ -318,25 +318,42 @@ mod tests {
     async fn extended_handshake() {
         let mut data = vec![];
         let mut tx = Client::new(Cursor::new(&mut data));
-        tx.send_ext_handshake().await.unwrap();
+        tx.send_ext_handshake(1).await.unwrap();
 
         let mut rx = Client::new(Cursor::new(data));
         let msg = rx.read().await.unwrap().unwrap();
-        assert_eq!(Message::Extended { len: 0 }, msg);
+        assert_eq!(Message::Extended { len: 45 }, msg);
+
+        let mut buf = vec![];
+        let ext = msg.read_ext(&mut rx.conn, &mut buf).await.unwrap();
+        let expected = b"d1:md11:ut_metadatai1ee1:pi6881e4:reqqi500ee";
+        assert_eq!(&expected[..], ext.node().data());
     }
 
     #[tokio::test]
     async fn extended() {
         let mut data = vec![];
         let mut tx = Client::new(Cursor::new(&mut data));
-        tx.send_ext(1, Entry::Int(100)).await.unwrap();
+        let payload = Entry::List(vec![Entry::Int(1), Entry::Int(2), Entry::Int(3)]);
+        tx.send_ext(1, payload).await.unwrap();
+
+        println!("{:?}", data);
 
         let mut rx = Client::new(Cursor::new(data));
         let msg = rx.read().await.unwrap().unwrap();
-        assert_eq!(Message::Extended { len: 6 }, msg);
+        assert_eq!(Message::Extended { len: 12 }, msg);
 
         let mut buf = vec![];
         let ext_msg = msg.read_ext(&mut rx.conn, &mut buf).await.unwrap();
-        assert_eq!(100, ext_msg.node().as_int().unwrap());
+        assert_eq!(1, ext_msg.id);
+
+        let list = ext_msg.node().as_list().unwrap();
+        assert_eq!(
+            vec![1, 2, 3],
+            list.iter()
+                .map(|n| n.as_int())
+                .collect::<Option<Vec<_>>>()
+                .unwrap()
+        );
     }
 }
