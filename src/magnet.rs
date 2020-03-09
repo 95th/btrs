@@ -20,6 +20,13 @@ pub struct MagnetUri {
     peer_addrs: Vec<SocketAddr>,
 }
 
+struct TorrentInfo {
+    piece_len: usize,
+    length: usize,
+    piece_hashes: Vec<u8>,
+    name: String,
+}
+
 impl MagnetUri {
     pub fn parse(s: &str) -> Result<Self, &'static str> {
         parser::MagnetUriParser::new().parse(s)
@@ -42,36 +49,40 @@ impl MagnetUri {
         while let Some(result) = futs.next().await {
             match result {
                 Ok(data) => {
-                    drop(futs);
-                    let node = Node::parse(&data)?;
-                    let info_dict = node.as_dict().ok_or("Not a dict")?;
-                    let length = info_dict.get_int(b"length").ok_or("`length` not found")? as usize;
-                    let name = info_dict.get_str(b"name").unwrap_or_default().to_string();
-                    let piece_len = info_dict
-                        .get_int(b"piece length")
-                        .ok_or("`piece_length` not found")?
-                        as usize;
-                    let piece_hashes = info_dict
-                        .get(b"pieces")
-                        .ok_or("`pieces` not found")?
-                        .data()
-                        .to_vec();
-                    return Ok(Torrent {
-                        peers,
-                        peers6,
-                        info_hash: self.info_hash.clone(),
-                        peer_id,
-                        piece_len,
-                        piece_hashes,
-                        length,
-                        name,
-                    });
+                    if let Some(t) = self.read_info(&data) {
+                        drop(futs);
+                        return Ok(Torrent {
+                            peers,
+                            peers6,
+                            peer_id,
+                            info_hash: self.info_hash.clone(),
+                            piece_len: t.piece_len,
+                            length: t.length,
+                            piece_hashes: t.piece_hashes,
+                            name: t.name,
+                        });
+                    }
                 }
                 Err(e) => debug!("Error : {}", e),
             }
         }
 
         Err("Metadata request failed".into())
+    }
+
+    fn read_info(&self, data: &[u8]) -> Option<TorrentInfo> {
+        let node = Node::parse(&data).ok()?;
+        let info_dict = node.as_dict()?;
+        let length = info_dict.get_int(b"length")? as usize;
+        let name = info_dict.get_str(b"name").unwrap_or_default().to_string();
+        let piece_len = info_dict.get_int(b"piece length")? as usize;
+        let piece_hashes = info_dict.get(b"pieces")?.data().to_vec();
+        Some(TorrentInfo {
+            piece_len,
+            length,
+            piece_hashes,
+            name,
+        })
     }
 
     async fn get_peers(&self, peer_id: &PeerId) -> Result<(Vec<Peer>, Vec<Peer>), &'static str> {
