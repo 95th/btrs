@@ -8,7 +8,7 @@ use crate::torrent::Torrent;
 use ben::Node;
 use futures::stream::FuturesUnordered;
 use futures::stream::StreamExt;
-use log::debug;
+use log::{debug, trace};
 use std::net::SocketAddr;
 use tokio::io::AsyncWriteExt;
 
@@ -51,6 +51,7 @@ impl MagnetUri {
                 Ok(data) => {
                     if let Some(t) = self.read_info(&data) {
                         drop(futs);
+                        trace!("Metadata requested successfully");
                         return Ok(Torrent {
                             peers,
                             peers6,
