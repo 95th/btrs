@@ -92,15 +92,9 @@ impl MagnetUri {
         let mut peers = vec![];
         let mut peers6 = vec![];
 
-        let mut futs: FuturesUnordered<_> = self
-            .tracker_urls
-            .iter()
-            .map(|url| AnnounceRequest::new(url, &self.info_hash, &peer_id, 6881).send())
-            .map(|fut| timeout(fut, 10))
-            .collect();
-
-        while let Some(result) = futs.next().await {
-            match result {
+        for url in &self.tracker_urls {
+            let req = AnnounceRequest::new(url, &self.info_hash, &peer_id, 6881);
+            match timeout(req.send(), 10).await {
                 Ok(r) => {
                     peers.extend(r.peers);
                     peers6.extend(r.peers6);
