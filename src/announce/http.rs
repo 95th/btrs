@@ -1,16 +1,10 @@
+use crate::announce::AnnounceResponse;
 use crate::metainfo::InfoHash;
 use crate::peer::{Peer, PeerId};
 use ben::Node;
 use log::debug;
 use reqwest::Client;
 use std::convert::TryInto;
-
-#[derive(Debug)]
-pub struct AnnounceResponse {
-    pub interval: usize,
-    pub peers: Vec<Peer>,
-    pub peers6: Vec<Peer>,
-}
 
 pub async fn announce(
     url: &str,
