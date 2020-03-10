@@ -1,4 +1,4 @@
-use crate::announce::announce;
+use crate::announce::AnnounceRequest;
 use crate::client::Client;
 use crate::future::timeout;
 use crate::metainfo::InfoHash;
@@ -95,7 +95,7 @@ impl MagnetUri {
         let mut futs: FuturesUnordered<_> = self
             .tracker_urls
             .iter()
-            .map(|url| announce(url, &self.info_hash, &peer_id, 6881))
+            .map(|url| AnnounceRequest::new(url, &self.info_hash, &peer_id, 6881).send())
             .map(|fut| timeout(fut, 10))
             .collect();
 

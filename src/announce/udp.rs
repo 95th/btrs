@@ -1,6 +1,5 @@
-use crate::announce::AnnounceResponse;
-use crate::metainfo::InfoHash;
-use crate::peer::{Peer, PeerId};
+use crate::announce::{AnnounceRequest, AnnounceResponse};
+use crate::peer::Peer;
 use log::trace;
 use rand::thread_rng;
 use rand::Rng;
@@ -11,20 +10,15 @@ use tokio::net::UdpSocket;
 
 pub const TRACKER_CONSTANT: u64 = 0x41727101980;
 
-pub mod action {
+mod action {
     pub const CONNECT: u32 = 0;
     pub const ANNOUNCE: u32 = 1;
 }
 
-pub async fn announce(
-    url: &str,
-    info_hash: &InfoHash,
-    peer_id: &PeerId,
-    port: u16,
-) -> crate::Result<AnnounceResponse> {
-    let mut c = UdpTrackerConnection::new(url).await?;
+pub async fn announce(req: AnnounceRequest<'_>) -> crate::Result<AnnounceResponse> {
+    let mut c = UdpTrackerConnection::new(req.url).await?;
     c.connect().await?;
-    c.announce(info_hash, peer_id, port).await
+    c.announce(req).await
 }
 
 #[derive(Debug)]
@@ -92,26 +86,21 @@ impl UdpTrackerConnection {
         Ok(())
     }
 
-    async fn announce(
-        &mut self,
-        info_hash: &InfoHash,
-        peer_id: &PeerId,
-        port: u16,
-    ) -> crate::Result<AnnounceResponse> {
+    async fn announce(&mut self, req: AnnounceRequest<'_>) -> crate::Result<AnnounceResponse> {
         let mut c = Cursor::new(&mut self.buf[..]);
         c.write_u64(self.conn_id).await?;
         c.write_u32(action::ANNOUNCE).await?;
         c.write_u32(self.txn_id).await?;
-        c.write_all(info_hash.as_ref()).await?;
-        c.write_all(peer_id).await?;
+        c.write_all(req.info_hash.as_ref()).await?;
+        c.write_all(req.peer_id).await?;
         c.write_u64(0).await?; // downloaded
         c.write_u64(0).await?; // left
         c.write_u64(0).await?; // uploaded
-        c.write_u32(0).await?; // event
+        c.write_u32(req.event as u32).await?;
         c.write_u32(0).await?; // IP addr
         c.write_u32(0).await?; // key
         c.write_i32(-1).await?; // num_want
-        c.write_u16(port).await?; // port
+        c.write_u16(req.port).await?; // port
 
         let n = self.conn.send(&self.buf[..98]).await?;
         if n != 98 {

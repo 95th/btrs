@@ -1,4 +1,4 @@
-use crate::announce::{announce, AnnounceResponse};
+use crate::announce::{AnnounceRequest, AnnounceResponse};
 use crate::avg::SlidingAvg;
 use crate::bitfield::BitField;
 use crate::client::{AsyncStream, Client, Connection};
@@ -64,8 +64,8 @@ impl TorrentFile {
         debug!("Our peer_id: {:x?}", peer_id);
 
         debug!("Infohash: {:x?}", self.info_hash);
-        let resp = announce(&self.announce, &self.info_hash, &peer_id, 6881).await?;
-        let AnnounceResponse { peers, peers6, .. } = resp;
+        let req = AnnounceRequest::new(&self.announce, &self.info_hash, &peer_id, 6881);
+        let AnnounceResponse { peers, peers6, .. } = req.send().await?;
 
         Ok(Torrent {
             peers,
