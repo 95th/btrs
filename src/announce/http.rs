@@ -1,25 +1,19 @@
-use crate::announce::AnnounceResponse;
-use crate::metainfo::InfoHash;
-use crate::peer::{Peer, PeerId};
+use crate::announce::{AnnounceRequest, AnnounceResponse};
+use crate::peer::Peer;
 use ben::Node;
 use log::debug;
 use reqwest::Client;
 use std::convert::TryInto;
 
-pub async fn announce(
-    url: &str,
-    info_hash: &InfoHash,
-    peer_id: &PeerId,
-    port: u16,
-) -> crate::Result<AnnounceResponse> {
-    let peer_id = std::str::from_utf8(&peer_id[..]).unwrap();
-    let info_hash_encoded = info_hash.encode_url();
+pub async fn announce(req: AnnounceRequest<'_>) -> crate::Result<AnnounceResponse> {
+    let peer_id = std::str::from_utf8(&req.peer_id[..]).unwrap();
+    let info_hash_encoded = req.info_hash.encode_url();
     debug!("Infohash Encoded: {}", info_hash_encoded);
-    let url = format!("{}?info_hash={}", url, info_hash_encoded);
+    let url = format!("{}?info_hash={}", req.url, info_hash_encoded);
     let data = Client::new()
         .get(&url)
         .query(&[("peer_id", peer_id)])
-        .query(&[("port", port)])
+        .query(&[("port", req.port)])
         .query(&[("uploaded", "0"), ("downloaded", "0"), ("compact", "1")]) // prefer compact peer list
         .send()
         .await?
