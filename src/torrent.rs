@@ -143,7 +143,7 @@ impl<'a> TorrentWorker<'a, Connection> {
 }
 
 impl<'a, C: AsyncStream> TorrentWorker<'a, C> {
-    pub async fn run_worker(&mut self, piece_tx: Sender<Piece>) {
+    pub async fn run_worker(&'a mut self, piece_tx: Sender<Piece>) {
         let work = &self.work;
         let mut futures = self
             .connected
@@ -172,18 +172,18 @@ struct PieceInProgress<'a> {
     requested: u32,
 }
 
-struct Download<'a, 'p, C> {
+struct Download<'a, C> {
     /// Peer connection
     client: &'a mut Client<C>,
 
     /// Common piece queue from where we pick the pieces to download
-    work: &'a WorkQueue<'p>,
+    work: &'a WorkQueue<'a>,
 
     /// Channel to send the completed and verified pieces
     piece_tx: Sender<Piece>,
 
     /// In-progress pieces
-    in_progress: HashMap<u32, PieceInProgress<'p>>,
+    in_progress: HashMap<u32, PieceInProgress<'a>>,
 
     /// Current pending block requests
     backlog: u32,
@@ -201,12 +201,12 @@ struct Download<'a, 'p, C> {
     rate: SlidingAvg,
 }
 
-impl<'a, 'p, C: AsyncStream> Download<'a, 'p, C> {
+impl<'a, C: AsyncStream> Download<'a, C> {
     async fn new(
         client: &'a mut Client<C>,
-        work: &'a WorkQueue<'p>,
+        work: &'a WorkQueue<'a>,
         piece_tx: Sender<Piece>,
-    ) -> crate::Result<Download<'a, 'p, C>> {
+    ) -> crate::Result<Download<'a, C>> {
         client.send_unchoke().await?;
         client.send_interested().await?;
         client.conn.flush().await?;
@@ -293,7 +293,7 @@ impl<'a, 'p, C: AsyncStream> Download<'a, 'p, C> {
         self.piece_done(p).await
     }
 
-    async fn piece_done(&mut self, state: PieceInProgress<'p>) -> crate::Result<()> {
+    async fn piece_done(&mut self, state: PieceInProgress<'a>) -> crate::Result<()> {
         trace!("Piece downloaded: {}", state.piece.index);
         if !state.piece.check_integrity(&state.buf) {
             error!("Bad piece: Hash mismatch for {}", state.piece.index);

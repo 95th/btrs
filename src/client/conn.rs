@@ -1,6 +1,7 @@
 use bytes::{Buf, BufMut};
 use std::io;
 use std::mem::MaybeUninit;
+use std::net::SocketAddr;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use tokio::io::{AsyncRead, AsyncWrite, BufStream};
@@ -10,8 +11,18 @@ pub trait AsyncStream: AsyncRead + AsyncWrite + Unpin {}
 
 impl<T: AsyncRead + AsyncWrite + Unpin> AsyncStream for T {}
 
+const DEF_CAPACITY: usize = 1024 * 1024; // 1 MiB
+
 pub enum Connection {
     Tcp(BufStream<TcpStream>),
+}
+
+impl Connection {
+    pub async fn new_tcp(addr: SocketAddr) -> io::Result<Self> {
+        let tcp = TcpStream::connect(addr).await?;
+        let stream = BufStream::with_capacity(DEF_CAPACITY, DEF_CAPACITY, tcp);
+        Ok(Self::Tcp(stream))
+    }
 }
 
 impl AsyncRead for Connection {
