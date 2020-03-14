@@ -151,7 +151,7 @@ impl<'a, C: AsyncStream> TorrentWorker<'a, C> {
             .map(|client| {
                 let piece_tx = piece_tx.clone();
                 async move {
-                    let dl = Download::new(client, work, piece_tx).await?;
+                    let mut dl = Download::new(client, work, piece_tx).await?;
                     dl.download().await
                 }
             })
@@ -241,7 +241,7 @@ impl<'a, C: AsyncStream> Download<'a, C> {
         })
     }
 
-    async fn download(mut self) -> crate::Result<()> {
+    async fn download(&mut self) -> crate::Result<()> {
         trace!("download");
         loop {
             self.pick_pieces();
