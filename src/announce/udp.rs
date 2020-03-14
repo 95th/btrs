@@ -8,7 +8,7 @@ use std::net::IpAddr;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::UdpSocket;
 
-pub const TRACKER_CONSTANT: u64 = 0x41727101980;
+pub const TRACKER_CONSTANT: u64 = 0x0417_2710_1980;
 
 mod action {
     pub const CONNECT: u32 = 0;

@@ -59,6 +59,12 @@ impl From<SocketAddr> for Peer {
     }
 }
 
+impl PartialEq for Peer {
+    fn eq(&self, other: &Self) -> bool {
+        self.addr == other.addr
+    }
+}
+
 pub fn generate_peer_id() -> Box<PeerId> {
     let mut buf = *b"-UT3100-000000000000";
     rand::thread_rng()

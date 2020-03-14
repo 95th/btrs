@@ -1,7 +1,7 @@
 use crate::announce::{AnnounceRequest, AnnounceResponse};
 use crate::avg::SlidingAvg;
 use crate::bitfield::BitField;
-use crate::client::{AsyncStream, Client, Connection};
+use crate::client::{AsyncStream, Client};
 use crate::future::timeout;
 use crate::metainfo::InfoHash;
 use crate::msg::Message;
@@ -9,11 +9,12 @@ use crate::peer::{self, Peer, PeerId};
 use crate::work::{Piece, PieceWork, WorkQueue};
 use ben::Node;
 use futures::stream::FuturesUnordered;
-use futures::StreamExt;
+use futures::Stream;
 use log::{debug, error, info, trace, warn};
 use sha1::Sha1;
 use std::collections::HashMap;
 use std::collections::VecDeque;
+use std::task::Poll;
 use std::time::Instant;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::mpsc::Sender;
@@ -96,72 +97,79 @@ impl Torrent {
         PieceIter::new(self)
     }
 
-    pub fn worker<C>(&self) -> TorrentWorker<'_, C> {
+    pub fn worker(&self) -> TorrentWorker<'_> {
         let work: VecDeque<_> = self.piece_iter().collect();
         TorrentWorker {
             torrent: self,
             bits: BitField::new(work.len()),
             work: WorkQueue::new(work),
-            connected: vec![],
         }
     }
 }
 
-pub struct TorrentWorker<'a, C> {
+pub struct TorrentWorker<'a> {
     torrent: &'a Torrent,
     pub bits: BitField,
     pub work: WorkQueue<'a>,
-    pub connected: Vec<Client<C>>,
 }
 
-impl<'a> TorrentWorker<'a, Connection> {
-    pub async fn connect_all(&mut self) -> usize {
+impl TorrentWorker<'_> {
+    pub async fn run_worker(&mut self, piece_tx: Sender<Piece>) {
+        let work = &self.work;
         let info_hash = &self.torrent.info_hash;
         let peer_id = &self.torrent.peer_id;
-        let mut clients: FuturesUnordered<_> = self
-            .torrent
-            .peers
-            .iter()
-            .chain(self.torrent.peers6.iter())
-            .map(|peer| async move {
-                let mut client = timeout(Client::new_tcp(peer.addr), 3).await?;
-                client.handshake(info_hash, peer_id).await?;
-                Ok::<_, crate::Error>(client)
-            })
-            .collect();
 
-        while let Some(result) = clients.next().await {
-            match result {
-                Ok(client) => self.connected.push(client),
-                Err(e) => warn!("Error occurred: {}", e),
-            }
-        }
+        let futures = FuturesUnordered::new();
+        futures::pin_mut!(futures);
 
-        debug!("{} peers connected", self.connected.len());
-        self.connected.len()
-    }
-}
+        // TODO: Make this configurable
+        let max_connections = 10;
+        let mut connected = vec![];
 
-impl<'a, C: AsyncStream> TorrentWorker<'a, C> {
-    pub async fn run_worker(&'a mut self, piece_tx: Sender<Piece>) {
-        let work = &self.work;
-        let mut futures = self
-            .connected
-            .iter_mut()
-            .map(|client| {
-                let piece_tx = piece_tx.clone();
-                async move {
-                    let mut dl = Download::new(client, work, piece_tx).await?;
-                    dl.download().await
+        let future = futures::future::poll_fn(|cx| {
+            loop {
+                while futures.len() < max_connections {
+                    let maybe_peer = self
+                        .torrent
+                        .peers
+                        .iter()
+                        .chain(self.torrent.peers6.iter())
+                        .find(|p| !connected.contains(p));
+
+                    if let Some(peer) = maybe_peer {
+                        let piece_tx = piece_tx.clone();
+                        futures.push(async move {
+                            let f = async {
+                                let mut client = timeout(Client::new_tcp(peer.addr), 3).await?;
+                                client.handshake(info_hash, peer_id).await?;
+                                let mut dl = Download::new(&mut client, work, piece_tx).await?;
+                                dl.download().await
+                            };
+                            f.await.map_err(|e| (e, peer))
+                        });
+                        connected.push(peer);
+                    } else {
+                        break;
+                    }
                 }
-            })
-            .collect::<FuturesUnordered<_>>();
 
-        while let Some(result) = futures.next().await {
-            if let Err(e) = result {
-                warn!("Error occurred: {}", e);
+                trace!("{} active connections", futures.len());
+
+                match futures::ready!(futures.as_mut().poll_next(cx)) {
+                    Some(Ok(())) => {}
+                    Some(Err((e, peer))) => {
+                        // if let Some(pos) = connected.iter().position(|p| *p == peer) {
+                        //     connected.swap_remove(pos);
+                        // }
+                        warn!("Error occurred for peer {} : {}", peer.addr, e)
+                    }
+                    None => break,
+                }
             }
-        }
+            Poll::Ready(())
+        });
+
+        future.await
     }
 }
 
@@ -172,18 +180,18 @@ struct PieceInProgress<'a> {
     requested: u32,
 }
 
-struct Download<'a, C> {
+struct Download<'w, 'c, 'p, C> {
     /// Peer connection
-    client: &'a mut Client<C>,
+    client: &'c mut Client<C>,
 
     /// Common piece queue from where we pick the pieces to download
-    work: &'a WorkQueue<'a>,
+    work: &'w WorkQueue<'p>,
 
     /// Channel to send the completed and verified pieces
     piece_tx: Sender<Piece>,
 
     /// In-progress pieces
-    in_progress: HashMap<u32, PieceInProgress<'a>>,
+    in_progress: HashMap<u32, PieceInProgress<'p>>,
 
     /// Current pending block requests
     backlog: u32,
@@ -201,7 +209,7 @@ struct Download<'a, C> {
     rate: SlidingAvg,
 }
 
-impl<'a, C> Drop for Download<'a, C> {
+impl<C> Drop for Download<'_, '_, '_, C> {
     fn drop(&mut self) {
         // Put any unfinished pieces back in the work queue
         self.work
@@ -210,12 +218,12 @@ impl<'a, C> Drop for Download<'a, C> {
     }
 }
 
-impl<'a, C: AsyncStream> Download<'a, C> {
+impl<'w, 'c, 'p, C: AsyncStream> Download<'w, 'c, 'p, C> {
     async fn new(
-        client: &'a mut Client<C>,
-        work: &'a WorkQueue<'a>,
+        client: &'c mut Client<C>,
+        work: &'w WorkQueue<'p>,
         piece_tx: Sender<Piece>,
-    ) -> crate::Result<Download<'a, C>> {
+    ) -> crate::Result<Download<'w, 'c, 'p, C>> {
         client.send_unchoke().await?;
         client.send_interested().await?;
         client.conn.flush().await?;
@@ -291,7 +299,7 @@ impl<'a, C: AsyncStream> Download<'a, C> {
         self.piece_done(p).await
     }
 
-    async fn piece_done(&mut self, state: PieceInProgress<'a>) -> crate::Result<()> {
+    async fn piece_done(&mut self, state: PieceInProgress<'p>) -> crate::Result<()> {
         trace!("Piece downloaded: {}", state.piece.index);
         if !state.piece.check_integrity(&state.buf) {
             error!("Bad piece: Hash mismatch for {}", state.piece.index);
