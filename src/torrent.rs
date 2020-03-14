@@ -201,6 +201,15 @@ struct Download<'a, C> {
     rate: SlidingAvg,
 }
 
+impl<'a, C> Drop for Download<'a, C> {
+    fn drop(&mut self) {
+        // Put any unfinished pieces back in the work queue
+        self.work
+            .borrow_mut()
+            .extend(self.in_progress.drain().map(|(_idx, p)| p.piece));
+    }
+}
+
 impl<'a, C: AsyncStream> Download<'a, C> {
     async fn new(
         client: &'a mut Client<C>,
@@ -233,18 +242,7 @@ impl<'a, C: AsyncStream> Download<'a, C> {
     }
 
     async fn download(mut self) -> crate::Result<()> {
-        if let Err(e) = self.attempt_download().await {
-            // In case of failure, put the pending pieces back into the queue
-            self.work
-                .borrow_mut()
-                .extend(self.in_progress.into_iter().map(|(_idx, p)| p.piece));
-            return Err(e);
-        }
-        Ok(())
-    }
-
-    async fn attempt_download(&mut self) -> crate::Result<()> {
-        trace!("attempt_download");
+        trace!("download");
         loop {
             self.pick_pieces();
 
