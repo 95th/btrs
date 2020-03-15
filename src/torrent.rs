@@ -28,7 +28,7 @@ const MAX_BLOCK_SIZE: u32 = 0x4000;
 
 #[derive(Debug)]
 pub struct TorrentFile {
-    pub tracker_urls: Vec<String>,
+    pub tracker_urls: HashSet<String>,
     pub info_hash: InfoHash,
     pub piece_hashes: Vec<u8>,
     pub piece_len: usize,
@@ -51,7 +51,11 @@ impl TorrentFile {
         let pieces = info_dict.get(b"pieces")?.data();
 
         let torrent = TorrentFile {
-            tracker_urls: vec![announce.to_owned()],
+            tracker_urls: {
+                let mut set = HashSet::new();
+                set.insert(announce.to_owned());
+                set
+            },
             info_hash,
             piece_hashes: pieces.to_vec(),
             piece_len: piece_len as usize,
@@ -85,7 +89,7 @@ pub struct Torrent {
     pub piece_len: usize,
     pub length: usize,
     pub name: String,
-    pub tracker_urls: Vec<String>,
+    pub tracker_urls: HashSet<String>,
 }
 
 impl Torrent {
@@ -147,7 +151,7 @@ impl TorrentWorker<'_> {
         let all_peers6 = &mut self.peers6;
         let announce_url = &self.torrent.tracker_urls;
         let mut last_announced = Instant::now() - Duration::from_secs(100_000);
-        let mut announce_interval = 0_u64;
+        let mut announce_interval = 100_000;
 
         let pending = FuturesUnordered::new();
         futures::pin_mut!(pending);
@@ -165,6 +169,7 @@ impl TorrentWorker<'_> {
                     let announce = async move {
                         let mut responses = vec![];
                         for url in announce_url {
+                            trace!("Announce to {}", url);
                             let req = AnnounceRequest::new(url, info_hash, peer_id, 6881);
                             match req.send().await {
                                 Ok(r) => responses.push(r),
@@ -174,6 +179,7 @@ impl TorrentWorker<'_> {
                         responses
                     };
                     pending.push(Action::Announce(announce));
+                    last_announced = Instant::now();
                 }
 
                 // Add new peer to download
@@ -228,9 +234,7 @@ impl TorrentWorker<'_> {
                         },
                         Action::Announce(responses) => {
                             for resp in responses {
-                                last_announced = Instant::now();
                                 announce_interval = resp.interval as u64;
-
                                 all_peers.extend(resp.peers);
                                 all_peers6.extend(resp.peers6);
                             }

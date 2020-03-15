@@ -9,6 +9,7 @@ use ben::Node;
 use futures::stream::FuturesUnordered;
 use futures::stream::StreamExt;
 use log::{debug, trace};
+use std::collections::HashSet;
 use std::net::SocketAddr;
 use tokio::io::AsyncWriteExt;
 
@@ -16,7 +17,7 @@ use tokio::io::AsyncWriteExt;
 pub struct MagnetUri {
     info_hash: InfoHash,
     display_name: Option<String>,
-    tracker_urls: Vec<String>,
+    tracker_urls: HashSet<String>,
     peer_addrs: Vec<SocketAddr>,
 }
 
@@ -218,7 +219,9 @@ mod parser {
                         }
                     }
                     DISPLAY_NAME => magnet.display_name = Some(value.to_string()),
-                    TRACKER_URL => magnet.tracker_urls.push(value.to_string()),
+                    TRACKER_URL => {
+                        magnet.tracker_urls.insert(value.to_string());
+                    }
                     PEER => match value.parse() {
                         Ok(addr) => magnet.peer_addrs.push(addr),
                         Err(_) => {
