@@ -32,7 +32,7 @@ pub async fn announce(req: AnnounceRequest<'_>) -> crate::Result<AnnounceRespons
 
     let peers = match value.get(b"peers") {
         Some(peers) if peers.is_list() => {
-            let mut v = HashSet::new();
+            let mut v = hashset![];
             for peer in peers.as_list().unwrap().iter() {
                 let peer = peer.as_dict().ok_or("Peer not a dict")?;
                 let ip = peer
@@ -52,7 +52,7 @@ pub async fn announce(req: AnnounceRequest<'_>) -> crate::Result<AnnounceRespons
 
             peers.chunks_exact(6).map(Peer::v4).collect()
         }
-        None => HashSet::new(),
+        None => hashset![],
     };
 
     debug!("Found {} peers (v4): {:?}", peers.len(), peers);

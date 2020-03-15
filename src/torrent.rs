@@ -51,11 +51,7 @@ impl TorrentFile {
         let pieces = info_dict.get(b"pieces")?.data();
 
         let torrent = TorrentFile {
-            tracker_urls: {
-                let mut set = HashSet::new();
-                set.insert(announce.to_owned());
-                set
-            },
+            tracker_urls: hashset![announce.to_owned()],
             info_hash,
             piece_hashes: pieces.to_vec(),
             piece_len: piece_len as usize,
@@ -101,8 +97,8 @@ impl Torrent {
         TorrentWorker {
             torrent: self,
             work: WorkQueue::new(self.piece_iter().collect()),
-            peers: HashSet::new(),
-            peers6: HashSet::new(),
+            peers: hashset![],
+            peers6: hashset![],
         }
     }
 }

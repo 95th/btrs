@@ -3,7 +3,6 @@ use crate::peer::Peer;
 use log::trace;
 use rand::thread_rng;
 use rand::Rng;
-use std::collections::HashSet;
 use std::io::Cursor;
 use std::net::IpAddr;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -139,7 +138,7 @@ impl UdpTrackerConnection {
             return Err("IPs should be 6 byte each".into());
         }
 
-        let mut peers = HashSet::new();
+        let mut peers = hashset![];
         while n > 0 {
             let ip_addr = c.read_u32().await?;
             let port = c.read_u16().await?;
@@ -151,7 +150,7 @@ impl UdpTrackerConnection {
         Ok(AnnounceResponse {
             interval: interval as usize,
             peers,
-            peers6: HashSet::new(),
+            peers6: hashset![],
         })
     }
 }

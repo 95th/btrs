@@ -305,8 +305,8 @@ mod tests {
         assert_eq!(infohash, magnet.info_hash);
         assert_eq!(display_name, magnet.display_name.unwrap());
 
-        let urls: Vec<&str> = magnet.tracker_urls.iter().map(|s| &s[..]).collect();
-        assert_eq!(&[tracker_url_1, tracker_url_2], &urls[..]);
+        let urls: HashSet<&str> = magnet.tracker_urls.iter().map(|s| &s[..]).collect();
+        assert_eq!(hashset![tracker_url_1, tracker_url_2], urls);
 
         let peers: &[SocketAddr] = &[peer_1.parse().unwrap(), peer_2.parse().unwrap()];
         assert_eq!(peers, &magnet.peer_addrs[..]);
