@@ -7,6 +7,7 @@ use crate::msg::Message;
 use crate::peer::{self, Peer, PeerId};
 use crate::work::{Piece, PieceWork, WorkQueue};
 use ben::Node;
+use futures::future::poll_fn;
 use futures::stream::FuturesUnordered;
 use futures::Stream;
 use log::{debug, error, info, trace, warn};
@@ -118,17 +119,17 @@ impl TorrentWorker<'_> {
         let info_hash = &self.torrent.info_hash;
         let peer_id = &self.torrent.peer_id;
 
-        let futures = FuturesUnordered::new();
-        futures::pin_mut!(futures);
+        let pending = FuturesUnordered::new();
+        futures::pin_mut!(pending);
 
         // TODO: Make this configurable
         let max_connections = 10;
         let mut connected = vec![];
         let mut failed = vec![];
 
-        let future = futures::future::poll_fn(|cx| {
+        let future = poll_fn(|cx| {
             loop {
-                while futures.len() < max_connections {
+                while connected.len() < max_connections {
                     let maybe_peer = self
                         .torrent
                         .peers
@@ -138,7 +139,7 @@ impl TorrentWorker<'_> {
 
                     if let Some(peer) = maybe_peer {
                         let piece_tx = piece_tx.clone();
-                        futures.push(async move {
+                        pending.push(async move {
                             let f = async {
                                 let mut client = timeout(Client::new_tcp(peer.addr), 3).await?;
                                 client.handshake(info_hash, peer_id).await?;
@@ -153,9 +154,9 @@ impl TorrentWorker<'_> {
                     }
                 }
 
-                trace!("{} active connections", futures.len());
+                trace!("{} active connections", connected.len());
 
-                match futures::ready!(futures.as_mut().poll_next(cx)) {
+                match futures::ready!(pending.as_mut().poll_next(cx)) {
                     Some(Ok(())) => {}
                     Some(Err((e, peer))) => {
                         warn!("Error occurred for peer {} : {}", peer.addr, e);
