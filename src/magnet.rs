@@ -59,7 +59,7 @@ impl MagnetUri {
                             length: t.length,
                             piece_hashes: t.piece_hashes,
                             name: t.name,
-                            announce: self.tracker_urls.first().unwrap().to_string(),
+                            tracker_urls: self.tracker_urls.clone(),
                         });
                     }
                 }

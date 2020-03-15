@@ -28,7 +28,7 @@ const MAX_BLOCK_SIZE: u32 = 0x4000;
 
 #[derive(Debug)]
 pub struct TorrentFile {
-    pub announce: String,
+    pub tracker_urls: Vec<String>,
     pub info_hash: InfoHash,
     pub piece_hashes: Vec<u8>,
     pub piece_len: usize,
@@ -51,7 +51,7 @@ impl TorrentFile {
         let pieces = info_dict.get(b"pieces")?.data();
 
         let torrent = TorrentFile {
-            announce: announce.to_owned(),
+            tracker_urls: vec![announce.to_owned()],
             info_hash,
             piece_hashes: pieces.to_vec(),
             piece_len: piece_len as usize,
@@ -73,7 +73,7 @@ impl TorrentFile {
             piece_len: self.piece_len,
             length: self.length,
             name: self.name,
-            announce: self.announce,
+            tracker_urls: self.tracker_urls,
         })
     }
 }
@@ -85,7 +85,7 @@ pub struct Torrent {
     pub piece_len: usize,
     pub length: usize,
     pub name: String,
-    pub announce: String,
+    pub tracker_urls: Vec<String>,
 }
 
 impl Torrent {
@@ -145,7 +145,7 @@ impl TorrentWorker<'_> {
         let peer_id = &self.torrent.peer_id;
         let all_peers = &mut self.peers;
         let all_peers6 = &mut self.peers6;
-        let announce_url = &self.torrent.announce;
+        let announce_url = &self.torrent.tracker_urls;
         let mut last_announced = Instant::now() - Duration::from_secs(100_000);
         let mut announce_interval = 0_u64;
 
@@ -154,19 +154,26 @@ impl TorrentWorker<'_> {
 
         // TODO: Make this configurable
         let max_connections = 10;
-        let mut connected = vec![];
-        let mut failed = vec![];
+        let mut connected: Vec<Peer> = vec![];
+        let mut failed: Vec<Peer> = vec![];
 
         let future = poll_fn(|cx| {
             loop {
-                // let announce_time = last_announced + Duration::from_secs(announce_interval);
-                // if announce_time <= Instant::now() {
-                //     let announce = async move {
-                //         let req = AnnounceRequest::new(announce_url, info_hash, peer_id, 6881);
-                //         req.send().await
-                //     };
-                //     pending.push(Action::Announce(announce));
-                // }
+                let announce_time = last_announced + Duration::from_secs(announce_interval);
+                if announce_time <= Instant::now() {
+                    let announce = async move {
+                        let mut responses = vec![];
+                        for url in announce_url {
+                            let req = AnnounceRequest::new(url, info_hash, peer_id, 6881);
+                            match req.send().await {
+                                Ok(r) => responses.push(r),
+                                Err(e) => warn!("Announce failed: {}", e),
+                            }
+                        }
+                        responses
+                    };
+                    pending.push(Action::Announce(announce));
+                }
 
                 while connected.len() < max_connections {
                     let maybe_peer = all_peers
@@ -175,6 +182,8 @@ impl TorrentWorker<'_> {
                         .find(|p| !connected.contains(p) && !failed.contains(p));
 
                     if let Some(peer) = maybe_peer {
+                        let peer = peer.clone();
+                        let peer_2 = peer.clone();
                         let piece_tx = piece_tx.clone();
                         let dl = async move {
                             let f = async {
@@ -186,14 +195,13 @@ impl TorrentWorker<'_> {
                             f.await.map_err(|e| (e, peer))
                         };
                         pending.push(Action::Download(dl));
-                        connected.push(peer);
+                        connected.push(peer_2);
                     } else {
                         break;
                     }
                 }
 
                 if false {
-                    pending.push(Action::Announce(async {}));
                     pending.push(Action::Metadata(async {}));
                 }
 
@@ -216,19 +224,14 @@ impl TorrentWorker<'_> {
                                 }
                             }
                         },
-                        // Action::Announce(result) => match result {
-                        //     Ok(AnnounceResponse {
-                        //         peers,
-                        //         peers6,
-                        //         interval,
-                        //     }) => {
-                        //         last_announced = Instant::now();
-                        //         announce_interval = interval as u64;
-                        //         all_peers.extend(peers);
-                        //         all_peers6.extend(peers6);
-                        //     }
-                        //     Err(e) => warn!("Announce failed: {}", e),
-                        // },
+                        Action::Announce(responses) => {
+                            for resp in responses {
+                                last_announced = Instant::now();
+                                announce_interval = resp.interval as u64;
+                                all_peers.extend(resp.peers);
+                                all_peers6.extend(resp.peers6);
+                            }
+                        }
                         _ => unimplemented!(),
                     },
                     None => break,
