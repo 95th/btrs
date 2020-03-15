@@ -1,6 +1,5 @@
 use crate::announce::{AnnounceRequest, AnnounceResponse};
 use crate::avg::SlidingAvg;
-use crate::bitfield::BitField;
 use crate::client::{AsyncStream, Client};
 use crate::future::timeout;
 use crate::metainfo::InfoHash;
@@ -13,7 +12,6 @@ use futures::Stream;
 use log::{debug, error, info, trace, warn};
 use sha1::Sha1;
 use std::collections::HashMap;
-use std::collections::VecDeque;
 use std::task::Poll;
 use std::time::Instant;
 use tokio::io::AsyncWriteExt;
@@ -98,22 +96,23 @@ impl Torrent {
     }
 
     pub fn worker(&self) -> TorrentWorker<'_> {
-        let work: VecDeque<_> = self.piece_iter().collect();
         TorrentWorker {
             torrent: self,
-            bits: BitField::new(work.len()),
-            work: WorkQueue::new(work),
+            work: WorkQueue::new(self.piece_iter().collect()),
         }
     }
 }
 
 pub struct TorrentWorker<'a> {
     torrent: &'a Torrent,
-    pub bits: BitField,
-    pub work: WorkQueue<'a>,
+    work: WorkQueue<'a>,
 }
 
 impl TorrentWorker<'_> {
+    pub fn num_pieces(&self) -> usize {
+        self.work.borrow().len()
+    }
+
     pub async fn run_worker(&mut self, piece_tx: Sender<Piece>) {
         let work = &self.work;
         let info_hash = &self.torrent.info_hash;

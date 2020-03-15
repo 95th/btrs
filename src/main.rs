@@ -54,7 +54,7 @@ pub async fn torrent_file(file: &str) -> btrs::Result<()> {
 pub async fn download(torrent: Torrent) -> btrs::Result<()> {
     let torrent_name = torrent.name.clone();
     let mut worker = torrent.worker();
-    let num_pieces = worker.work.borrow().len();
+    let num_pieces = worker.num_pieces();
     let piece_len = torrent.piece_len;
 
     let (piece_tx, mut piece_rx) = mpsc::channel::<Piece>(200);
