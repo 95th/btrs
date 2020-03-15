@@ -124,6 +124,7 @@ impl TorrentWorker<'_> {
         // TODO: Make this configurable
         let max_connections = 10;
         let mut connected = vec![];
+        let mut failed = vec![];
 
         let future = futures::future::poll_fn(|cx| {
             loop {
@@ -133,7 +134,7 @@ impl TorrentWorker<'_> {
                         .peers
                         .iter()
                         .chain(self.torrent.peers6.iter())
-                        .find(|p| !connected.contains(p));
+                        .find(|p| !connected.contains(p) && !failed.contains(p));
 
                     if let Some(peer) = maybe_peer {
                         let piece_tx = piece_tx.clone();
@@ -157,10 +158,14 @@ impl TorrentWorker<'_> {
                 match futures::ready!(futures.as_mut().poll_next(cx)) {
                     Some(Ok(())) => {}
                     Some(Err((e, peer))) => {
-                        // if let Some(pos) = connected.iter().position(|p| *p == peer) {
-                        //     connected.swap_remove(pos);
-                        // }
-                        warn!("Error occurred for peer {} : {}", peer.addr, e)
+                        warn!("Error occurred for peer {} : {}", peer.addr, e);
+                        match connected.iter().position(|p| *p == peer) {
+                            Some(pos) => {
+                                connected.swap_remove(pos);
+                                failed.push(peer);
+                            }
+                            None => debug_assert!(false, "peer should be in `connected` list"),
+                        }
                     }
                     None => break,
                 }
