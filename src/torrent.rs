@@ -13,7 +13,7 @@ use futures::Stream;
 use log::{debug, error, info, trace, warn};
 use pin_project::pin_project;
 use sha1::Sha1;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
@@ -97,8 +97,8 @@ impl Torrent {
         TorrentWorker {
             torrent: self,
             work: WorkQueue::new(self.piece_iter().collect()),
-            peers: vec![],
-            peers6: vec![],
+            peers: HashSet::new(),
+            peers6: HashSet::new(),
         }
     }
 }
@@ -106,8 +106,8 @@ impl Torrent {
 pub struct TorrentWorker<'a> {
     torrent: &'a Torrent,
     work: WorkQueue<'a>,
-    peers: Vec<Peer>,
-    peers6: Vec<Peer>,
+    peers: HashSet<Peer>,
+    peers6: HashSet<Peer>,
 }
 
 #[pin_project]
@@ -159,6 +159,7 @@ impl TorrentWorker<'_> {
 
         let future = poll_fn(|cx| {
             loop {
+                // Announce
                 let announce_time = last_announced + Duration::from_secs(announce_interval);
                 if announce_time <= Instant::now() {
                     let announce = async move {
@@ -175,6 +176,7 @@ impl TorrentWorker<'_> {
                     pending.push(Action::Announce(announce));
                 }
 
+                // Add new peer to download
                 while connected.len() < max_connections {
                     let maybe_peer = all_peers
                         .iter()
@@ -228,6 +230,7 @@ impl TorrentWorker<'_> {
                             for resp in responses {
                                 last_announced = Instant::now();
                                 announce_interval = resp.interval as u64;
+
                                 all_peers.extend(resp.peers);
                                 all_peers6.extend(resp.peers6);
                             }

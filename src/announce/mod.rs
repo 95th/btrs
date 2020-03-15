@@ -1,5 +1,6 @@
 use crate::metainfo::InfoHash;
 use crate::peer::{Peer, PeerId};
+use std::collections::HashSet;
 
 mod http;
 mod udp;
@@ -15,8 +16,8 @@ pub enum Event {
 #[derive(Debug)]
 pub struct AnnounceResponse {
     pub interval: usize,
-    pub peers: Vec<Peer>,
-    pub peers6: Vec<Peer>,
+    pub peers: HashSet<Peer>,
+    pub peers6: HashSet<Peer>,
 }
 
 pub struct AnnounceRequest<'a> {
