@@ -53,14 +53,13 @@ impl MagnetUri {
                         drop(futs);
                         trace!("Metadata requested successfully");
                         return Ok(Torrent {
-                            peers,
-                            peers6,
                             peer_id,
                             info_hash: self.info_hash.clone(),
                             piece_len: t.piece_len,
                             length: t.length,
                             piece_hashes: t.piece_hashes,
                             name: t.name,
+                            announce: self.tracker_urls.first().unwrap().to_string(),
                         });
                     }
                 }

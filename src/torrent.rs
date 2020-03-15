@@ -11,10 +11,13 @@ use futures::future::poll_fn;
 use futures::stream::FuturesUnordered;
 use futures::Stream;
 use log::{debug, error, info, trace, warn};
+use pin_project::pin_project;
 use sha1::Sha1;
 use std::collections::HashMap;
-use std::task::Poll;
-use std::time::Instant;
+use std::future::Future;
+use std::pin::Pin;
+use std::task::{Context, Poll};
+use std::time::{Duration, Instant};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::mpsc::Sender;
 
@@ -59,36 +62,30 @@ impl TorrentFile {
         Some(torrent)
     }
 
-    pub async fn into_torrent(self) -> crate::Result<Torrent> {
+    pub fn into_torrent(self) -> crate::Result<Torrent> {
         let peer_id = peer::generate_peer_id();
         debug!("Our peer_id: {:x?}", peer_id);
 
-        debug!("Infohash: {:x?}", self.info_hash);
-        let req = AnnounceRequest::new(&self.announce, &self.info_hash, &peer_id, 6881);
-        let AnnounceResponse { peers, peers6, .. } = req.send().await?;
-
         Ok(Torrent {
-            peers,
-            peers6,
             peer_id,
             info_hash: self.info_hash,
             piece_hashes: self.piece_hashes,
             piece_len: self.piece_len,
             length: self.length,
             name: self.name,
+            announce: self.announce,
         })
     }
 }
 
 pub struct Torrent {
-    pub peers: Vec<Peer>,
-    pub peers6: Vec<Peer>,
     pub peer_id: Box<PeerId>,
     pub info_hash: InfoHash,
     pub piece_hashes: Vec<u8>,
     pub piece_len: usize,
     pub length: usize,
     pub name: String,
+    pub announce: String,
 }
 
 impl Torrent {
@@ -100,6 +97,8 @@ impl Torrent {
         TorrentWorker {
             torrent: self,
             work: WorkQueue::new(self.piece_iter().collect()),
+            peers: vec![],
+            peers6: vec![],
         }
     }
 }
@@ -107,6 +106,32 @@ impl Torrent {
 pub struct TorrentWorker<'a> {
     torrent: &'a Torrent,
     work: WorkQueue<'a>,
+    peers: Vec<Peer>,
+    peers6: Vec<Peer>,
+}
+
+#[pin_project]
+enum Action<A, M, D> {
+    Announce(#[pin] A),
+    Metadata(#[pin] M),
+    Download(#[pin] D),
+}
+
+impl<A, M, D> Future for Action<A, M, D>
+where
+    A: Future,
+    M: Future,
+    D: Future,
+{
+    type Output = Action<A::Output, M::Output, D::Output>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        match self.project() {
+            __ActionProjection::Announce(f) => f.poll(cx).map(Action::Announce),
+            __ActionProjection::Metadata(f) => f.poll(cx).map(Action::Metadata),
+            __ActionProjection::Download(f) => f.poll(cx).map(Action::Download),
+        }
+    }
 }
 
 impl TorrentWorker<'_> {
@@ -118,6 +143,11 @@ impl TorrentWorker<'_> {
         let work = &self.work;
         let info_hash = &self.torrent.info_hash;
         let peer_id = &self.torrent.peer_id;
+        let all_peers = &mut self.peers;
+        let all_peers6 = &mut self.peers6;
+        let announce_url = &self.torrent.announce;
+        let mut last_announced = Instant::now() - Duration::from_secs(100_000);
+        let mut announce_interval = 0_u64;
 
         let pending = FuturesUnordered::new();
         futures::pin_mut!(pending);
@@ -129,17 +159,24 @@ impl TorrentWorker<'_> {
 
         let future = poll_fn(|cx| {
             loop {
+                // let announce_time = last_announced + Duration::from_secs(announce_interval);
+                // if announce_time <= Instant::now() {
+                //     let announce = async move {
+                //         let req = AnnounceRequest::new(announce_url, info_hash, peer_id, 6881);
+                //         req.send().await
+                //     };
+                //     pending.push(Action::Announce(announce));
+                // }
+
                 while connected.len() < max_connections {
-                    let maybe_peer = self
-                        .torrent
-                        .peers
+                    let maybe_peer = all_peers
                         .iter()
-                        .chain(self.torrent.peers6.iter())
+                        .chain(all_peers6.iter())
                         .find(|p| !connected.contains(p) && !failed.contains(p));
 
                     if let Some(peer) = maybe_peer {
                         let piece_tx = piece_tx.clone();
-                        pending.push(async move {
+                        let dl = async move {
                             let f = async {
                                 let mut client = timeout(Client::new_tcp(peer.addr), 3).await?;
                                 client.handshake(info_hash, peer_id).await?;
@@ -147,27 +184,53 @@ impl TorrentWorker<'_> {
                                 dl.download().await
                             };
                             f.await.map_err(|e| (e, peer))
-                        });
+                        };
+                        pending.push(Action::Download(dl));
                         connected.push(peer);
                     } else {
                         break;
                     }
                 }
 
+                if false {
+                    pending.push(Action::Announce(async {}));
+                    pending.push(Action::Metadata(async {}));
+                }
+
                 trace!("{} active connections", connected.len());
 
                 match futures::ready!(pending.as_mut().poll_next(cx)) {
-                    Some(Ok(())) => {}
-                    Some(Err((e, peer))) => {
-                        warn!("Error occurred for peer {} : {}", peer.addr, e);
-                        match connected.iter().position(|p| *p == peer) {
-                            Some(pos) => {
-                                connected.swap_remove(pos);
-                                failed.push(peer);
+                    Some(output) => match output {
+                        Action::Download(result) => match result {
+                            Ok(()) => {}
+                            Err((e, peer)) => {
+                                warn!("Error occurred for peer {} : {}", peer.addr, e);
+                                match connected.iter().position(|p| *p == peer) {
+                                    Some(pos) => {
+                                        connected.swap_remove(pos);
+                                        failed.push(peer);
+                                    }
+                                    None => {
+                                        debug_assert!(false, "peer should be in `connected` list")
+                                    }
+                                }
                             }
-                            None => debug_assert!(false, "peer should be in `connected` list"),
-                        }
-                    }
+                        },
+                        // Action::Announce(result) => match result {
+                        //     Ok(AnnounceResponse {
+                        //         peers,
+                        //         peers6,
+                        //         interval,
+                        //     }) => {
+                        //         last_announced = Instant::now();
+                        //         announce_interval = interval as u64;
+                        //         all_peers.extend(peers);
+                        //         all_peers6.extend(peers6);
+                        //     }
+                        //     Err(e) => warn!("Announce failed: {}", e),
+                        // },
+                        _ => unimplemented!(),
+                    },
                     None => break,
                 }
             }
