@@ -1,4 +1,4 @@
-use crate::announce::{AnnounceRequest, AnnounceResponse};
+use crate::announce::AnnounceRequest;
 use crate::avg::SlidingAvg;
 use crate::client::{AsyncStream, Client};
 use crate::future::timeout;
