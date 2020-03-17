@@ -2,7 +2,10 @@ use crate::bitfield::BitField;
 use rand::distributions::Alphanumeric;
 use rand::Rng;
 use std::convert::TryInto;
-use std::net::{IpAddr, SocketAddr};
+use std::{
+    hash::Hash,
+    net::{IpAddr, SocketAddr},
+};
 
 pub type PeerId = [u8; 20];
 pub type Extensions = [u8; 8];
@@ -62,6 +65,14 @@ impl From<SocketAddr> for Peer {
 impl PartialEq for Peer {
     fn eq(&self, other: &Self) -> bool {
         self.addr == other.addr
+    }
+}
+
+impl Eq for Peer {}
+
+impl Hash for Peer {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.addr.hash(state)
     }
 }
 

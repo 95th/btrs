@@ -1,20 +1,16 @@
-// macro_rules! matches {
-//     ($expression:expr, $( $pattern:pat )|+ $( if $guard: expr )?) => {
-//         match $expression {
-//             $( $pattern )|+ $( if $guard )? => true,
-//             _ => false
-//         }
-//     }
-// }
-
-// macro_rules! if_matches {
-//     ($expression:expr, $( $pattern:pat )|+ $( if $guard: expr )?, $bind: expr) => {
-//         match $expression {
-//             $( $pattern )|+ $( if $guard )? => Some($bind),
-//             _ => None
-//         }
-//     }
-// }
+macro_rules! hashset {
+    () => {
+        std::collections::HashSet::new()
+    };
+    ($($x:expr),*) => {{
+        let mut set = hashset![];
+        $(
+            set.insert($x);
+        )*
+        set
+    }};
+    ($($x:expr,)*) => (hashset![$($x),*])
+}
 
 pub const CLIENT_NAME: &str = "95th 0.1";
 

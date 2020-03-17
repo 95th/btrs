@@ -9,6 +9,7 @@ use ben::Node;
 use futures::stream::FuturesUnordered;
 use futures::stream::StreamExt;
 use log::{debug, trace};
+use std::collections::HashSet;
 use std::net::SocketAddr;
 use tokio::io::AsyncWriteExt;
 
@@ -16,7 +17,7 @@ use tokio::io::AsyncWriteExt;
 pub struct MagnetUri {
     info_hash: InfoHash,
     display_name: Option<String>,
-    tracker_urls: Vec<String>,
+    tracker_urls: HashSet<String>,
     peer_addrs: Vec<SocketAddr>,
 }
 
@@ -53,14 +54,13 @@ impl MagnetUri {
                         drop(futs);
                         trace!("Metadata requested successfully");
                         return Ok(Torrent {
-                            peers,
-                            peers6,
                             peer_id,
                             info_hash: self.info_hash.clone(),
                             piece_len: t.piece_len,
                             length: t.length,
                             piece_hashes: t.piece_hashes,
                             name: t.name,
+                            tracker_urls: self.tracker_urls.clone(),
                         });
                     }
                 }
@@ -219,7 +219,9 @@ mod parser {
                         }
                     }
                     DISPLAY_NAME => magnet.display_name = Some(value.to_string()),
-                    TRACKER_URL => magnet.tracker_urls.push(value.to_string()),
+                    TRACKER_URL => {
+                        magnet.tracker_urls.insert(value.to_string());
+                    }
                     PEER => match value.parse() {
                         Ok(addr) => magnet.peer_addrs.push(addr),
                         Err(_) => {
@@ -303,8 +305,8 @@ mod tests {
         assert_eq!(infohash, magnet.info_hash);
         assert_eq!(display_name, magnet.display_name.unwrap());
 
-        let urls: Vec<&str> = magnet.tracker_urls.iter().map(|s| &s[..]).collect();
-        assert_eq!(&[tracker_url_1, tracker_url_2], &urls[..]);
+        let urls: HashSet<&str> = magnet.tracker_urls.iter().map(|s| &s[..]).collect();
+        assert_eq!(hashset![tracker_url_1, tracker_url_2], urls);
 
         let peers: &[SocketAddr] = &[peer_1.parse().unwrap(), peer_2.parse().unwrap()];
         assert_eq!(peers, &magnet.peer_addrs[..]);

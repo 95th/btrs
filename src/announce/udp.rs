@@ -138,19 +138,19 @@ impl UdpTrackerConnection {
             return Err("IPs should be 6 byte each".into());
         }
 
-        let mut peers = vec![];
+        let mut peers = hashset![];
         while n > 0 {
             let ip_addr = c.read_u32().await?;
             let port = c.read_u16().await?;
             trace!("Addr: {}, port: {}", ip_addr, port);
             let addr: IpAddr = ip_addr.to_be_bytes().into();
-            peers.push(Peer::new(addr, port));
+            peers.insert(Peer::new(addr, port));
             n -= 6;
         }
         Ok(AnnounceResponse {
             interval: interval as usize,
             peers,
-            peers6: vec![],
+            peers6: hashset![],
         })
     }
 }

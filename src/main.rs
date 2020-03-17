@@ -47,7 +47,7 @@ pub async fn magnet(uri: &str) -> btrs::Result<()> {
 pub async fn torrent_file(file: &str) -> btrs::Result<()> {
     let buf = fs::read(file)?;
     let torrent_file = TorrentFile::parse(buf).ok_or("Unable to parse torrent file")?;
-    let torrent = torrent_file.into_torrent().await?;
+    let torrent = torrent_file.into_torrent()?;
     download(torrent).await
 }
 

@@ -3,6 +3,7 @@ use crate::peer::Peer;
 use ben::Node;
 use log::debug;
 use reqwest::Client;
+use std::collections::HashSet;
 use std::convert::TryInto;
 
 pub async fn announce(req: AnnounceRequest<'_>) -> crate::Result<AnnounceResponse> {
@@ -31,7 +32,7 @@ pub async fn announce(req: AnnounceRequest<'_>) -> crate::Result<AnnounceRespons
 
     let peers = match value.get(b"peers") {
         Some(peers) if peers.is_list() => {
-            let mut v = vec![];
+            let mut v = hashset![];
             for peer in peers.as_list().unwrap().iter() {
                 let peer = peer.as_dict().ok_or("Peer not a dict")?;
                 let ip = peer
@@ -39,7 +40,7 @@ pub async fn announce(req: AnnounceRequest<'_>) -> crate::Result<AnnounceRespons
                     .ok_or("IP not present")
                     .and_then(|v| v.parse().map_err(|_| "Invalid IP/DNS name"))?;
                 let port = peer.get_int(b"port").ok_or("Port not present")?;
-                v.push(Peer::new(ip, port as u16));
+                v.insert(Peer::new(ip, port as u16));
             }
             v
         }
@@ -51,7 +52,7 @@ pub async fn announce(req: AnnounceRequest<'_>) -> crate::Result<AnnounceRespons
 
             peers.chunks_exact(6).map(Peer::v4).collect()
         }
-        None => vec![],
+        None => hashset![],
     };
 
     debug!("Found {} peers (v4): {:?}", peers.len(), peers);
@@ -61,7 +62,7 @@ pub async fn announce(req: AnnounceRequest<'_>) -> crate::Result<AnnounceRespons
         return Err("Invalid peer len".into());
     }
 
-    let peers6: Vec<_> = peers6.chunks_exact(18).map(Peer::v6).collect();
+    let peers6: HashSet<_> = peers6.chunks_exact(18).map(Peer::v6).collect();
     debug!("Found {} peers (v6): {:?}", peers6.len(), peers6);
 
     Ok(AnnounceResponse {
