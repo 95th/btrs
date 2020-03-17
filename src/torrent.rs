@@ -8,15 +8,13 @@ use crate::peer::{self, Peer, PeerId};
 use crate::work::{Piece, PieceWork, WorkQueue};
 use ben::Node;
 use futures::future::poll_fn;
+use futures::future::Either;
 use futures::stream::FuturesUnordered;
 use futures::Stream;
 use log::{debug, error, info, trace, warn};
-use pin_project::pin_project;
 use sha1::Sha1;
 use std::collections::{HashMap, HashSet};
-use std::future::Future;
-use std::pin::Pin;
-use std::task::{Context, Poll};
+use std::task::Poll;
 use std::time::{Duration, Instant};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::mpsc::Sender;
@@ -110,30 +108,6 @@ pub struct TorrentWorker<'a> {
     peers6: HashSet<Peer>,
 }
 
-#[pin_project]
-enum Action<A, M, D> {
-    Announce(#[pin] A),
-    Metadata(#[pin] M),
-    Download(#[pin] D),
-}
-
-impl<A, M, D> Future for Action<A, M, D>
-where
-    A: Future,
-    M: Future,
-    D: Future,
-{
-    type Output = Action<A::Output, M::Output, D::Output>;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        match self.project() {
-            __ActionProjection::Announce(f) => f.poll(cx).map(Action::Announce),
-            __ActionProjection::Metadata(f) => f.poll(cx).map(Action::Metadata),
-            __ActionProjection::Download(f) => f.poll(cx).map(Action::Download),
-        }
-    }
-}
-
 impl TorrentWorker<'_> {
     pub fn num_pieces(&self) -> usize {
         self.work.borrow().len()
@@ -172,9 +146,9 @@ impl TorrentWorker<'_> {
                                 Err(e) => warn!("Announce failed: {}", e),
                             }
                         }
-                        responses
+                        Either::Left(responses)
                     };
-                    pending.push(Action::Announce(announce));
+                    pending.push(Either::Left(announce));
                     last_announced = Instant::now();
                 }
 
@@ -196,24 +170,33 @@ impl TorrentWorker<'_> {
                                 let mut dl = Download::new(&mut client, work, piece_tx).await?;
                                 dl.download().await
                             };
-                            f.await.map_err(|e| (e, peer))
+                            Either::Right(f.await.map_err(|e| (e, peer)))
                         };
-                        pending.push(Action::Download(dl));
+                        pending.push(Either::Right(dl));
                         connected.push(peer_2);
                     } else {
                         break;
                     }
                 }
 
-                if false {
-                    pending.push(Action::Metadata(async {}));
-                }
-
                 trace!("{} active connections", connected.len());
 
                 match futures::ready!(pending.as_mut().poll_next(cx)) {
                     Some(output) => match output {
-                        Action::Download(result) => match result {
+                        Either::Left(responses) => {
+                            for resp in responses {
+                                // keep announce interval of atleast 1 minute
+                                announce_interval = 60.max(resp.interval as u64);
+
+                                all_peers.extend(resp.peers);
+                                all_peers6.extend(resp.peers6);
+
+                                // We don't want to connect failed peers again
+                                all_peers.retain(|p| !failed.contains(p));
+                                all_peers6.retain(|p| !failed.contains(p));
+                            }
+                        }
+                        Either::Right(result) => match result {
                             Ok(()) => {}
                             Err((e, peer)) => {
                                 warn!("Error occurred for peer {} : {}", peer.addr, e);
@@ -228,14 +211,6 @@ impl TorrentWorker<'_> {
                                 }
                             }
                         },
-                        Action::Announce(responses) => {
-                            for resp in responses {
-                                announce_interval = resp.interval as u64;
-                                all_peers.extend(resp.peers);
-                                all_peers6.extend(resp.peers6);
-                            }
-                        }
-                        _ => unimplemented!(),
                     },
                     None => break,
                 }
