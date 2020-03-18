@@ -1,4 +1,4 @@
-use crate::announce::AnnounceRequest;
+use crate::announce::Tracker;
 use crate::avg::SlidingAvg;
 use crate::client::{AsyncStream, Client};
 use crate::future::timeout;
@@ -13,9 +13,9 @@ use futures::stream::FuturesUnordered;
 use futures::Stream;
 use log::{debug, error, info, trace, warn};
 use sha1::Sha1;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::task::Poll;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::mpsc::Sender;
 
@@ -92,11 +92,18 @@ impl Torrent {
     }
 
     pub fn worker(&self) -> TorrentWorker<'_> {
+        let trackers = self
+            .tracker_urls
+            .iter()
+            .cloned()
+            .map(|url| Tracker::new(url))
+            .collect();
         TorrentWorker {
             torrent: self,
             work: WorkQueue::new(self.piece_iter().collect()),
             peers: hashset![],
             peers6: hashset![],
+            trackers,
         }
     }
 }
@@ -106,6 +113,7 @@ pub struct TorrentWorker<'a> {
     work: WorkQueue<'a>,
     peers: HashSet<Peer>,
     peers6: HashSet<Peer>,
+    trackers: VecDeque<Tracker>,
 }
 
 impl TorrentWorker<'_> {
@@ -119,9 +127,7 @@ impl TorrentWorker<'_> {
         let peer_id = &self.torrent.peer_id;
         let all_peers = &mut self.peers;
         let all_peers6 = &mut self.peers6;
-        let announce_url = &self.torrent.tracker_urls;
-        let mut last_announced = Instant::now() - Duration::from_secs(100_000);
-        let mut announce_interval = 100_000;
+        let trackers = &mut self.trackers;
 
         let pending = FuturesUnordered::new();
         futures::pin_mut!(pending);
@@ -134,22 +140,19 @@ impl TorrentWorker<'_> {
         let future = poll_fn(|cx| {
             loop {
                 // Announce
-                let announce_time = last_announced + Duration::from_secs(announce_interval);
-                if announce_time <= Instant::now() {
-                    let announce = async move {
-                        let mut responses = vec![];
-                        for url in announce_url {
-                            trace!("Announce to {}", url);
-                            let req = AnnounceRequest::new(url, info_hash, peer_id, 6881);
-                            match req.send().await {
-                                Ok(r) => responses.push(r),
-                                Err(e) => warn!("Announce failed: {}", e),
-                            }
-                        }
-                        Either::Left(responses)
-                    };
-                    pending.push(Either::Left(announce));
-                    last_announced = Instant::now();
+                let mut n = trackers.len();
+                while let Some(tracker) = trackers.pop_front() {
+                    n -= 1;
+                    if tracker.should_announce() {
+                        pending.push(Either::Left(async move {
+                            Either::Left(tracker.announce(info_hash, peer_id).await)
+                        }));
+                    } else {
+                        trackers.push_back(tracker);
+                    }
+                    if n == 0 {
+                        break;
+                    }
                 }
 
                 // Add new peer to download
@@ -179,15 +182,16 @@ impl TorrentWorker<'_> {
                     }
                 }
 
-                trace!("{} active connections", connected.len());
+                trace!(
+                    "{} active connections, {} pending futures",
+                    connected.len(),
+                    pending.len()
+                );
 
                 match futures::ready!(pending.as_mut().poll_next(cx)) {
                     Some(output) => match output {
-                        Either::Left(responses) => {
-                            for resp in responses {
-                                // keep announce interval of atleast 1 minute
-                                announce_interval = 60.max(resp.interval as u64);
-
+                        Either::Left((resp, tracker)) => {
+                            if let Some(resp) = resp {
                                 all_peers.extend(resp.peers);
                                 all_peers6.extend(resp.peers6);
 
@@ -195,6 +199,7 @@ impl TorrentWorker<'_> {
                                 all_peers.retain(|p| !failed.contains(p));
                                 all_peers6.retain(|p| !failed.contains(p));
                             }
+                            trackers.push_back(tracker);
                         }
                         Either::Right(result) => match result {
                             Ok(()) => {}

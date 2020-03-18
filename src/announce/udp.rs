@@ -148,7 +148,7 @@ impl UdpTrackerConnection {
             n -= 6;
         }
         Ok(AnnounceResponse {
-            interval: interval as usize,
+            interval: interval as u64,
             peers,
             peers6: hashset![],
         })

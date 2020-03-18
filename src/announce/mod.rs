@@ -1,9 +1,13 @@
 use crate::metainfo::InfoHash;
 use crate::peer::{Peer, PeerId};
+use log::{trace, warn};
 use std::collections::HashSet;
+use std::time::{Duration, Instant};
 
 mod http;
 mod udp;
+
+const MIN_TRACKER_INTERVAL: u64 = 60;
 
 #[derive(Debug)]
 pub enum Event {
@@ -13,9 +17,48 @@ pub enum Event {
     Stopped,
 }
 
+pub struct Tracker {
+    pub url: String,
+    next_announce: Instant,
+    interval: u64,
+}
+
+impl Tracker {
+    pub fn new(url: String) -> Self {
+        Self {
+            url,
+            next_announce: Instant::now(),
+            interval: MIN_TRACKER_INTERVAL,
+        }
+    }
+
+    pub fn should_announce(&self) -> bool {
+        Instant::now() >= self.next_announce
+    }
+
+    pub async fn announce(
+        mut self,
+        info_hash: &InfoHash,
+        peer_id: &PeerId,
+    ) -> (Option<AnnounceResponse>, Self) {
+        trace!("Announce to {}", self.url);
+        let req = AnnounceRequest::new(&self.url, info_hash, peer_id, 6881);
+        let resp = match req.send().await {
+            Ok(r) => r,
+            Err(e) => {
+                warn!("Announce failed: {}", e);
+                return (None, self);
+            }
+        };
+        self.interval = MIN_TRACKER_INTERVAL.max(resp.interval);
+        self.next_announce = Instant::now() + Duration::from_secs(self.interval);
+        (Some(resp), self)
+    }
+}
+
 #[derive(Debug)]
 pub struct AnnounceResponse {
-    pub interval: usize,
+    pub interval: u64,
     pub peers: HashSet<Peer>,
     pub peers6: HashSet<Peer>,
 }
