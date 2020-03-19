@@ -44,15 +44,17 @@ impl Tracker {
         trace!("Announce to {}", self.url);
         let req = AnnounceRequest::new(&self.url, info_hash, peer_id, 6881);
         let resp = match req.send().await {
-            Ok(r) => r,
+            Ok(r) => {
+                self.interval = MIN_TRACKER_INTERVAL.max(r.interval);
+                Some(r)
+            }
             Err(e) => {
                 warn!("Announce failed: {}", e);
-                return (None, self);
+                None
             }
         };
-        self.interval = MIN_TRACKER_INTERVAL.max(resp.interval);
         self.next_announce = Instant::now() + Duration::from_secs(self.interval);
-        (Some(resp), self)
+        (resp, self)
     }
 }
 
