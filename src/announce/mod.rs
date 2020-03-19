@@ -1,3 +1,4 @@
+use crate::future::timeout;
 use crate::metainfo::InfoHash;
 use crate::peer::{Peer, PeerId};
 use log::{trace, warn};
@@ -7,7 +8,7 @@ use std::time::{Duration, Instant};
 mod http;
 mod udp;
 
-const MIN_TRACKER_INTERVAL: u64 = 60;
+const MIN_TRACKER_INTERVAL: u64 = 10;
 
 #[derive(Debug)]
 pub enum Event {
@@ -43,7 +44,7 @@ impl Tracker {
     ) -> (Option<AnnounceResponse>, Self) {
         trace!("Announce to {}", self.url);
         let req = AnnounceRequest::new(&self.url, info_hash, peer_id, 6881);
-        let resp = match req.send().await {
+        let resp = match timeout(req.send(), 3).await {
             Ok(r) => {
                 self.interval = MIN_TRACKER_INTERVAL.max(r.interval);
                 Some(r)
