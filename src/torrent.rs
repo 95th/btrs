@@ -8,7 +8,6 @@ use crate::peer::{self, Peer, PeerId};
 use crate::work::{Piece, PieceWork, WorkQueue};
 use ben::Node;
 use futures::future::poll_fn;
-use futures::future::Either;
 use futures::stream::FuturesUnordered;
 use futures::Stream;
 use log::{debug, error, info, trace, warn};
@@ -129,27 +128,27 @@ impl TorrentWorker<'_> {
         let all_peers6 = &mut self.peers6;
         let trackers = &mut self.trackers;
 
-        let pending = FuturesUnordered::new();
-        futures::pin_mut!(pending);
+        let pending_downloads = FuturesUnordered::new();
+        let pending_trackers = FuturesUnordered::new();
+
+        futures::pin_mut!(pending_downloads);
+        futures::pin_mut!(pending_trackers);
 
         // TODO: Make this configurable
         let max_connections = 10;
         let mut connected: Vec<Peer> = vec![];
         let mut failed: Vec<Peer> = vec![];
-        let mut pending_downloads = 0;
 
         let future = poll_fn(|cx| {
             loop {
-                // No pending pieces are left and no pending downloads
-                if work.borrow().is_empty() && pending_downloads == 0 {
+                // No remaining pieces are left and no pending downloads
+                if work.borrow().is_empty() && pending_downloads.is_empty() {
                     break;
                 }
 
                 // Announce
                 while let Some(tracker) = trackers.pop_front() {
-                    pending.push(Either::Left(async move {
-                        Either::Left(tracker.announce(info_hash, peer_id).await)
-                    }));
+                    pending_trackers.push(tracker.announce(info_hash, peer_id));
                 }
 
                 // Add new peer to download
@@ -170,56 +169,58 @@ impl TorrentWorker<'_> {
                                 let mut dl = Download::new(&mut client, work, piece_tx).await?;
                                 dl.download().await
                             };
-                            Either::Right(f.await.map_err(|e| (e, peer)))
+                            f.await.map_err(|e| (e, peer))
                         };
-                        pending.push(Either::Right(dl));
+                        pending_downloads.push(dl);
                         connected.push(peer_2);
-                        pending_downloads += 1;
                     } else {
                         break;
                     }
                 }
 
                 trace!(
-                    "{} active connections, {} pending futures",
+                    "{} active connections, {} pending trackers, {} pending downloads",
                     connected.len(),
-                    pending.len()
+                    pending_trackers.len(),
+                    pending_downloads.len()
                 );
 
-                match futures::ready!(pending.as_mut().poll_next(cx)) {
-                    Some(output) => match output {
-                        Either::Left((resp, tracker)) => {
-                            if let Some(resp) = resp {
-                                all_peers.extend(resp.peers);
-                                all_peers6.extend(resp.peers6);
+                let mut tracker_pending = false;
 
-                                // We don't want to connect failed peers again
-                                all_peers.retain(|p| !failed.contains(p));
-                                all_peers6.retain(|p| !failed.contains(p));
-                            }
-                            trackers.push_back(tracker);
+                match pending_trackers.as_mut().poll_next(cx) {
+                    Poll::Ready(Some((resp, tracker))) => {
+                        if let Some(resp) = resp {
+                            all_peers.extend(resp.peers);
+                            all_peers6.extend(resp.peers6);
+
+                            // We don't want to connect failed peers again
+                            all_peers.retain(|p| !failed.contains(p));
+                            all_peers6.retain(|p| !failed.contains(p));
                         }
-                        Either::Right(result) => {
-                            pending_downloads -= 1;
-                            match result {
-                                Ok(()) => {}
-                                Err((e, peer)) => {
-                                    warn!("Error occurred for peer {} : {}", peer.addr, e);
-                                    match connected.iter().position(|p| *p == peer) {
-                                        Some(pos) => {
-                                            connected.swap_remove(pos);
-                                            failed.push(peer);
-                                        }
-                                        None => debug_assert!(
-                                            false,
-                                            "peer should be in `connected` list"
-                                        ),
-                                    }
+                        trackers.push_back(tracker);
+                    }
+                    Poll::Ready(None) => {}
+                    Poll::Pending => tracker_pending = true,
+                }
+
+                match futures::ready!(pending_downloads.as_mut().poll_next(cx)) {
+                    Some(result) => {
+                        if let Err((e, peer)) = result {
+                            warn!("Error occurred for peer {} : {}", peer.addr, e);
+                            match connected.iter().position(|p| *p == peer) {
+                                Some(pos) => {
+                                    connected.swap_remove(pos);
+                                    failed.push(peer);
                                 }
+                                None => debug_assert!(false, "peer should be in `connected` list"),
                             }
                         }
-                    },
-                    None => break,
+                    }
+                    None => {
+                        if tracker_pending {
+                            return Poll::Pending;
+                        }
+                    }
                 }
             }
             Poll::Ready(())
