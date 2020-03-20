@@ -159,20 +159,21 @@ impl TorrentWorker<'_> {
                         .find(|p| !connected.contains(p) && !failed.contains(p));
 
                     if let Some(peer) = maybe_peer {
-                        let peer = peer.clone();
-                        let peer_2 = peer.clone();
-                        let piece_tx = piece_tx.clone();
-                        let dl = async move {
-                            let f = async {
-                                let mut client = timeout(Client::new_tcp(peer.addr), 3).await?;
-                                client.handshake(info_hash, peer_id).await?;
-                                let mut dl = Download::new(client, work, piece_tx).await?;
-                                dl.download().await
-                            };
-                            f.await.map_err(|e| (e, peer))
+                        let dl = {
+                            let peer = peer.clone();
+                            let piece_tx = piece_tx.clone();
+                            async move {
+                                let f = async {
+                                    let mut client = timeout(Client::new_tcp(peer.addr), 3).await?;
+                                    client.handshake(info_hash, peer_id).await?;
+                                    let mut dl = Download::new(client, work, piece_tx).await?;
+                                    dl.download().await
+                                };
+                                f.await.map_err(|e| (e, peer))
+                            }
                         };
                         pending_downloads.push(dl);
-                        connected.push(peer_2);
+                        connected.push(peer.clone());
                     } else {
                         break;
                     }
