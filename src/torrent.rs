@@ -166,7 +166,7 @@ impl TorrentWorker<'_> {
                             let f = async {
                                 let mut client = timeout(Client::new_tcp(peer.addr), 3).await?;
                                 client.handshake(info_hash, peer_id).await?;
-                                let mut dl = Download::new(&mut client, work, piece_tx).await?;
+                                let mut dl = Download::new(client, work, piece_tx).await?;
                                 dl.download().await
                             };
                             f.await.map_err(|e| (e, peer))
@@ -237,9 +237,9 @@ struct PieceInProgress<'a> {
     requested: u32,
 }
 
-struct Download<'w, 'c, 'p, C> {
+struct Download<'w, 'p, C> {
     /// Peer connection
-    client: &'c mut Client<C>,
+    client: Client<C>,
 
     /// Common piece queue from where we pick the pieces to download
     work: &'w WorkQueue<'p>,
@@ -266,7 +266,7 @@ struct Download<'w, 'c, 'p, C> {
     rate: SlidingAvg,
 }
 
-impl<C> Drop for Download<'_, '_, '_, C> {
+impl<C> Drop for Download<'_, '_, C> {
     fn drop(&mut self) {
         // Put any unfinished pieces back in the work queue
         self.work
@@ -275,12 +275,12 @@ impl<C> Drop for Download<'_, '_, '_, C> {
     }
 }
 
-impl<'w, 'c, 'p, C: AsyncStream> Download<'w, 'c, 'p, C> {
+impl<'w, 'p, C: AsyncStream> Download<'w, 'p, C> {
     async fn new(
-        client: &'c mut Client<C>,
+        mut client: Client<C>,
         work: &'w WorkQueue<'p>,
         piece_tx: Sender<Piece>,
-    ) -> crate::Result<Download<'w, 'c, 'p, C>> {
+    ) -> crate::Result<Download<'w, 'p, C>> {
         client.send_unchoke().await?;
         client.send_interested().await?;
         client.conn.flush().await?;
