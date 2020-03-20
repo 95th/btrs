@@ -136,23 +136,20 @@ impl TorrentWorker<'_> {
         let max_connections = 10;
         let mut connected: Vec<Peer> = vec![];
         let mut failed: Vec<Peer> = vec![];
+        let mut pending_downloads = 0;
 
         let future = poll_fn(|cx| {
             loop {
+                // No pending pieces are left and no pending downloads
+                if work.borrow().is_empty() && pending_downloads == 0 {
+                    break;
+                }
+
                 // Announce
-                let mut n = trackers.len();
                 while let Some(tracker) = trackers.pop_front() {
-                    n -= 1;
-                    if tracker.should_announce() {
-                        pending.push(Either::Left(async move {
-                            Either::Left(tracker.announce(info_hash, peer_id).await)
-                        }));
-                    } else {
-                        trackers.push_back(tracker);
-                    }
-                    if n == 0 {
-                        break;
-                    }
+                    pending.push(Either::Left(async move {
+                        Either::Left(tracker.announce(info_hash, peer_id).await)
+                    }));
                 }
 
                 // Add new peer to download
@@ -177,6 +174,7 @@ impl TorrentWorker<'_> {
                         };
                         pending.push(Either::Right(dl));
                         connected.push(peer_2);
+                        pending_downloads += 1;
                     } else {
                         break;
                     }
@@ -201,21 +199,25 @@ impl TorrentWorker<'_> {
                             }
                             trackers.push_back(tracker);
                         }
-                        Either::Right(result) => match result {
-                            Ok(()) => {}
-                            Err((e, peer)) => {
-                                warn!("Error occurred for peer {} : {}", peer.addr, e);
-                                match connected.iter().position(|p| *p == peer) {
-                                    Some(pos) => {
-                                        connected.swap_remove(pos);
-                                        failed.push(peer);
-                                    }
-                                    None => {
-                                        debug_assert!(false, "peer should be in `connected` list")
+                        Either::Right(result) => {
+                            pending_downloads -= 1;
+                            match result {
+                                Ok(()) => {}
+                                Err((e, peer)) => {
+                                    warn!("Error occurred for peer {} : {}", peer.addr, e);
+                                    match connected.iter().position(|p| *p == peer) {
+                                        Some(pos) => {
+                                            connected.swap_remove(pos);
+                                            failed.push(peer);
+                                        }
+                                        None => debug_assert!(
+                                            false,
+                                            "peer should be in `connected` list"
+                                        ),
                                     }
                                 }
                             }
-                        },
+                        }
                     },
                     None => break,
                 }

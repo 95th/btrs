@@ -33,15 +33,13 @@ impl Tracker {
         }
     }
 
-    pub fn should_announce(&self) -> bool {
-        Instant::now() >= self.next_announce
-    }
-
     pub async fn announce(
         mut self,
         info_hash: &InfoHash,
         peer_id: &PeerId,
     ) -> (Option<AnnounceResponse>, Self) {
+        tokio::time::delay_until(self.next_announce.into()).await;
+
         trace!("Announce to {}", self.url);
         let req = AnnounceRequest::new(&self.url, info_hash, peer_id, 6881);
         let resp = match timeout(req.send(), 3).await {
