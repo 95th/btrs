@@ -135,6 +135,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 [[package]]
 name = "dht"
 version = "0.1.0"
+dependencies = [
+ "data-encoding 2.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "rand 0.7.3 (registry+https://github.com/rust-lang/crates.io-index)",
+]
 
 [[package]]
 name = "dtoa"
