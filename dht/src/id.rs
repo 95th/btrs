@@ -12,6 +12,10 @@ impl NodeId {
         Self::default()
     }
 
+    pub fn max() -> Self {
+        Self::of_byte(u8::max_value())
+    }
+
     pub fn of_byte(b: u8) -> Self {
         Self([b; Self::LEN])
     }
@@ -51,10 +55,6 @@ impl NodeId {
         Ok(())
     }
 
-    pub fn dist(&self, other: &Self) -> Self {
-        self ^ other
-    }
-
     pub fn compare_ref(&self, n1: &Self, n2: &Self) -> bool {
         let lhs = self ^ n1;
         let rhs = self ^ n2;
@@ -62,7 +62,7 @@ impl NodeId {
     }
 
     pub fn dist_exp(&self, other: &Self) -> usize {
-        160 - self.dist(other).leading_zeros()
+        160 - self.xor_leading_zeros(other)
     }
 
     pub fn min_dist_exp(&self, ids: &[Self]) -> usize {
@@ -70,6 +70,16 @@ impl NodeId {
         ids.iter().map(|id| self.dist_exp(id)).min().unwrap_or(160)
     }
 
+    /// Returns number of leading zeros.
+    ///
+    /// # Usage:
+    /// ```
+    /// # use dht::id::NodeId;
+    ///
+    /// let id = NodeId::of_byte(0b0010_0010);
+    ///
+    /// assert_eq!(2, id.leading_zeros());
+    /// ```
     pub fn leading_zeros(&self) -> usize {
         let mut n = 0;
         for &c in self.0.iter() {
@@ -81,6 +91,28 @@ impl NodeId {
             }
         }
         n
+    }
+
+    /// Returns number of leading zeros of `XOR` of `self` with given `NodeId`
+    ///
+    /// # Usage:
+    /// ```
+    /// # use dht::id::NodeId;
+    ///
+    /// let id1 = NodeId::of_byte(0b0000_0101);
+    /// let id2 = NodeId::of_byte(0b0010_0010);
+    ///
+    /// let n1 = id1.xor_leading_zeros(&id2);
+    /// let n2 = (&id1 ^ &id2).leading_zeros();
+    ///
+    /// assert_eq!(n1, n2);
+    /// ```
+    pub fn xor_leading_zeros(&self, other: &Self) -> usize {
+        (self ^ other).leading_zeros()
+    }
+
+    pub fn as_bytes(&self) -> &[u8; Self::LEN] {
+        &self.0
     }
 }
 
@@ -131,11 +163,5 @@ mod tests {
         let b = NodeId::of_byte(0b1100_0100);
         let c = &a ^ &b;
         assert_eq!(NodeId::of_byte(0b1100_0001), c);
-    }
-
-    #[test]
-    fn leading_zeros() {
-        let a = NodeId::of_byte(0b0000_1000);
-        assert_eq!(4, a.leading_zeros());
     }
 }
