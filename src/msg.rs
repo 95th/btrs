@@ -1,6 +1,5 @@
-use ben::{Entry, Node};
+use ben::{Encoder, Node};
 use log::trace;
-use std::collections::BTreeMap;
 use std::io;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
@@ -347,32 +346,35 @@ pub enum MetadataMsg {
     Data(i64, i64),
 }
 
-impl From<MetadataMsg> for Entry {
+impl From<MetadataMsg> for Vec<u8> {
     fn from(msg: MetadataMsg) -> Self {
-        let mut dict = BTreeMap::new();
+        let mut v = vec![];
+        let mut dict = v.add_dict();
         match msg {
             MetadataMsg::Handshake(id) => {
-                let mut m = BTreeMap::new();
-                m.insert("ut_metadata", (id as i64).into());
-                dict.insert("m", m.into());
-                dict.insert("reqq", 500.into());
-                dict.insert("p", 6881.into());
+                let mut m = dict.add_dict("m");
+                m.add_int("ut_metadata", id as i64);
+                m.finish();
+
+                dict.add_int("p", 6881);
+                dict.add_int("reqq", 500);
             }
             MetadataMsg::Request(piece) => {
-                dict.insert("msg_type", msg_type::REQUEST.into());
-                dict.insert("piece", piece.into());
+                dict.add_int("msg_type", msg_type::REQUEST);
+                dict.add_int("piece", piece);
             }
             MetadataMsg::Reject(piece) => {
-                dict.insert("msg_type", msg_type::REJECT.into());
-                dict.insert("piece", piece.into());
+                dict.add_int("msg_type", msg_type::REJECT);
+                dict.add_int("piece", piece);
             }
             MetadataMsg::Data(piece, total_size) => {
-                dict.insert("msg_type", msg_type::DATA.into());
-                dict.insert("piece", piece.into());
-                dict.insert("total_size", total_size.into());
+                dict.add_int("msg_type", msg_type::DATA);
+                dict.add_int("piece", piece);
+                dict.add_int("total_size", total_size);
             }
         }
-        dict.into()
+        dict.finish();
+        v
     }
 }
 

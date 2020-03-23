@@ -6,7 +6,7 @@ use crate::client::handshake::Handshake;
 use crate::metainfo::InfoHash;
 use crate::msg::{Message, MetadataMsg};
 use crate::peer::PeerId;
-use ben::Entry;
+use ben::Node;
 pub use conn::{AsyncStream, Connection};
 use log::trace;
 use std::io;
@@ -148,12 +148,15 @@ impl<C: AsyncStream> Client<C> {
         self.send_ext(0, MetadataMsg::Handshake(id).into()).await
     }
 
-    pub async fn send_ext(&mut self, id: u8, value: Entry) -> io::Result<()> {
-        let data = value.to_vec();
+    pub async fn send_ext(&mut self, id: u8, data: Vec<u8>) -> io::Result<()> {
         let msg = Message::Extended {
             len: data.len() as u32,
         };
-        trace!("Send extended message : {:?} ; payload: {:?}", msg, value);
+        trace!(
+            "Send extended message : {:?} ; payload: {:#?}",
+            msg,
+            Node::parse(&data).unwrap()
+        );
         msg.write_ext(&mut self.conn, id, &data).await
     }
 
@@ -167,6 +170,7 @@ impl<C: AsyncStream> Client<C> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ben::Encoder;
     use std::io::Cursor;
 
     #[tokio::test]
@@ -327,7 +331,14 @@ mod tests {
     async fn extended() {
         let mut data = vec![];
         let mut tx = Client::new(Cursor::new(&mut data));
-        let payload = Entry::List(vec![Entry::Int(1), Entry::Int(2), Entry::Int(3)]);
+        let mut payload = vec![];
+
+        let mut list = payload.add_list();
+        list.add_int(1);
+        list.add_int(2);
+        list.add_int(3);
+        list.finish();
+
         tx.send_ext(1, payload).await.unwrap();
 
         println!("{:?}", data);

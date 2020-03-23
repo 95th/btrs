@@ -39,7 +39,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 [[package]]
 name = "ben"
 version = "0.1.7"
-source = "git+https://github.com/95th/ben#4681c36bae0ea06fe2ee8a96b3338429f63abc90"
+source = "git+https://github.com/95th/ben#1253a4ec43050ec311ef39d970204b97fb7b710d"
+dependencies = [
+ "itoa 0.4.5 (registry+https://github.com/rust-lang/crates.io-index)",
+]
 
 [[package]]
 name = "bitflags"
