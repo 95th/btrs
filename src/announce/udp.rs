@@ -3,6 +3,7 @@ use crate::peer::Peer;
 use log::trace;
 use rand::thread_rng;
 use rand::Rng;
+use std::io;
 use std::io::Cursor;
 use std::net::IpAddr;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -36,9 +37,26 @@ impl UdpTrackerConnection {
             return Err("Not a UDP url".into());
         }
 
+        let mut port = 6881;
+        let mut tries = 100;
+        let conn = loop {
+            let conn = UdpSocket::bind(("localhost", port)).await;
+            match conn {
+                Ok(conn) => break conn,
+                Err(e) if e.kind() == io::ErrorKind::AddrInUse => {
+                    port += 1;
+                    tries -= 1;
+                    if tries == 0 {
+                        return Err(e.into());
+                    }
+                }
+                Err(e) => return Err(e.into()),
+            }
+        };
+
         let host = url.host_str().ok_or("Missing host")?;
         let port = url.port().ok_or("Missing port")?;
-        let conn = UdpSocket::bind("localhost:6881").await?;
+
         conn.connect((host, port)).await?;
         Ok(Self {
             conn,
