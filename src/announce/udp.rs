@@ -3,9 +3,9 @@ use crate::peer::Peer;
 use log::trace;
 use rand::thread_rng;
 use rand::Rng;
-use std::io;
 use std::io::Cursor;
 use std::net::IpAddr;
+use std::sync::atomic::{AtomicU16, Ordering};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::UdpSocket;
 
@@ -31,33 +31,33 @@ struct UdpTrackerConnection {
 }
 
 impl UdpTrackerConnection {
+    const PORT: AtomicU16 = AtomicU16::new(6881);
+
     async fn new(url: &str) -> crate::Result<Self> {
         let url = url::Url::parse(url).map_err(|_| "Failed to parse tracker url")?;
         if url.scheme() != "udp" {
             return Err("Not a UDP url".into());
         }
 
-        let mut port = 6881;
-        let mut tries = 100;
-        let conn = loop {
-            let conn = UdpSocket::bind(("localhost", port)).await;
-            match conn {
-                Ok(conn) => break conn,
-                Err(e) if e.kind() == io::ErrorKind::AddrInUse => {
-                    port += 1;
-                    tries -= 1;
-                    if tries == 0 {
-                        return Err(e.into());
-                    }
-                }
-                Err(e) => return Err(e.into()),
-            }
-        };
-
         let host = url.host_str().ok_or("Missing host")?;
         let port = url.port().ok_or("Missing port")?;
 
-        conn.connect((host, port)).await?;
+        let f = async {
+            let local_port = Self::PORT.fetch_add(1, Ordering::SeqCst);
+            let conn = UdpSocket::bind(("localhost", local_port)).await?;
+            conn.connect((host, port)).await?;
+            Ok(conn)
+        };
+
+        let conn = match f.await {
+            Ok(conn) => conn,
+            Err(e) => {
+                // Connect failed, reset the port back down by one.
+                Self::PORT.fetch_sub(1, Ordering::SeqCst);
+                return Err(e);
+            }
+        };
+
         Ok(Self {
             conn,
             buf: vec![0; 4096].into_boxed_slice(),
@@ -170,5 +170,11 @@ impl UdpTrackerConnection {
             peers,
             peers6: hashset![],
         })
+    }
+}
+
+impl Drop for UdpTrackerConnection {
+    fn drop(&mut self) {
+        Self::PORT.fetch_sub(1, Ordering::SeqCst);
     }
 }
