@@ -1,7 +1,7 @@
 use crate::announce::{AnnounceRequest, AnnounceResponse};
 use crate::peer::Peer;
 use futures::channel::{mpsc, oneshot};
-use futures::StreamExt;
+use futures::{SinkExt, StreamExt};
 use log::{trace, warn};
 use rand::thread_rng;
 use rand::Rng;
@@ -20,22 +20,22 @@ mod action {
     pub const ANNOUNCE: u32 = 1;
 }
 
-struct Tracker<'a> {
+struct Tracker {
     addr: SocketAddr,
-    req: AnnounceRequest<'a>,
+    req: AnnounceRequest,
     tx: oneshot::Sender<crate::Result<AnnounceResponse>>,
     added: Instant,
     conn_id: u64,
     txn_id: u32,
 }
 
-impl Tracker<'_> {
-    async fn new<'a>(
-        req: AnnounceRequest<'a>,
+impl Tracker {
+    async fn new(
+        req: AnnounceRequest,
         tx: oneshot::Sender<crate::Result<AnnounceResponse>>,
         conn: &mut UdpSocket,
         buf: &mut [u8],
-    ) -> Option<Tracker<'a>> {
+    ) -> Option<Tracker> {
         let f = async {
             let url = url::Url::parse(&req.url).map_err(|_| "Failed to parse tracker url")?;
             if url.scheme() != "udp" {
@@ -103,7 +103,7 @@ impl Tracker<'_> {
         c.write_u32(action::ANNOUNCE).await?;
         c.write_u32(self.txn_id).await?;
         c.write_all(self.req.info_hash.as_ref()).await?;
-        c.write_all(self.req.peer_id).await?;
+        c.write_all(&self.req.peer_id).await?;
         c.write_u64(0).await?; // downloaded
         c.write_u64(0).await?; // left
         c.write_u64(0).await?; // uploaded
@@ -122,47 +122,56 @@ impl Tracker<'_> {
     }
 }
 
-pub struct TrackerManager<'a> {
+pub struct UdpTrackerMgr {
     request_rx: mpsc::Receiver<(
-        AnnounceRequest<'a>,
+        AnnounceRequest,
         oneshot::Sender<crate::Result<AnnounceResponse>>,
     )>,
     request_tx: mpsc::Sender<(
-        AnnounceRequest<'a>,
+        AnnounceRequest,
         oneshot::Sender<crate::Result<AnnounceResponse>>,
     )>,
     udp_socket: UdpSocket,
 }
 
-pub struct TrackerManagerHandle<'a>(
+#[derive(Clone)]
+pub struct UdpTrackerMgrHandle(
     mpsc::Sender<(
-        AnnounceRequest<'a>,
+        AnnounceRequest,
         oneshot::Sender<crate::Result<AnnounceResponse>>,
     )>,
 );
 
-impl<'a> TrackerManagerHandle<'a> {
-    // pub fn announce(&mut self, req: AnnounceRequest<'a>) -> crate::Result<AnnounceResponse> {
-    //     self.0.send(req);
-    // }
+impl UdpTrackerMgrHandle {
+    pub async fn announce(&mut self, req: AnnounceRequest) -> crate::Result<AnnounceResponse> {
+        let (tx, rx) = oneshot::channel();
+        self.0
+            .send((req, tx))
+            .await
+            .map_err(|_| "Unable to send announce request")?;
+        rx.await
+            .map_err(|_| "Unable to receive announce response")?
+    }
 }
 
-impl<'a> TrackerManager<'a> {
-    pub async fn new() -> crate::Result<TrackerManager<'a>> {
+impl UdpTrackerMgr {
+    pub async fn new() -> crate::Result<UdpTrackerMgr> {
         let udp_socket = UdpSocket::bind(("localhost", 6881)).await?;
         let (request_tx, request_rx) = mpsc::channel(100);
-        Ok(TrackerManager {
+        Ok(UdpTrackerMgr {
             udp_socket,
             request_tx,
             request_rx,
         })
     }
 
-    pub fn handle(&self) -> TrackerManagerHandle<'a> {
-        TrackerManagerHandle(self.request_tx.clone())
+    pub fn handle(&self) -> UdpTrackerMgrHandle {
+        UdpTrackerMgrHandle(self.request_tx.clone())
     }
 
     pub async fn listen(&mut self) {
+        trace!("Listening for announce requests");
+
         let mut pending_connect = HashMap::new();
         let mut pending_announce = HashMap::new();
 
@@ -174,8 +183,10 @@ impl<'a> TrackerManager<'a> {
 
         loop {
             if pending_rx && pending_announce.is_empty() && pending_connect.is_empty() {
+                // Wait for requests
                 match request_rx.next().await {
                     Some((req, tx)) => {
+                        trace!("Got an announce request");
                         let tc = Tracker::new(req, tx, udp_socket, &mut buf).await;
                         if let Some(tc) = tc {
                             pending_connect.insert(tc.txn_id, tc);
@@ -184,9 +195,11 @@ impl<'a> TrackerManager<'a> {
                     None => break,
                 }
             } else {
+                // Read as many request as we can without blocking
                 loop {
                     match request_rx.try_next() {
                         Ok(Some((req, tx))) => {
+                            trace!("Got an announce request");
                             let tc = Tracker::new(req, tx, udp_socket, &mut buf).await;
                             if let Some(tc) = tc {
                                 pending_connect.insert(tc.txn_id, tc);
@@ -204,6 +217,13 @@ impl<'a> TrackerManager<'a> {
                 }
             }
 
+            trace!(
+                "pending_rx: {}, pending_connect: {}, pending_announce: {}",
+                pending_rx,
+                pending_connect.len(),
+                pending_announce.len()
+            );
+
             if !pending_rx && pending_connect.is_empty() && pending_announce.is_empty() {
                 // Channel is closed and no pending items - We're done
                 break;
@@ -212,13 +232,15 @@ impl<'a> TrackerManager<'a> {
             let f = async {
                 let (mut n, addr) = udp_socket.recv_from(&mut buf[..]).await?;
 
-                if n < 4 {
+                if n < 8 {
                     return Err("Packet too small".into());
                 }
 
                 let mut c = Cursor::new(&buf[..]);
                 let action = c.read_u32().await?;
                 let txn_id = c.read_u32().await?;
+
+                trace!("action: {}, txn_id: {}", action, txn_id);
 
                 if action == action::CONNECT {
                     if n < 16 {
@@ -231,10 +253,14 @@ impl<'a> TrackerManager<'a> {
                     }
 
                     let conn_id = c.read_u64().await?;
+                    trace!("conn_id: {}", conn_id);
+
                     tc.conn_id = conn_id;
                     tc.update_txn_id();
 
                     tc.send_announce(udp_socket, &mut buf).await?;
+                    trace!("sent announce");
+
                     pending_announce.insert(tc.txn_id, tc);
                 } else if action == action::ANNOUNCE {
                     if n < 20 {
@@ -288,11 +314,23 @@ impl<'a> TrackerManager<'a> {
                 warn!("Error: {}", e);
             }
 
-            let now = Instant::now();
+            trace!(
+                "Before culling: pending_connect: {}, pending_announce: {}",
+                pending_connect.len(),
+                pending_announce.len()
+            );
+
+            let cutoff = Instant::now() - TRACKER_TIMEOUT;
 
             // Cull timed out entries
-            pending_connect.retain(|_, tc| tc.added + TRACKER_TIMEOUT < now);
-            pending_announce.retain(|_, tc| tc.added + TRACKER_TIMEOUT < now);
+            pending_connect.retain(|_, tc| tc.added > cutoff);
+            pending_announce.retain(|_, tc| tc.added > cutoff);
+
+            trace!(
+                "After culling: pending_connect: {}, pending_announce: {}",
+                pending_connect.len(),
+                pending_announce.len()
+            );
         }
     }
 }
