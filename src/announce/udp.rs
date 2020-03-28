@@ -20,10 +20,12 @@ mod action {
     pub const ANNOUNCE: u32 = 1;
 }
 
+type AnnounceResponseTx = oneshot::Sender<crate::Result<AnnounceResponse>>;
+
 struct Tracker {
     addr: SocketAddr,
     req: AnnounceRequest,
-    tx: oneshot::Sender<crate::Result<AnnounceResponse>>,
+    tx: AnnounceResponseTx,
     added: Instant,
     conn_id: u64,
     txn_id: u32,
@@ -32,8 +34,8 @@ struct Tracker {
 impl Tracker {
     async fn new(
         req: AnnounceRequest,
-        tx: oneshot::Sender<crate::Result<AnnounceResponse>>,
-        conn: &mut UdpSocket,
+        tx: AnnounceResponseTx,
+        socket: &mut UdpSocket,
         buf: &mut [u8],
     ) -> Option<Tracker> {
         let f = async {
@@ -69,7 +71,7 @@ impl Tracker {
             txn_id: 0,
         };
 
-        match c.send_connect(conn, buf).await {
+        match c.send_connect(socket, buf).await {
             Ok(()) => Some(c),
             Err(e) => {
                 let _ = c.tx.send(Err(e));
@@ -82,14 +84,14 @@ impl Tracker {
         self.txn_id = thread_rng().gen();
     }
 
-    async fn send_connect(&mut self, conn: &mut UdpSocket, buf: &mut [u8]) -> crate::Result<()> {
+    async fn send_connect(&mut self, socket: &mut UdpSocket, buf: &mut [u8]) -> crate::Result<()> {
         self.update_txn_id();
         let mut c = Cursor::new(&mut *buf);
         c.write_u64(TRACKER_CONSTANT).await?;
         c.write_u32(action::CONNECT).await?;
         c.write_u32(self.txn_id).await?;
 
-        let n = conn.send_to(&buf[..16], &self.addr).await?;
+        let n = socket.send_to(&buf[..16], &self.addr).await?;
         if n != 16 {
             return Err("Error sending data".into());
         }
@@ -97,7 +99,7 @@ impl Tracker {
         Ok(())
     }
 
-    async fn send_announce(&mut self, conn: &mut UdpSocket, buf: &mut [u8]) -> crate::Result<()> {
+    async fn send_announce(&mut self, socket: &mut UdpSocket, buf: &mut [u8]) -> crate::Result<()> {
         let mut c = Cursor::new(&mut *buf);
         c.write_u64(self.conn_id).await?;
         c.write_u32(action::ANNOUNCE).await?;
@@ -113,7 +115,7 @@ impl Tracker {
         c.write_i32(-1).await?; // num_want
         c.write_u16(self.req.port).await?; // port
 
-        let n = conn.send_to(&buf[..98], &self.addr).await?;
+        let n = socket.send_to(&buf[..98], &self.addr).await?;
         if n != 98 {
             return Err("Error sending data".into());
         }
@@ -123,24 +125,13 @@ impl Tracker {
 }
 
 pub struct UdpTrackerMgr {
-    request_rx: mpsc::Receiver<(
-        AnnounceRequest,
-        oneshot::Sender<crate::Result<AnnounceResponse>>,
-    )>,
-    request_tx: mpsc::Sender<(
-        AnnounceRequest,
-        oneshot::Sender<crate::Result<AnnounceResponse>>,
-    )>,
-    udp_socket: UdpSocket,
+    rx: mpsc::Receiver<(AnnounceRequest, AnnounceResponseTx)>,
+    tx: mpsc::Sender<(AnnounceRequest, AnnounceResponseTx)>,
+    socket: UdpSocket,
 }
 
 #[derive(Clone)]
-pub struct UdpTrackerMgrHandle(
-    mpsc::Sender<(
-        AnnounceRequest,
-        oneshot::Sender<crate::Result<AnnounceResponse>>,
-    )>,
-);
+pub struct UdpTrackerMgrHandle(mpsc::Sender<(AnnounceRequest, AnnounceResponseTx)>);
 
 impl UdpTrackerMgrHandle {
     pub async fn announce(&mut self, req: AnnounceRequest) -> crate::Result<AnnounceResponse> {
@@ -156,17 +147,13 @@ impl UdpTrackerMgrHandle {
 
 impl UdpTrackerMgr {
     pub async fn new() -> crate::Result<UdpTrackerMgr> {
-        let udp_socket = UdpSocket::bind(("localhost", 6881)).await?;
-        let (request_tx, request_rx) = mpsc::channel(100);
-        Ok(UdpTrackerMgr {
-            udp_socket,
-            request_tx,
-            request_rx,
-        })
+        let socket = UdpSocket::bind(("localhost", 6882)).await?;
+        let (tx, rx) = mpsc::channel(100);
+        Ok(UdpTrackerMgr { socket, tx, rx })
     }
 
     pub fn handle(&self) -> UdpTrackerMgrHandle {
-        UdpTrackerMgrHandle(self.request_tx.clone())
+        UdpTrackerMgrHandle(self.tx.clone())
     }
 
     pub async fn listen(&mut self) {
@@ -175,19 +162,19 @@ impl UdpTrackerMgr {
         let mut pending_connect = HashMap::new();
         let mut pending_announce = HashMap::new();
 
-        let request_rx = &mut self.request_rx;
-        let udp_socket = &mut self.udp_socket;
+        let rx = &mut self.rx;
+        let socket = &mut self.socket;
         let mut buf = [0; 4096];
 
-        let mut pending_rx = true;
+        let mut channel_open = true;
 
         loop {
-            if pending_rx && pending_announce.is_empty() && pending_connect.is_empty() {
+            if channel_open && pending_announce.is_empty() && pending_connect.is_empty() {
                 // Wait for requests
-                match request_rx.next().await {
+                match rx.next().await {
                     Some((req, tx)) => {
                         trace!("Got an announce request");
-                        let tc = Tracker::new(req, tx, udp_socket, &mut buf).await;
+                        let tc = Tracker::new(req, tx, socket, &mut buf).await;
                         if let Some(tc) = tc {
                             pending_connect.insert(tc.txn_id, tc);
                         }
@@ -197,20 +184,20 @@ impl UdpTrackerMgr {
             } else {
                 // Read as many request as we can without blocking
                 loop {
-                    match request_rx.try_next() {
+                    match rx.try_next() {
                         Ok(Some((req, tx))) => {
                             trace!("Got an announce request");
-                            let tc = Tracker::new(req, tx, udp_socket, &mut buf).await;
+                            let tc = Tracker::new(req, tx, socket, &mut buf).await;
                             if let Some(tc) = tc {
                                 pending_connect.insert(tc.txn_id, tc);
                             }
                         }
                         Ok(None) => {
-                            pending_rx = false;
+                            channel_open = false;
                             break;
                         }
                         Err(_) => {
-                            pending_rx = true;
+                            channel_open = true;
                             break;
                         }
                     }
@@ -218,19 +205,19 @@ impl UdpTrackerMgr {
             }
 
             trace!(
-                "pending_rx: {}, pending_connect: {}, pending_announce: {}",
-                pending_rx,
+                "channel_open: {}, pending_connect: {}, pending_announce: {}",
+                channel_open,
                 pending_connect.len(),
                 pending_announce.len()
             );
 
-            if !pending_rx && pending_connect.is_empty() && pending_announce.is_empty() {
+            if !channel_open && pending_connect.is_empty() && pending_announce.is_empty() {
                 // Channel is closed and no pending items - We're done
                 break;
             }
 
             let f = async {
-                let (mut n, addr) = udp_socket.recv_from(&mut buf[..]).await?;
+                let (mut n, addr) = socket.recv_from(&mut buf[..]).await?;
 
                 if n < 8 {
                     return Err("Packet too small".into());
@@ -258,7 +245,7 @@ impl UdpTrackerMgr {
                     tc.conn_id = conn_id;
                     tc.update_txn_id();
 
-                    tc.send_announce(udp_socket, &mut buf).await?;
+                    tc.send_announce(socket, &mut buf).await?;
                     trace!("sent announce");
 
                     pending_announce.insert(tc.txn_id, tc);
