@@ -181,25 +181,26 @@ impl UdpTrackerMgr {
                     }
                     None => break,
                 }
-            } else {
-                // Read as many request as we can without blocking
-                loop {
-                    match rx.try_next() {
-                        Ok(Some((req, tx))) => {
-                            trace!("Got an announce request");
-                            let tc = Tracker::new(req, tx, socket, &mut buf).await;
-                            if let Some(tc) = tc {
-                                pending_connect.insert(tc.txn_id, tc);
-                            }
+            }
+
+            // Read as many requests as we can without blocking (well blocking only to write
+            // connects to socket which shouldn't block much)
+            loop {
+                match rx.try_next() {
+                    Ok(Some((req, tx))) => {
+                        trace!("Got an announce request");
+                        let tc = Tracker::new(req, tx, socket, &mut buf).await;
+                        if let Some(tc) = tc {
+                            pending_connect.insert(tc.txn_id, tc);
                         }
-                        Ok(None) => {
-                            channel_open = false;
-                            break;
-                        }
-                        Err(_) => {
-                            channel_open = true;
-                            break;
-                        }
+                    }
+                    Ok(None) => {
+                        channel_open = false;
+                        break;
+                    }
+                    Err(_) => {
+                        channel_open = true;
+                        break;
                     }
                 }
             }
