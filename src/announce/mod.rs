@@ -8,9 +8,11 @@ use std::time::{Duration, Instant};
 mod http;
 mod udp;
 
+pub use udp::TrackerManager;
+
 const MIN_TRACKER_INTERVAL: u64 = 10;
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum Event {
     None,
     Completed,
@@ -99,8 +101,8 @@ impl AnnounceRequest<'_> {
     pub async fn send(self) -> crate::Result<AnnounceResponse> {
         if self.url.starts_with("http") {
             http::announce(self).await
-        } else if self.url.starts_with("udp") {
-            udp::announce(self).await
+        // } else if self.url.starts_with("udp") {
+        //     udp::announce(self).await
         } else {
             Err("Unsupported tracker URL".into())
         }
