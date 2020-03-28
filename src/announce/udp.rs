@@ -1,180 +1,336 @@
 use crate::announce::{AnnounceRequest, AnnounceResponse};
 use crate::peer::Peer;
-use log::trace;
+use futures::channel::{mpsc, oneshot};
+use futures::{SinkExt, StreamExt};
+use log::{trace, warn};
 use rand::thread_rng;
 use rand::Rng;
+use std::collections::HashMap;
 use std::io::Cursor;
-use std::net::IpAddr;
-use std::sync::atomic::{AtomicU16, Ordering};
+use std::net::{IpAddr, SocketAddr};
+use std::time::{Duration, Instant};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::UdpSocket;
+use tokio::net::{lookup_host, UdpSocket};
 
-pub const TRACKER_CONSTANT: u64 = 0x0417_2710_1980;
+const TRACKER_CONSTANT: u64 = 0x0417_2710_1980;
+const TRACKER_TIMEOUT: Duration = Duration::from_secs(10);
 
 mod action {
     pub const CONNECT: u32 = 0;
     pub const ANNOUNCE: u32 = 1;
 }
 
-pub async fn announce(req: AnnounceRequest<'_>) -> crate::Result<AnnounceResponse> {
-    let mut c = UdpTrackerConnection::new(req.url).await?;
-    c.connect().await?;
-    c.announce(req).await
-}
-
-#[derive(Debug)]
-struct UdpTrackerConnection {
-    conn: UdpSocket,
-    buf: Box<[u8]>,
+struct Tracker {
+    addr: SocketAddr,
+    req: AnnounceRequest,
+    tx: oneshot::Sender<crate::Result<AnnounceResponse>>,
+    added: Instant,
     conn_id: u64,
     txn_id: u32,
 }
 
-impl UdpTrackerConnection {
-    const PORT: AtomicU16 = AtomicU16::new(6881);
-
-    async fn new(url: &str) -> crate::Result<Self> {
-        let url = url::Url::parse(url).map_err(|_| "Failed to parse tracker url")?;
-        if url.scheme() != "udp" {
-            return Err("Not a UDP url".into());
-        }
-
-        let host = url.host_str().ok_or("Missing host")?;
-        let port = url.port().ok_or("Missing port")?;
-
+impl Tracker {
+    async fn new(
+        req: AnnounceRequest,
+        tx: oneshot::Sender<crate::Result<AnnounceResponse>>,
+        conn: &mut UdpSocket,
+        buf: &mut [u8],
+    ) -> Option<Tracker> {
         let f = async {
-            let local_port = Self::PORT.fetch_add(1, Ordering::SeqCst);
-            let conn = UdpSocket::bind(("localhost", local_port)).await?;
-            conn.connect((host, port)).await?;
-            Ok(conn)
+            let url = url::Url::parse(&req.url).map_err(|_| "Failed to parse tracker url")?;
+            if url.scheme() != "udp" {
+                return Err("Not a UDP url".into());
+            }
+
+            let host = url.host_str().ok_or("Missing host")?;
+            let port = url.port().ok_or("Missing port")?;
+
+            let addr = lookup_host((host, port))
+                .await?
+                .next()
+                .ok_or("Host/port is not resolved to a socket addr")?;
+            Ok(addr)
         };
 
-        let conn = match f.await {
-            Ok(conn) => conn,
+        let addr = match f.await {
+            Ok(x) => x,
             Err(e) => {
-                // Connect failed, reset the port back down by one.
-                Self::PORT.fetch_sub(1, Ordering::SeqCst);
-                return Err(e);
+                let _ = tx.send(Err(e));
+                return None;
             }
         };
 
-        Ok(Self {
-            conn,
-            buf: vec![0; 4096].into_boxed_slice(),
+        let mut c = Tracker {
+            addr,
+            req,
+            tx,
+            added: Instant::now(),
             conn_id: 0,
             txn_id: 0,
-        })
+        };
+
+        match c.send_connect(conn, buf).await {
+            Ok(()) => Some(c),
+            Err(e) => {
+                let _ = c.tx.send(Err(e));
+                None
+            }
+        }
     }
 
     fn update_txn_id(&mut self) {
         self.txn_id = thread_rng().gen();
     }
 
-    async fn connect(&mut self) -> crate::Result<()> {
+    async fn send_connect(&mut self, conn: &mut UdpSocket, buf: &mut [u8]) -> crate::Result<()> {
         self.update_txn_id();
-        let mut c = Cursor::new(&mut self.buf[..]);
+        let mut c = Cursor::new(&mut *buf);
         c.write_u64(TRACKER_CONSTANT).await?;
         c.write_u32(action::CONNECT).await?;
         c.write_u32(self.txn_id).await?;
 
-        let n = self.conn.send(&self.buf[..16]).await?;
+        let n = conn.send_to(&buf[..16], &self.addr).await?;
         if n != 16 {
             return Err("Error sending data".into());
         }
 
-        let n = self.conn.recv(&mut self.buf[..]).await?;
-        if n < 16 {
-            return Err("Error receiving data".into());
-        }
-
-        let mut c = Cursor::new(&self.buf[..]);
-        let action = c.read_u32().await?;
-        if action != action::CONNECT {
-            return Err("Expected CONNECT action".into());
-        }
-
-        let txn_id = c.read_u32().await?;
-        if self.txn_id != txn_id {
-            return Err("Incorrect transaction ID received".into());
-        }
-
-        let conn_id = c.read_u64().await?;
-        self.conn_id = conn_id;
-        self.update_txn_id();
         Ok(())
     }
 
-    async fn announce(&mut self, req: AnnounceRequest<'_>) -> crate::Result<AnnounceResponse> {
-        let mut c = Cursor::new(&mut self.buf[..]);
+    async fn send_announce(&mut self, conn: &mut UdpSocket, buf: &mut [u8]) -> crate::Result<()> {
+        let mut c = Cursor::new(&mut *buf);
         c.write_u64(self.conn_id).await?;
         c.write_u32(action::ANNOUNCE).await?;
         c.write_u32(self.txn_id).await?;
-        c.write_all(req.info_hash.as_ref()).await?;
-        c.write_all(req.peer_id).await?;
+        c.write_all(self.req.info_hash.as_ref()).await?;
+        c.write_all(&self.req.peer_id).await?;
         c.write_u64(0).await?; // downloaded
         c.write_u64(0).await?; // left
         c.write_u64(0).await?; // uploaded
-        c.write_u32(req.event as u32).await?;
+        c.write_u32(self.req.event as u32).await?;
         c.write_u32(0).await?; // IP addr
         c.write_u32(0).await?; // key
         c.write_i32(-1).await?; // num_want
-        c.write_u16(req.port).await?; // port
+        c.write_u16(self.req.port).await?; // port
 
-        let n = self.conn.send(&self.buf[..98]).await?;
+        let n = conn.send_to(&buf[..98], &self.addr).await?;
         if n != 98 {
             return Err("Error sending data".into());
         }
 
-        let mut n = self.conn.recv(&mut self.buf[..]).await?;
-        if n < 20 {
-            return Err("Error receiving data".into());
-        }
-
-        let mut c = Cursor::new(&self.buf[..]);
-        let action = c.read_u32().await?;
-        if action != action::ANNOUNCE {
-            return Err("Expected ANNOUNCE action".into());
-        }
-
-        let txn_id = c.read_u32().await?;
-        if self.txn_id != txn_id {
-            return Err("Incorrect transaction ID received".into());
-        }
-
-        let interval = c.read_u32().await?;
-        trace!("interval: {}", interval);
-
-        let leechers = c.read_u32().await?;
-        trace!("leechers: {}", leechers);
-
-        let seeders = c.read_u32().await?;
-        trace!("seeders: {}", seeders);
-
-        n -= 20;
-
-        if n % 6 != 0 {
-            return Err("IPs should be 6 byte each".into());
-        }
-
-        let mut peers = hashset![];
-        while n > 0 {
-            let ip_addr = c.read_u32().await?;
-            let port = c.read_u16().await?;
-            trace!("Addr: {}, port: {}", ip_addr, port);
-            let addr: IpAddr = ip_addr.to_be_bytes().into();
-            peers.insert(Peer::new(addr, port));
-            n -= 6;
-        }
-        Ok(AnnounceResponse {
-            interval: interval as u64,
-            peers,
-            peers6: hashset![],
-        })
+        Ok(())
     }
 }
 
-impl Drop for UdpTrackerConnection {
-    fn drop(&mut self) {
-        Self::PORT.fetch_sub(1, Ordering::SeqCst);
+pub struct UdpTrackerMgr {
+    request_rx: mpsc::Receiver<(
+        AnnounceRequest,
+        oneshot::Sender<crate::Result<AnnounceResponse>>,
+    )>,
+    request_tx: mpsc::Sender<(
+        AnnounceRequest,
+        oneshot::Sender<crate::Result<AnnounceResponse>>,
+    )>,
+    udp_socket: UdpSocket,
+}
+
+#[derive(Clone)]
+pub struct UdpTrackerMgrHandle(
+    mpsc::Sender<(
+        AnnounceRequest,
+        oneshot::Sender<crate::Result<AnnounceResponse>>,
+    )>,
+);
+
+impl UdpTrackerMgrHandle {
+    pub async fn announce(&mut self, req: AnnounceRequest) -> crate::Result<AnnounceResponse> {
+        let (tx, rx) = oneshot::channel();
+        self.0
+            .send((req, tx))
+            .await
+            .map_err(|_| "Unable to send announce request")?;
+        rx.await
+            .map_err(|_| "Unable to receive announce response")?
+    }
+}
+
+impl UdpTrackerMgr {
+    pub async fn new() -> crate::Result<UdpTrackerMgr> {
+        let udp_socket = UdpSocket::bind(("localhost", 6881)).await?;
+        let (request_tx, request_rx) = mpsc::channel(100);
+        Ok(UdpTrackerMgr {
+            udp_socket,
+            request_tx,
+            request_rx,
+        })
+    }
+
+    pub fn handle(&self) -> UdpTrackerMgrHandle {
+        UdpTrackerMgrHandle(self.request_tx.clone())
+    }
+
+    pub async fn listen(&mut self) {
+        trace!("Listening for announce requests");
+
+        let mut pending_connect = HashMap::new();
+        let mut pending_announce = HashMap::new();
+
+        let request_rx = &mut self.request_rx;
+        let udp_socket = &mut self.udp_socket;
+        let mut buf = [0; 4096];
+
+        let mut pending_rx = true;
+
+        loop {
+            if pending_rx && pending_announce.is_empty() && pending_connect.is_empty() {
+                // Wait for requests
+                match request_rx.next().await {
+                    Some((req, tx)) => {
+                        trace!("Got an announce request");
+                        let tc = Tracker::new(req, tx, udp_socket, &mut buf).await;
+                        if let Some(tc) = tc {
+                            pending_connect.insert(tc.txn_id, tc);
+                        }
+                    }
+                    None => break,
+                }
+            } else {
+                // Read as many request as we can without blocking
+                loop {
+                    match request_rx.try_next() {
+                        Ok(Some((req, tx))) => {
+                            trace!("Got an announce request");
+                            let tc = Tracker::new(req, tx, udp_socket, &mut buf).await;
+                            if let Some(tc) = tc {
+                                pending_connect.insert(tc.txn_id, tc);
+                            }
+                        }
+                        Ok(None) => {
+                            pending_rx = false;
+                            break;
+                        }
+                        Err(_) => {
+                            pending_rx = true;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            trace!(
+                "pending_rx: {}, pending_connect: {}, pending_announce: {}",
+                pending_rx,
+                pending_connect.len(),
+                pending_announce.len()
+            );
+
+            if !pending_rx && pending_connect.is_empty() && pending_announce.is_empty() {
+                // Channel is closed and no pending items - We're done
+                break;
+            }
+
+            let f = async {
+                let (mut n, addr) = udp_socket.recv_from(&mut buf[..]).await?;
+
+                if n < 8 {
+                    return Err("Packet too small".into());
+                }
+
+                let mut c = Cursor::new(&buf[..]);
+                let action = c.read_u32().await?;
+                let txn_id = c.read_u32().await?;
+
+                trace!("action: {}, txn_id: {}", action, txn_id);
+
+                if action == action::CONNECT {
+                    if n < 16 {
+                        return Err("Packet too small".into());
+                    }
+
+                    let mut tc = pending_connect.remove(&txn_id).ok_or("Unknown txn id")?;
+                    if tc.addr != addr {
+                        return Err("Address mismatch".into());
+                    }
+
+                    let conn_id = c.read_u64().await?;
+                    trace!("conn_id: {}", conn_id);
+
+                    tc.conn_id = conn_id;
+                    tc.update_txn_id();
+
+                    tc.send_announce(udp_socket, &mut buf).await?;
+                    trace!("sent announce");
+
+                    pending_announce.insert(tc.txn_id, tc);
+                } else if action == action::ANNOUNCE {
+                    if n < 20 {
+                        return Err("Packet too small".into());
+                    }
+
+                    let tc = pending_announce.remove(&txn_id).ok_or("Unknown txn id")?;
+                    if tc.addr != addr {
+                        return Err("Address mismatch".into());
+                    }
+
+                    let interval = c.read_u32().await?;
+                    trace!("interval: {}", interval);
+
+                    let leechers = c.read_u32().await?;
+                    trace!("leechers: {}", leechers);
+
+                    let seeders = c.read_u32().await?;
+                    trace!("seeders: {}", seeders);
+
+                    n -= 20;
+
+                    if n % 6 != 0 {
+                        return Err("IPs should be 6 byte each".into());
+                    }
+
+                    let mut peers = hashset![];
+                    while n > 0 {
+                        let ip_addr = c.read_u32().await?;
+                        let port = c.read_u16().await?;
+                        trace!("Addr: {}, port: {}", ip_addr, port);
+                        let addr: IpAddr = ip_addr.to_be_bytes().into();
+                        peers.insert(Peer::new(addr, port));
+                        n -= 6;
+                    }
+                    let resp = AnnounceResponse {
+                        interval: interval as u64,
+                        peers,
+                        peers6: hashset![],
+                    };
+
+                    let _ = tc.tx.send(Ok(resp));
+                } else {
+                    return Err("Invalid action received".into());
+                }
+
+                Ok::<_, crate::Error>(())
+            };
+
+            if let Err(e) = f.await {
+                warn!("Error: {}", e);
+            }
+
+            trace!(
+                "Before culling: pending_connect: {}, pending_announce: {}",
+                pending_connect.len(),
+                pending_announce.len()
+            );
+
+            let cutoff = Instant::now() - TRACKER_TIMEOUT;
+
+            // Cull timed out entries
+            pending_connect.retain(|_, tc| tc.added > cutoff);
+            pending_announce.retain(|_, tc| tc.added > cutoff);
+
+            trace!(
+                "After culling: pending_connect: {}, pending_announce: {}",
+                pending_connect.len(),
+                pending_announce.len()
+            );
+        }
     }
 }

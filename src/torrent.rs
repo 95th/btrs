@@ -1,4 +1,4 @@
-use crate::announce::Tracker;
+use crate::announce::{Tracker, TrackerMgr};
 use crate::avg::SlidingAvg;
 use crate::client::{AsyncStream, Client};
 use crate::future::timeout;
@@ -13,6 +13,7 @@ use futures::Stream;
 use log::{debug, error, info, trace, warn};
 use sha1::Sha1;
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::fmt;
 use std::task::Poll;
 use std::time::Instant;
 use tokio::io::AsyncWriteExt;
@@ -23,7 +24,6 @@ const MAX_REQUESTS: u32 = 500;
 const MIN_REQUESTS: u32 = 2;
 const MAX_BLOCK_SIZE: u32 = 0x4000;
 
-#[derive(Debug)]
 pub struct TorrentFile {
     pub tracker_urls: HashSet<String>,
     pub info_hash: InfoHash,
@@ -31,6 +31,22 @@ pub struct TorrentFile {
     pub piece_len: usize,
     pub length: usize,
     pub name: String,
+}
+
+impl fmt::Debug for TorrentFile {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("TorrentFile")
+            .field("tracker_urls", &self.tracker_urls)
+            .field("info_hash", &self.info_hash)
+            .field(
+                "piece_hashes",
+                &format!("[..; {}]", self.piece_hashes.len()),
+            )
+            .field("piece_len", &self.piece_len)
+            .field("length", &self.length)
+            .field("name", &self.name)
+            .finish()
+    }
 }
 
 impl TorrentFile {
@@ -47,8 +63,17 @@ impl TorrentFile {
         let piece_len = info_dict.get_int(b"piece length")?;
         let pieces = info_dict.get(b"pieces")?.data();
 
+        let mut tracker_urls = hashset![announce.to_owned()];
+        if let Some(list) = dict.get_list(b"announce-list") {
+            for v in list.iter() {
+                for v in v.as_list()?.iter() {
+                    tracker_urls.insert(v.as_str()?.to_string());
+                }
+            }
+        }
+
         let torrent = TorrentFile {
-            tracker_urls: hashset![announce.to_owned()],
+            tracker_urls,
             info_hash,
             piece_hashes: pieces.to_vec(),
             piece_len: piece_len as usize,
@@ -59,11 +84,10 @@ impl TorrentFile {
         Some(torrent)
     }
 
-    pub fn into_torrent(self) -> crate::Result<Torrent> {
+    pub fn into_torrent(self) -> Torrent {
         let peer_id = peer::generate_peer_id();
-        debug!("Our peer_id: {:x?}", peer_id);
 
-        Ok(Torrent {
+        Torrent {
             peer_id,
             info_hash: self.info_hash,
             piece_hashes: self.piece_hashes,
@@ -71,7 +95,7 @@ impl TorrentFile {
             length: self.length,
             name: self.name,
             tracker_urls: self.tracker_urls,
-        })
+        }
     }
 }
 
@@ -90,12 +114,12 @@ impl Torrent {
         PieceIter::new(self)
     }
 
-    pub fn worker(&self) -> TorrentWorker<'_> {
+    pub fn worker<'a>(&'a self, mgr: TrackerMgr) -> TorrentWorker<'a> {
         let trackers = self
             .tracker_urls
             .iter()
             .cloned()
-            .map(|url| Tracker::new(url))
+            .map(|url| Tracker::new(url, mgr.clone()))
             .collect();
         TorrentWorker {
             torrent: self,
