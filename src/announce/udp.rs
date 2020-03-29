@@ -48,6 +48,9 @@ impl Tracker {
             let host = url.host_str().ok_or("Missing host")?;
             let port = url.port().ok_or("Missing port")?;
 
+            // TODO: This happens periodically for the same URL for every announce
+            // Find a way to avoid this call - This is run in Tokio using spawn blocking
+            // which creates a new thread every single time.
             let addr = lookup_host((host, port))
                 .await?
                 .next()
@@ -104,6 +107,7 @@ impl Tracker {
     }
 
     async fn send_announce(&mut self, socket: &mut UdpSocket, buf: &mut [u8]) -> crate::Result<()> {
+        self.update_txn_id();
         let mut c = Cursor::new(&mut *buf);
         c.write_u64(self.conn_id).await?;
         c.write_u32(action::ANNOUNCE).await?;
@@ -127,6 +131,74 @@ impl Tracker {
         self.pending_action = action::ANNOUNCE;
         self.last_updated = Instant::now();
         Ok(())
+    }
+
+    async fn handle_response(mut self, buf: &[u8]) -> crate::Result<Option<Self>> {
+        if buf.len() < 16 {
+            return Err("Packet too small".into());
+        }
+
+        let mut c = Cursor::new(buf);
+        let action = c.read_u32().await?;
+        let txn_id = c.read_u32().await?;
+
+        trace!("action: {}, txn_id: {}", action, txn_id);
+
+        if self.pending_action != action {
+            return Err("Incorrect msg action received".into());
+        }
+
+        if self.txn_id != txn_id {
+            return Err("Txn Id mismatch".into());
+        }
+
+        if action == action::CONNECT {
+            let conn_id = c.read_u64().await?;
+            trace!("conn_id: {}", conn_id);
+
+            self.conn_id = conn_id;
+
+            Ok(Some(self))
+        } else if action == action::ANNOUNCE {
+            if buf.len() < 20 {
+                return Err("Packet too small".into());
+            }
+
+            let interval = c.read_u32().await?;
+            trace!("interval: {}", interval);
+
+            let leechers = c.read_u32().await?;
+            trace!("leechers: {}", leechers);
+
+            let seeders = c.read_u32().await?;
+            trace!("seeders: {}", seeders);
+
+            let mut n = buf.len() - 20;
+
+            if n % 6 != 0 {
+                return Err("IPs should be 6 byte each".into());
+            }
+
+            let mut peers = hashset![];
+            while n > 0 {
+                let ip_addr = c.read_u32().await?;
+                let port = c.read_u16().await?;
+                trace!("Addr: {}, port: {}", ip_addr, port);
+                let addr: IpAddr = ip_addr.to_be_bytes().into();
+                peers.insert(Peer::new(addr, port));
+                n -= 6;
+            }
+            let resp = AnnounceResponse {
+                interval: interval as u64,
+                peers,
+                peers6: hashset![],
+            };
+
+            let _ = self.tx.send(Ok(resp));
+            Ok(None)
+        } else {
+            Err("Invalid action received".into())
+        }
     }
 }
 
@@ -218,86 +290,16 @@ impl UdpTrackerMgr {
             }
 
             let f = async {
-                let (mut n, addr) = socket.recv_from(&mut buf[..]).await?;
-                let mut tc = pending
+                let (len, addr) = socket.recv_from(&mut buf).await?;
+                let tc = pending
                     .remove(&addr)
                     .ok_or("Msg received from unexpected addr")?;
 
-                if n < 8 {
-                    return Err("Packet too small".into());
-                }
-
-                let mut c = Cursor::new(&buf[..]);
-                let action = c.read_u32().await?;
-                let txn_id = c.read_u32().await?;
-
-                trace!("action: {}, txn_id: {}", action, txn_id);
-
-                if tc.pending_action != action {
-                    return Err("Incorrect msg action received".into());
-                }
-
-                if action == action::CONNECT {
-                    if n < 16 {
-                        return Err("Packet too small".into());
-                    }
-
-                    if tc.txn_id != txn_id {
-                        return Err("Txn Id mismatch".into());
-                    }
-
-                    let conn_id = c.read_u64().await?;
-                    trace!("conn_id: {}", conn_id);
-
-                    tc.conn_id = conn_id;
-                    tc.update_txn_id();
-
+                if let Some(mut tc) = tc.handle_response(&buf[..len]).await? {
                     tc.send_announce(socket, &mut buf).await?;
                     trace!("sent announce");
 
                     pending.insert(tc.addr, tc);
-                } else if action == action::ANNOUNCE {
-                    if n < 20 {
-                        return Err("Packet too small".into());
-                    }
-
-                    if tc.txn_id != txn_id {
-                        return Err("Txn Id mismatch".into());
-                    }
-
-                    let interval = c.read_u32().await?;
-                    trace!("interval: {}", interval);
-
-                    let leechers = c.read_u32().await?;
-                    trace!("leechers: {}", leechers);
-
-                    let seeders = c.read_u32().await?;
-                    trace!("seeders: {}", seeders);
-
-                    n -= 20;
-
-                    if n % 6 != 0 {
-                        return Err("IPs should be 6 byte each".into());
-                    }
-
-                    let mut peers = hashset![];
-                    while n > 0 {
-                        let ip_addr = c.read_u32().await?;
-                        let port = c.read_u16().await?;
-                        trace!("Addr: {}, port: {}", ip_addr, port);
-                        let addr: IpAddr = ip_addr.to_be_bytes().into();
-                        peers.insert(Peer::new(addr, port));
-                        n -= 6;
-                    }
-                    let resp = AnnounceResponse {
-                        interval: interval as u64,
-                        peers,
-                        peers6: hashset![],
-                    };
-
-                    let _ = tc.tx.send(Ok(resp));
-                } else {
-                    return Err("Invalid action received".into());
                 }
 
                 Ok::<_, crate::Error>(())
