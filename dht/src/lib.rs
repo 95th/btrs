@@ -3,6 +3,7 @@
 mod bucket;
 mod contact;
 pub mod id;
+pub mod msg;
 pub mod table;
 
 use id::NodeId;
