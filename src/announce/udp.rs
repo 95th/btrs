@@ -237,39 +237,28 @@ impl UdpTrackerMgr {
         trace!("Listening for announce requests");
 
         let mut pending = HashMap::new();
-
-        let rx = &mut self.rx;
-        let socket = &mut self.socket;
         let mut buf = [0; 4096];
-
         let mut channel_open = true;
 
         loop {
             if channel_open && pending.is_empty() {
-                // Wait for requests
-                match rx.next().await {
-                    Some((req, tx)) => {
-                        trace!("Got an announce request");
-                        let tc = UdpTracker::new(req, tx, socket, &mut buf).await;
-                        if let Some(tc) = tc {
-                            pending.insert(tc.addr, tc);
-                        }
-                    }
+                // Wait for a request
+                let (req, tx) = match self.rx.next().await {
+                    Some(r) => r,
                     None => break,
+                };
+
+                trace!("Got an announce request");
+                let tracker = UdpTracker::new(req, tx, &mut self.socket, &mut buf).await;
+                if let Some(tracker) = tracker {
+                    pending.insert(tracker.addr, tracker);
                 }
             }
 
-            // Read as many requests as we can without blocking (well blocking only to write
-            // connects to socket which shouldn't block much)
+            // Read as many requests as we can without blocking on request channel
             loop {
-                match rx.try_next() {
-                    Ok(Some((req, tx))) => {
-                        trace!("Got an announce request");
-                        let tc = UdpTracker::new(req, tx, socket, &mut buf).await;
-                        if let Some(tc) = tc {
-                            pending.insert(tc.addr, tc);
-                        }
-                    }
+                let (req, tx) = match self.rx.try_next() {
+                    Ok(Some(r)) => r,
                     Ok(None) => {
                         channel_open = false;
                         break;
@@ -278,6 +267,12 @@ impl UdpTrackerMgr {
                         channel_open = true;
                         break;
                     }
+                };
+
+                trace!("Got an announce request");
+                let tracker = UdpTracker::new(req, tx, &mut self.socket, &mut buf).await;
+                if let Some(tracker) = tracker {
+                    pending.insert(tracker.addr, tracker);
                 }
             }
 
@@ -287,19 +282,18 @@ impl UdpTrackerMgr {
                 if channel_open {
                     continue;
                 } else {
-                    // Channel is closed and no pending items - We're done here
                     break;
                 }
             }
 
             let f = async {
-                let (len, addr) = socket.recv_from(&mut buf).await?;
+                let (len, addr) = self.socket.recv_from(&mut buf).await?;
                 let tc = pending
                     .remove(&addr)
                     .ok_or("Msg received from unexpected addr")?;
 
                 if let Some(mut tc) = tc.handle_response(&buf[..len]).await? {
-                    tc.send_announce(socket, &mut buf).await?;
+                    tc.send_announce(&mut self.socket, &mut buf).await?;
                     trace!("sent announce");
 
                     pending.insert(tc.addr, tc);
