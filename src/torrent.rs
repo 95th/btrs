@@ -198,17 +198,17 @@ impl TorrentWorker<'_> {
                         };
                         pending_downloads.push(dl);
                         connected.push(peer.clone());
+
+                        trace!(
+                            "{} active connections, {} pending trackers, {} pending downloads",
+                            connected.len(),
+                            pending_trackers.len(),
+                            pending_downloads.len()
+                        );
                     } else {
                         break;
                     }
                 }
-
-                trace!(
-                    "{} active connections, {} pending trackers, {} pending downloads",
-                    connected.len(),
-                    pending_trackers.len(),
-                    pending_downloads.len()
-                );
 
                 let mut tracker_pending = false;
 
