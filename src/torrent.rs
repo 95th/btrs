@@ -215,6 +215,8 @@ impl TorrentWorker<'_> {
                 match pending_trackers.as_mut().poll_next(cx) {
                     Poll::Ready(Some((resp, tracker))) => {
                         if let Some(resp) = resp {
+                            trackers.push_back(tracker);
+
                             all_peers.extend(resp.peers);
                             all_peers6.extend(resp.peers6);
 
@@ -222,7 +224,6 @@ impl TorrentWorker<'_> {
                             all_peers.retain(|p| !failed.contains(p));
                             all_peers6.retain(|p| !failed.contains(p));
                         }
-                        trackers.push_back(tracker);
                     }
                     Poll::Ready(None) => {}
                     Poll::Pending => tracker_pending = true,
