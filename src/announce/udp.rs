@@ -26,9 +26,10 @@ struct Tracker {
     addr: SocketAddr,
     req: AnnounceRequest,
     tx: AnnounceResponseTx,
-    added: Instant,
+    last_updated: Instant,
     conn_id: u64,
     txn_id: u32,
+    pending_action: u32,
 }
 
 impl Tracker {
@@ -66,9 +67,10 @@ impl Tracker {
             addr,
             req,
             tx,
-            added: Instant::now(),
+            last_updated: Instant::now(),
             conn_id: 0,
             txn_id: 0,
+            pending_action: 0,
         };
 
         match c.send_connect(socket, buf).await {
@@ -96,6 +98,8 @@ impl Tracker {
             return Err("Error sending data".into());
         }
 
+        self.pending_action = action::CONNECT;
+        self.last_updated = Instant::now();
         Ok(())
     }
 
@@ -120,6 +124,8 @@ impl Tracker {
             return Err("Error sending data".into());
         }
 
+        self.pending_action = action::ANNOUNCE;
+        self.last_updated = Instant::now();
         Ok(())
     }
 }
@@ -159,8 +165,7 @@ impl UdpTrackerMgr {
     pub async fn listen(&mut self) {
         trace!("Listening for announce requests");
 
-        let mut pending_connect = HashMap::new();
-        let mut pending_announce = HashMap::new();
+        let mut pending = HashMap::new();
 
         let rx = &mut self.rx;
         let socket = &mut self.socket;
@@ -169,14 +174,14 @@ impl UdpTrackerMgr {
         let mut channel_open = true;
 
         loop {
-            if channel_open && pending_announce.is_empty() && pending_connect.is_empty() {
+            if channel_open && pending.is_empty() {
                 // Wait for requests
                 match rx.next().await {
                     Some((req, tx)) => {
                         trace!("Got an announce request");
                         let tc = Tracker::new(req, tx, socket, &mut buf).await;
                         if let Some(tc) = tc {
-                            pending_connect.insert(tc.txn_id, tc);
+                            pending.insert(tc.addr, tc);
                         }
                     }
                     None => break,
@@ -191,7 +196,7 @@ impl UdpTrackerMgr {
                         trace!("Got an announce request");
                         let tc = Tracker::new(req, tx, socket, &mut buf).await;
                         if let Some(tc) = tc {
-                            pending_connect.insert(tc.txn_id, tc);
+                            pending.insert(tc.addr, tc);
                         }
                     }
                     Ok(None) => {
@@ -205,20 +210,18 @@ impl UdpTrackerMgr {
                 }
             }
 
-            trace!(
-                "channel_open: {}, pending_connect: {}, pending_announce: {}",
-                channel_open,
-                pending_connect.len(),
-                pending_announce.len()
-            );
+            trace!("channel_open: {}, pending: {}", channel_open, pending.len(),);
 
-            if !channel_open && pending_connect.is_empty() && pending_announce.is_empty() {
+            if !channel_open && pending.is_empty() {
                 // Channel is closed and no pending items - We're done
                 break;
             }
 
             let f = async {
                 let (mut n, addr) = socket.recv_from(&mut buf[..]).await?;
+                let mut tc = pending
+                    .remove(&addr)
+                    .ok_or("Msg received from unexpected addr")?;
 
                 if n < 8 {
                     return Err("Packet too small".into());
@@ -230,14 +233,17 @@ impl UdpTrackerMgr {
 
                 trace!("action: {}, txn_id: {}", action, txn_id);
 
+                if tc.pending_action != action {
+                    return Err("Incorrect msg action received".into());
+                }
+
                 if action == action::CONNECT {
                     if n < 16 {
                         return Err("Packet too small".into());
                     }
 
-                    let mut tc = pending_connect.remove(&txn_id).ok_or("Unknown txn id")?;
-                    if tc.addr != addr {
-                        return Err("Address mismatch".into());
+                    if tc.txn_id != txn_id {
+                        return Err("Txn Id mismatch".into());
                     }
 
                     let conn_id = c.read_u64().await?;
@@ -249,15 +255,14 @@ impl UdpTrackerMgr {
                     tc.send_announce(socket, &mut buf).await?;
                     trace!("sent announce");
 
-                    pending_announce.insert(tc.txn_id, tc);
+                    pending.insert(tc.addr, tc);
                 } else if action == action::ANNOUNCE {
                     if n < 20 {
                         return Err("Packet too small".into());
                     }
 
-                    let tc = pending_announce.remove(&txn_id).ok_or("Unknown txn id")?;
-                    if tc.addr != addr {
-                        return Err("Address mismatch".into());
+                    if tc.txn_id != txn_id {
+                        return Err("Txn Id mismatch".into());
                     }
 
                     let interval = c.read_u32().await?;
@@ -302,23 +307,14 @@ impl UdpTrackerMgr {
                 warn!("Error: {}", e);
             }
 
-            trace!(
-                "Before culling: pending_connect: {}, pending_announce: {}",
-                pending_connect.len(),
-                pending_announce.len()
-            );
+            trace!("Before culling: pending: {}", pending.len(),);
 
             let cutoff = Instant::now() - TRACKER_TIMEOUT;
 
             // Cull timed out entries
-            pending_connect.retain(|_, tc| tc.added > cutoff);
-            pending_announce.retain(|_, tc| tc.added > cutoff);
+            pending.retain(|_, tc| tc.last_updated > cutoff);
 
-            trace!(
-                "After culling: pending_connect: {}, pending_announce: {}",
-                pending_connect.len(),
-                pending_announce.len()
-            );
+            trace!("After culling: pending: {}", pending.len(),);
         }
     }
 }
