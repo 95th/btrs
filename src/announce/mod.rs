@@ -75,6 +75,7 @@ pub struct AnnounceResponse {
     pub peers6: HashSet<Peer>,
 }
 
+#[derive(Debug)]
 pub struct AnnounceRequest {
     pub url: String,
 

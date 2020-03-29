@@ -1,4 +1,5 @@
 use crate::announce::{AnnounceRequest, AnnounceResponse};
+use crate::future::timeout;
 use crate::peer::Peer;
 use futures::channel::{mpsc, oneshot};
 use futures::{SinkExt, StreamExt};
@@ -216,12 +217,8 @@ pub struct UdpTrackerMgrHandle(mpsc::Sender<(AnnounceRequest, AnnounceResponseTx
 impl UdpTrackerMgrHandle {
     pub async fn announce(&mut self, req: AnnounceRequest) -> crate::Result<AnnounceResponse> {
         let (tx, rx) = oneshot::channel();
-        self.0
-            .send((req, tx))
-            .await
-            .map_err(|_| "Unable to send announce request")?;
-        rx.await
-            .map_err(|_| "Unable to receive announce response")?
+        self.0.send((req, tx)).await.unwrap();
+        rx.await.unwrap()
     }
 }
 
@@ -286,9 +283,13 @@ impl UdpTrackerMgr {
 
             trace!("channel_open: {}, pending: {}", channel_open, pending.len(),);
 
-            if !channel_open && pending.is_empty() {
-                // Channel is closed and no pending items - We're done
-                break;
+            if pending.is_empty() {
+                if channel_open {
+                    continue;
+                } else {
+                    // Channel is closed and no pending items - We're done here
+                    break;
+                }
             }
 
             let f = async {
@@ -307,7 +308,7 @@ impl UdpTrackerMgr {
                 Ok::<_, crate::Error>(())
             };
 
-            if let Err(e) = f.await {
+            if let Err(e) = timeout(f, 3).await {
                 warn!("Error: {}", e);
             }
 

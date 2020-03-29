@@ -245,6 +245,8 @@ impl TorrentWorker<'_> {
                     None => {
                         if tracker_pending {
                             return Poll::Pending;
+                        } else if trackers.is_empty() && pending_trackers.is_empty() {
+                            break;
                         }
                     }
                 }
