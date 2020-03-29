@@ -11,6 +11,7 @@ use std::net::{IpAddr, SocketAddr};
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{lookup_host, UdpSocket};
+use url::Url;
 
 const TRACKER_CONSTANT: u64 = 0x0417_2710_1980;
 const TRACKER_TIMEOUT: Duration = Duration::from_secs(10);
@@ -22,7 +23,7 @@ mod action {
 
 type AnnounceResponseTx = oneshot::Sender<crate::Result<AnnounceResponse>>;
 
-struct Tracker {
+struct UdpTracker {
     addr: SocketAddr,
     req: AnnounceRequest,
     tx: AnnounceResponseTx,
@@ -32,41 +33,41 @@ struct Tracker {
     pending_action: u32,
 }
 
-impl Tracker {
+async fn resolve_addr(url: &str) -> crate::Result<SocketAddr> {
+    let url: Url = url.parse().map_err(|_| "Failed to parse tracker url")?;
+    if url.scheme() != "udp" {
+        return Err("Not a UDP url".into());
+    }
+
+    let host = url.host_str().ok_or("Missing host")?;
+    let port = url.port().ok_or("Missing port")?;
+
+    for addr in lookup_host((host, port)).await? {
+        return Ok(addr);
+    }
+
+    Err("Host/port is not resolved to a socket addr".into())
+}
+
+impl UdpTracker {
     async fn new(
         req: AnnounceRequest,
         tx: AnnounceResponseTx,
         socket: &mut UdpSocket,
         buf: &mut [u8],
-    ) -> Option<Tracker> {
-        let f = async {
-            let url = url::Url::parse(&req.url).map_err(|_| "Failed to parse tracker url")?;
-            if url.scheme() != "udp" {
-                return Err("Not a UDP url".into());
-            }
-
-            let host = url.host_str().ok_or("Missing host")?;
-            let port = url.port().ok_or("Missing port")?;
-
-            // TODO: This happens periodically for the same URL for every announce
-            // Find a way to avoid this call - This is run in Tokio using spawn blocking
-            // which creates a new thread every single time.
-            let addr = lookup_host((host, port))
-                .await?
-                .next()
-                .ok_or("Host/port is not resolved to a socket addr")?;
-            Ok(addr)
+    ) -> Option<UdpTracker> {
+        let addr = match req.resolved_addr {
+            Some(addr) => addr,
+            None => match resolve_addr(&req.url).await {
+                Ok(addr) => addr,
+                Err(e) => {
+                    let _ = tx.send(Err(e));
+                    return None;
+                }
+            },
         };
 
-        let addr = match f.await {
-            Ok(x) => x,
-            Err(e) => {
-                let _ = tx.send(Err(e));
-                return None;
-            }
-        };
-
-        let mut c = Tracker {
+        let mut c = UdpTracker {
             addr,
             req,
             tx,
@@ -192,6 +193,7 @@ impl Tracker {
                 interval: interval as u64,
                 peers,
                 peers6: hashset![],
+                resolved_addr: Some(self.addr),
             };
 
             let _ = self.tx.send(Ok(resp));
@@ -251,7 +253,7 @@ impl UdpTrackerMgr {
                 match rx.next().await {
                     Some((req, tx)) => {
                         trace!("Got an announce request");
-                        let tc = Tracker::new(req, tx, socket, &mut buf).await;
+                        let tc = UdpTracker::new(req, tx, socket, &mut buf).await;
                         if let Some(tc) = tc {
                             pending.insert(tc.addr, tc);
                         }
@@ -266,7 +268,7 @@ impl UdpTrackerMgr {
                 match rx.try_next() {
                     Ok(Some((req, tx))) => {
                         trace!("Got an announce request");
-                        let tc = Tracker::new(req, tx, socket, &mut buf).await;
+                        let tc = UdpTracker::new(req, tx, socket, &mut buf).await;
                         if let Some(tc) = tc {
                             pending.insert(tc.addr, tc);
                         }

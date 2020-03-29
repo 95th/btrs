@@ -3,6 +3,7 @@ use crate::metainfo::InfoHash;
 use crate::peer::{Peer, PeerId};
 use log::{trace, warn};
 use std::collections::HashSet;
+use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 
 mod http;
@@ -25,6 +26,7 @@ pub enum Event {
 pub struct Tracker {
     mgr: TrackerMgr,
     pub url: String,
+    resolved_addr: Option<SocketAddr>,
     next_announce: Instant,
     interval: u64,
 }
@@ -34,6 +36,7 @@ impl Tracker {
         Self {
             mgr,
             url,
+            resolved_addr: None,
             next_announce: Instant::now(),
             interval: MIN_TRACKER_INTERVAL,
         }
@@ -47,10 +50,11 @@ impl Tracker {
         tokio::time::delay_until(self.next_announce.into()).await;
 
         trace!("Announce to {}", self.url);
-        let req = AnnounceRequest::new(&self.url, info_hash, peer_id, 6881);
+        let req = AnnounceRequest::new(&self.url, self.resolved_addr, info_hash, peer_id, 6881);
         let resp = match timeout(self.mgr.announce(req), 3).await {
             Ok(r) => {
                 self.interval = MIN_TRACKER_INTERVAL.max(r.interval);
+                self.resolved_addr = r.resolved_addr;
                 Some(r)
             }
             Err(e) => {
@@ -65,6 +69,7 @@ impl Tracker {
 
 #[derive(Debug)]
 pub struct AnnounceResponse {
+    pub resolved_addr: Option<SocketAddr>,
     pub interval: u64,
     pub peers: HashSet<Peer>,
     pub peers6: HashSet<Peer>,
@@ -72,6 +77,10 @@ pub struct AnnounceResponse {
 
 pub struct AnnounceRequest {
     pub url: String,
+
+    /// Used by UDP tracker announcement to save expensive DNS queries
+    pub resolved_addr: Option<SocketAddr>,
+
     pub info_hash: InfoHash,
     pub peer_id: PeerId,
     pub port: u16,
@@ -82,9 +91,16 @@ pub struct AnnounceRequest {
 }
 
 impl AnnounceRequest {
-    pub fn new(url: &str, info_hash: &InfoHash, peer_id: &PeerId, port: u16) -> AnnounceRequest {
+    pub fn new(
+        url: &str,
+        resolved_addr: Option<SocketAddr>,
+        info_hash: &InfoHash,
+        peer_id: &PeerId,
+        port: u16,
+    ) -> AnnounceRequest {
         AnnounceRequest {
             url: url.to_owned(),
+            resolved_addr,
             info_hash: info_hash.clone(),
             peer_id: peer_id.clone(),
             port,

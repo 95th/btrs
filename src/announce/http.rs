@@ -78,5 +78,6 @@ async fn announce(req: AnnounceRequest) -> crate::Result<AnnounceResponse> {
         interval,
         peers,
         peers6,
+        resolved_addr: None,
     })
 }
