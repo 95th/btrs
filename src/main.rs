@@ -5,11 +5,11 @@ use btrs::magnet::MagnetUri;
 use btrs::peer;
 use btrs::torrent::{Torrent, TorrentFile};
 use btrs::work::Piece;
+use futures::channel::mpsc;
 use futures::StreamExt;
 use log::{debug, error, trace};
 use std::fs;
 use std::time::{Duration, Instant};
-use tokio::sync::mpsc;
 
 use clap::{App, Arg};
 

@@ -1,7 +1,7 @@
+use futures::channel::mpsc::SendError;
 use std::borrow::Cow;
 use std::fmt;
 use std::io;
-use tokio::sync::mpsc::error::SendError;
 use tokio::time::Elapsed;
 
 #[derive(Debug)]
@@ -11,6 +11,7 @@ pub enum Error {
     Bencode(ben::Error),
     Reqwest(reqwest::Error),
     Timer(Elapsed),
+    Channel(SendError),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -53,9 +54,9 @@ impl From<String> for Error {
     }
 }
 
-impl<T> From<SendError<T>> for Error {
-    fn from(_: SendError<T>) -> Self {
-        Self::Generic("Send error occured".into())
+impl From<SendError> for Error {
+    fn from(e: SendError) -> Self {
+        Self::Channel(e)
     }
 }
 
