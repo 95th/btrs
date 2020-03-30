@@ -1,10 +1,18 @@
+use crate::util::ascii_escape;
 use percent_encoding::{percent_encode, PercentEncode, NON_ALPHANUMERIC};
 use std::convert::TryFrom;
+use std::fmt;
 
 type Bytes = [u8; 20];
 
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Default, PartialEq)]
 pub struct InfoHash(Bytes);
+
+impl fmt::Debug for InfoHash {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", ascii_escape(&self.0))
+    }
+}
 
 impl InfoHash {
     pub fn encode_url(&self) -> PercentEncode {

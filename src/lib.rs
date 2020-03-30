@@ -27,6 +27,7 @@ pub mod metainfo;
 pub mod msg;
 pub mod peer;
 pub mod torrent;
+mod util;
 pub mod work;
 
 pub use error::*;

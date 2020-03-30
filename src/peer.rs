@@ -2,35 +2,23 @@ use crate::bitfield::BitField;
 use rand::distributions::Alphanumeric;
 use rand::Rng;
 use std::convert::TryInto;
-use std::{
-    hash::Hash,
-    net::{IpAddr, SocketAddr},
-};
+use std::fmt;
+use std::hash::Hash;
+use std::net::{IpAddr, SocketAddr};
 
 pub type PeerId = [u8; 20];
 pub type Extensions = [u8; 8];
 
-#[derive(Debug, Clone, Copy)]
-pub struct PeerStatus {
-    pub choked: bool,
-    pub interested: bool,
-}
-
-impl Default for PeerStatus {
-    fn default() -> Self {
-        Self {
-            choked: true,
-            interested: false,
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Peer {
     pub addr: SocketAddr,
     pieces: BitField,
-    local_status: PeerStatus,
-    remote_status: PeerStatus,
+}
+
+impl fmt::Debug for Peer {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.addr)
+    }
 }
 
 impl Peer {
@@ -56,8 +44,6 @@ impl From<SocketAddr> for Peer {
         Self {
             addr,
             pieces: Default::default(),
-            local_status: Default::default(),
-            remote_status: Default::default(),
         }
     }
 }

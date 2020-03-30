@@ -44,6 +44,7 @@ async fn resolve_addr(url: &str) -> crate::Result<SocketAddr> {
     let port = url.port().ok_or("Missing port")?;
 
     for addr in lookup_host((host, port)).await? {
+        trace!("Resolved {}/{} to {}", host, port, addr);
         return Ok(addr);
     }
 
