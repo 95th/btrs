@@ -93,6 +93,9 @@ impl UdpTracker {
 
     async fn send_connect(&mut self, socket: &mut UdpSocket, buf: &mut [u8]) -> crate::Result<()> {
         self.update_txn_id();
+
+        trace!("Sending connect to {}, txn id: {}", self.addr, self.txn_id);
+
         let mut c = Cursor::new(&mut *buf);
         c.write_u64(TRACKER_CONSTANT).await?;
         c.write_u32(action::CONNECT).await?;
@@ -110,6 +113,9 @@ impl UdpTracker {
 
     async fn send_announce(&mut self, socket: &mut UdpSocket, buf: &mut [u8]) -> crate::Result<()> {
         self.update_txn_id();
+
+        trace!("Sending announce to {}, txn id: {}", self.addr, self.txn_id);
+
         let mut c = Cursor::new(&mut *buf);
         c.write_u64(self.conn_id).await?;
         c.write_u32(action::ANNOUNCE).await?;
@@ -144,7 +150,7 @@ impl UdpTracker {
         let action = c.read_u32().await?;
         let txn_id = c.read_u32().await?;
 
-        trace!("action: {}, txn_id: {}", action, txn_id);
+        trace!("Received action: {}, txn_id: {}", action, txn_id);
 
         if self.pending_action != action {
             return Err("Incorrect msg action received".into());
@@ -167,13 +173,12 @@ impl UdpTracker {
             }
 
             let interval = c.read_u32().await?;
-            trace!("interval: {}", interval);
-
             let leechers = c.read_u32().await?;
-            trace!("leechers: {}", leechers);
-
             let seeders = c.read_u32().await?;
+
+            trace!("interval: {}", interval);
             trace!("seeders: {}", seeders);
+            trace!("leechers: {}", leechers);
 
             let mut n = buf.len() - 20;
 
@@ -185,11 +190,14 @@ impl UdpTracker {
             while n > 0 {
                 let ip_addr = c.read_u32().await?;
                 let port = c.read_u16().await?;
-                trace!("Addr: {}, port: {}", ip_addr, port);
                 let addr: IpAddr = ip_addr.to_be_bytes().into();
+
                 peers.insert(Peer::new(addr, port));
                 n -= 6;
             }
+
+            trace!("Got peers: {:?}", peers);
+
             let resp = AnnounceResponse {
                 interval: interval as u64,
                 peers,
@@ -209,6 +217,8 @@ pub struct UdpTrackerMgr {
     rx: mpsc::Receiver<(AnnounceRequest, AnnounceResponseTx)>,
     tx: mpsc::Sender<(AnnounceRequest, AnnounceResponseTx)>,
     socket: UdpSocket,
+    pending: HashMap<SocketAddr, UdpTracker>,
+    channel_open: bool,
 }
 
 #[derive(Clone)]
@@ -226,7 +236,13 @@ impl UdpTrackerMgr {
     pub async fn new() -> crate::Result<UdpTrackerMgr> {
         let socket = UdpSocket::bind(("localhost", 6882)).await?;
         let (tx, rx) = mpsc::channel(100);
-        Ok(UdpTrackerMgr { socket, tx, rx })
+        Ok(UdpTrackerMgr {
+            socket,
+            tx,
+            rx,
+            pending: HashMap::new(),
+            channel_open: true,
+        })
     }
 
     pub fn handle(&self) -> UdpTrackerMgrHandle {
@@ -236,84 +252,92 @@ impl UdpTrackerMgr {
     pub async fn listen(&mut self) {
         trace!("Listening for announce requests");
 
-        let mut pending = HashMap::new();
         let mut buf = [0; 4096];
-        let mut channel_open = true;
 
-        loop {
-            if channel_open && pending.is_empty() {
-                // Wait for a request
-                let (req, tx) = match self.rx.next().await {
-                    Some(r) => r,
-                    None => break,
-                };
+        while self.has_work() {
+            self.add_requests(&mut buf).await;
+            self.handle_requests(&mut buf).await;
+        }
+    }
 
-                trace!("Got an announce request");
-                let tracker = UdpTracker::new(req, tx, &mut self.socket, &mut buf).await;
-                if let Some(tracker) = tracker {
-                    pending.insert(tracker.addr, tracker);
+    fn has_work(&self) -> bool {
+        self.channel_open || !self.pending.is_empty()
+    }
+
+    async fn add_requests(&mut self, buf: &mut [u8]) {
+        if !self.channel_open {
+            return;
+        }
+
+        if self.pending.is_empty() {
+            // Wait for a request
+            let (req, tx) = match self.rx.next().await {
+                Some(r) => r,
+                None => {
+                    self.channel_open = false;
+                    return;
                 }
-            }
-
-            // Read as many requests as we can without blocking on request channel
-            loop {
-                let (req, tx) = match self.rx.try_next() {
-                    Ok(Some(r)) => r,
-                    Ok(None) => {
-                        channel_open = false;
-                        break;
-                    }
-                    Err(_) => {
-                        channel_open = true;
-                        break;
-                    }
-                };
-
-                trace!("Got an announce request");
-                let tracker = UdpTracker::new(req, tx, &mut self.socket, &mut buf).await;
-                if let Some(tracker) = tracker {
-                    pending.insert(tracker.addr, tracker);
-                }
-            }
-
-            trace!("channel_open: {}, pending: {}", channel_open, pending.len(),);
-
-            if pending.is_empty() {
-                if channel_open {
-                    continue;
-                } else {
-                    break;
-                }
-            }
-
-            let f = async {
-                let (len, addr) = self.socket.recv_from(&mut buf).await?;
-                let tc = pending
-                    .remove(&addr)
-                    .ok_or("Msg received from unexpected addr")?;
-
-                if let Some(mut tc) = tc.handle_response(&buf[..len]).await? {
-                    tc.send_announce(&mut self.socket, &mut buf).await?;
-                    trace!("sent announce");
-
-                    pending.insert(tc.addr, tc);
-                }
-
-                Ok::<_, crate::Error>(())
             };
 
-            if let Err(e) = timeout(f, 3).await {
-                warn!("Error: {}", e);
+            trace!("Got an announce request");
+            let tracker = UdpTracker::new(req, tx, &mut self.socket, buf).await;
+            if let Some(tracker) = tracker {
+                self.pending.insert(tracker.addr, tracker);
             }
-
-            trace!("Before culling: pending: {}", pending.len(),);
-
-            let cutoff = Instant::now() - TRACKER_TIMEOUT;
-
-            // Cull timed out entries
-            pending.retain(|_, tc| tc.last_updated > cutoff);
-
-            trace!("After culling: pending: {}", pending.len(),);
         }
+
+        // Read as many requests as we can without blocking on request channel
+        loop {
+            let (req, tx) = match self.rx.try_next() {
+                Ok(Some(r)) => r,
+                Ok(None) => {
+                    self.channel_open = false;
+                    break;
+                }
+                Err(_) => break,
+            };
+
+            trace!("Got an announce request");
+            let tracker = UdpTracker::new(req, tx, &mut self.socket, buf).await;
+            if let Some(tracker) = tracker {
+                self.pending.insert(tracker.addr, tracker);
+            }
+        }
+
+        trace!(
+            "channel_open: {}, pending: {}",
+            self.channel_open,
+            self.pending.len(),
+        );
+    }
+
+    async fn handle_requests(&mut self, buf: &mut [u8]) {
+        if self.pending.is_empty() {
+            return;
+        }
+
+        if let Err(e) = timeout(self.process_response(buf), 3).await {
+            warn!("Error: {}", e);
+        }
+
+        // Cull timed out entries
+        let cutoff = Instant::now() - TRACKER_TIMEOUT;
+        self.pending.retain(|_, t| t.last_updated > cutoff);
+
+        trace!("Pending UDP trackers: {}", self.pending.len());
+    }
+
+    async fn process_response(&mut self, buf: &mut [u8]) -> crate::Result<()> {
+        let (len, addr) = self.socket.recv_from(buf).await?;
+        let tracker = self
+            .pending
+            .remove(&addr)
+            .ok_or("Msg received from unexpected addr")?;
+
+        if let Some(mut tracker) = tracker.handle_response(&buf[..len]).await? {
+            tracker.send_announce(&mut self.socket, buf).await?;
+            self.pending.insert(tracker.addr, tracker);
+        }
+        Ok(())
     }
 }
