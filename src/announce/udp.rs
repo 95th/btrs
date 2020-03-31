@@ -1,6 +1,7 @@
 use crate::announce::{AnnounceRequest, AnnounceResponse};
 use crate::future::timeout;
 use crate::peer::Peer;
+use byteorder::{ReadBytesExt, WriteBytesExt, BE};
 use futures::channel::{mpsc, oneshot};
 use futures::{SinkExt, StreamExt};
 use log::{trace, warn};
@@ -8,9 +9,9 @@ use rand::thread_rng;
 use rand::Rng;
 use std::collections::HashMap;
 use std::io::Cursor;
+use std::io::Write;
 use std::net::{IpAddr, SocketAddr};
 use std::time::{Duration, Instant};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{lookup_host, UdpSocket};
 use url::Url;
 
@@ -98,9 +99,9 @@ impl UdpTracker {
         trace!("Sending connect to {}, txn id: {}", self.addr, self.txn_id);
 
         let mut c = Cursor::new(&mut *buf);
-        c.write_u64(TRACKER_CONSTANT).await?;
-        c.write_u32(action::CONNECT).await?;
-        c.write_u32(self.txn_id).await?;
+        c.write_u64::<BE>(TRACKER_CONSTANT)?;
+        c.write_u32::<BE>(action::CONNECT)?;
+        c.write_u32::<BE>(self.txn_id)?;
 
         let n = socket.send_to(&buf[..16], &self.addr).await?;
         if n != 16 {
@@ -118,19 +119,19 @@ impl UdpTracker {
         trace!("Sending announce to {}, txn id: {}", self.addr, self.txn_id);
 
         let mut c = Cursor::new(&mut *buf);
-        c.write_u64(self.conn_id).await?;
-        c.write_u32(action::ANNOUNCE).await?;
-        c.write_u32(self.txn_id).await?;
-        c.write_all(self.req.info_hash.as_ref()).await?;
-        c.write_all(&self.req.peer_id).await?;
-        c.write_u64(0).await?; // downloaded
-        c.write_u64(0).await?; // left
-        c.write_u64(0).await?; // uploaded
-        c.write_u32(self.req.event as u32).await?;
-        c.write_u32(0).await?; // IP addr
-        c.write_u32(0).await?; // key
-        c.write_i32(-1).await?; // num_want
-        c.write_u16(self.req.port).await?; // port
+        c.write_u64::<BE>(self.conn_id)?;
+        c.write_u32::<BE>(action::ANNOUNCE)?;
+        c.write_u32::<BE>(self.txn_id)?;
+        c.write_all(self.req.info_hash.as_ref())?;
+        c.write_all(&self.req.peer_id)?;
+        c.write_u64::<BE>(0)?; // downloaded
+        c.write_u64::<BE>(0)?; // left
+        c.write_u64::<BE>(0)?; // uploaded
+        c.write_u32::<BE>(self.req.event as u32)?;
+        c.write_u32::<BE>(0)?; // IP addr
+        c.write_u32::<BE>(0)?; // key
+        c.write_i32::<BE>(-1)?; // num_want
+        c.write_u16::<BE>(self.req.port)?; // port
 
         let n = socket.send_to(&buf[..98], &self.addr).await?;
         if n != 98 {
@@ -142,14 +143,14 @@ impl UdpTracker {
         Ok(())
     }
 
-    async fn handle_response(mut self, buf: &[u8]) -> crate::Result<Option<Self>> {
+    fn handle_response(mut self, buf: &[u8]) -> crate::Result<Option<Self>> {
         if buf.len() < 16 {
             return Err("Packet too small".into());
         }
 
         let mut c = Cursor::new(buf);
-        let action = c.read_u32().await?;
-        let txn_id = c.read_u32().await?;
+        let action = c.read_u32::<BE>()?;
+        let txn_id = c.read_u32::<BE>()?;
 
         trace!("Received action: {}, txn_id: {}", action, txn_id);
 
@@ -162,7 +163,7 @@ impl UdpTracker {
         }
 
         if action == action::CONNECT {
-            let conn_id = c.read_u64().await?;
+            let conn_id = c.read_u64::<BE>()?;
             trace!("conn_id: {}", conn_id);
 
             self.conn_id = conn_id;
@@ -173,9 +174,9 @@ impl UdpTracker {
                 return Err("Packet too small".into());
             }
 
-            let interval = c.read_u32().await?;
-            let leechers = c.read_u32().await?;
-            let seeders = c.read_u32().await?;
+            let interval = c.read_u32::<BE>()?;
+            let leechers = c.read_u32::<BE>()?;
+            let seeders = c.read_u32::<BE>()?;
 
             trace!("interval: {}", interval);
             trace!("seeders: {}", seeders);
@@ -189,8 +190,8 @@ impl UdpTracker {
 
             let mut peers = hashset![];
             while n > 0 {
-                let ip_addr = c.read_u32().await?;
-                let port = c.read_u16().await?;
+                let ip_addr = c.read_u32::<BE>()?;
+                let port = c.read_u16::<BE>()?;
                 let addr: IpAddr = ip_addr.to_be_bytes().into();
 
                 peers.insert(Peer::new(addr, port));
@@ -335,7 +336,7 @@ impl UdpTrackerMgr {
             .remove(&addr)
             .ok_or("Msg received from unexpected addr")?;
 
-        if let Some(mut tracker) = tracker.handle_response(&buf[..len]).await? {
+        if let Some(mut tracker) = tracker.handle_response(&buf[..len])? {
             tracker.send_announce(&mut self.socket, buf).await?;
             self.pending.insert(tracker.addr, tracker);
         }

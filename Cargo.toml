@@ -22,3 +22,4 @@ ben =  { git = "https://github.com/95th/ben" }
 clap = "2.33.0"
 bytes = "0.5.4"
 dht = { path = "dht" }
+byteorder = "1.3.4"
