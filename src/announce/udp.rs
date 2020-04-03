@@ -17,23 +17,23 @@ mod action {
     pub const ANNOUNCE: u32 = 1;
 }
 
-pub async fn announce(req: AnnounceRequest, buf: &mut [u8]) -> crate::Result<AnnounceResponse> {
+pub async fn announce(req: AnnounceRequest<'_>, buf: &mut [u8]) -> crate::Result<AnnounceResponse> {
     let mut t = UdpTracker::new(req).await?;
     t.connect(buf).await?;
     t.announce(buf).await
 }
 
-struct UdpTracker {
+struct UdpTracker<'a> {
     socket: UdpSocket,
     addr: SocketAddr,
-    req: AnnounceRequest,
+    req: AnnounceRequest<'a>,
     conn_id: u64,
     txn_id: u32,
     pending_action: u32,
 }
 
-impl UdpTracker {
-    pub async fn new(req: AnnounceRequest) -> crate::Result<UdpTracker> {
+impl<'a> UdpTracker<'a> {
+    pub async fn new(req: AnnounceRequest<'a>) -> crate::Result<UdpTracker<'a>> {
         let socket = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0)).await?;
         let addr = match req.resolved_addr {
             Some(a) => a,
@@ -125,11 +125,11 @@ impl UdpTracker {
         Ok(resp)
     }
 
-    async fn read_response<'a>(
+    async fn read_response<'b>(
         &mut self,
-        buf: &'a mut [u8],
+        buf: &'b mut [u8],
         min_len: usize,
-    ) -> crate::Result<(usize, Cursor<&'a [u8]>)> {
+    ) -> crate::Result<(usize, Cursor<&'b [u8]>)> {
         let (len, addr) = self.socket.recv_from(buf).await?;
 
         if addr != self.addr {

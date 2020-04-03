@@ -6,7 +6,7 @@ use reqwest::Client;
 use std::collections::HashSet;
 use std::convert::TryInto;
 
-pub async fn announce(req: AnnounceRequest) -> crate::Result<AnnounceResponse> {
+pub async fn announce(req: AnnounceRequest<'_>) -> crate::Result<AnnounceResponse> {
     let peer_id = std::str::from_utf8(&req.peer_id[..]).unwrap();
     let info_hash_encoded = req.info_hash.encode_url();
     debug!("Infohash Encoded: {}", info_hash_encoded);

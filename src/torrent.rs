@@ -118,7 +118,6 @@ impl Torrent {
         let trackers = self
             .tracker_urls
             .iter()
-            .cloned()
             .map(|url| Tracker::new(url))
             .collect();
         TorrentWorker {
@@ -136,7 +135,7 @@ pub struct TorrentWorker<'a> {
     work: WorkQueue<'a>,
     peers: HashSet<Peer>,
     peers6: HashSet<Peer>,
-    trackers: VecDeque<Tracker>,
+    trackers: VecDeque<Tracker<'a>>,
 }
 
 impl TorrentWorker<'_> {

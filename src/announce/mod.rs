@@ -19,16 +19,16 @@ pub enum Event {
     Stopped,
 }
 
-pub struct Tracker {
-    url: String,
+pub struct Tracker<'a> {
+    url: &'a str,
     resolved_addr: Option<SocketAddr>,
     next_announce: Instant,
     interval: u64,
     buf: Box<[u8]>,
 }
 
-impl Tracker {
-    pub fn new(url: String) -> Self {
+impl<'a> Tracker<'a> {
+    pub fn new(url: &'a str) -> Self {
         Self {
             url,
             resolved_addr: None,
@@ -69,8 +69,8 @@ pub struct AnnounceResponse {
 }
 
 #[derive(Debug)]
-pub struct AnnounceRequest {
-    pub url: String,
+pub struct AnnounceRequest<'a> {
+    pub url: &'a str,
 
     /// Used by UDP tracker announcement to save expensive DNS queries
     pub resolved_addr: Option<SocketAddr>,
@@ -84,16 +84,16 @@ pub struct AnnounceRequest {
     pub event: Event,
 }
 
-impl AnnounceRequest {
+impl<'a> AnnounceRequest<'a> {
     pub fn new(
-        url: &str,
+        url: &'a str,
         resolved_addr: Option<SocketAddr>,
         info_hash: &InfoHash,
         peer_id: &PeerId,
         port: u16,
-    ) -> AnnounceRequest {
-        AnnounceRequest {
-            url: url.to_owned(),
+    ) -> Self {
+        Self {
+            url,
             resolved_addr,
             info_hash: info_hash.clone(),
             peer_id: peer_id.clone(),
