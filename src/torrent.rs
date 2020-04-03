@@ -1,4 +1,4 @@
-use crate::announce::{Tracker, TrackerMgr};
+use crate::announce::Tracker;
 use crate::avg::SlidingAvg;
 use crate::client::{AsyncStream, Client};
 use crate::future::timeout;
@@ -114,12 +114,12 @@ impl Torrent {
         PieceIter::new(self)
     }
 
-    pub fn worker<'a>(&'a self, mgr: TrackerMgr) -> TorrentWorker<'a> {
+    pub fn worker<'a>(&'a self) -> TorrentWorker<'a> {
         let trackers = self
             .tracker_urls
             .iter()
             .cloned()
-            .map(|url| Tracker::new(url, mgr.clone()))
+            .map(|url| Tracker::new(url))
             .collect();
         TorrentWorker {
             torrent: self,
@@ -171,8 +171,11 @@ impl TorrentWorker<'_> {
                 }
 
                 // Announce
-                while let Some(tracker) = trackers.pop_front() {
-                    pending_trackers.push(tracker.announce(info_hash, peer_id));
+                while let Some(mut tracker) = trackers.pop_front() {
+                    pending_trackers.push(async move {
+                        let resp = tracker.announce(info_hash, peer_id).await;
+                        (resp, tracker)
+                    });
                 }
 
                 // Add new peer to download
@@ -214,15 +217,18 @@ impl TorrentWorker<'_> {
 
                 match pending_trackers.as_mut().poll_next(cx) {
                     Poll::Ready(Some((resp, tracker))) => {
-                        if let Some(resp) = resp {
-                            trackers.push_back(tracker);
+                        match resp {
+                            Ok(resp) => {
+                                trackers.push_back(tracker);
 
-                            all_peers.extend(resp.peers);
-                            all_peers6.extend(resp.peers6);
+                                all_peers.extend(resp.peers);
+                                all_peers6.extend(resp.peers6);
 
-                            // We don't want to connect failed peers again
-                            all_peers.retain(|p| !failed.contains(p));
-                            all_peers6.retain(|p| !failed.contains(p));
+                                // We don't want to connect failed peers again
+                                all_peers.retain(|p| !failed.contains(p));
+                                all_peers6.retain(|p| !failed.contains(p));
+                            }
+                            Err(e) => warn!("Announce error: {}", e),
                         }
                     }
                     Poll::Ready(None) => {}

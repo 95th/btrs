@@ -1,17 +1,13 @@
 use crate::future::timeout;
 use crate::metainfo::InfoHash;
 use crate::peer::{Peer, PeerId};
-use log::{trace, warn};
+use log::trace;
 use std::collections::HashSet;
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 
 mod http;
 mod udp;
-
-use http::HttpTrackerMgr;
-use udp::UdpTrackerMgr;
-use udp::UdpTrackerMgrHandle;
 
 const MIN_TRACKER_INTERVAL: u64 = 10;
 
@@ -24,46 +20,43 @@ pub enum Event {
 }
 
 pub struct Tracker {
-    mgr: TrackerMgr,
-    pub url: String,
+    url: String,
     resolved_addr: Option<SocketAddr>,
     next_announce: Instant,
     interval: u64,
+    buf: Box<[u8]>,
 }
 
 impl Tracker {
-    pub fn new(url: String, mgr: TrackerMgr) -> Self {
+    pub fn new(url: String) -> Self {
         Self {
-            mgr,
             url,
             resolved_addr: None,
             next_announce: Instant::now(),
             interval: MIN_TRACKER_INTERVAL,
+            buf: Box::new([0; 2048]),
         }
     }
 
     pub async fn announce(
-        mut self,
+        &mut self,
         info_hash: &InfoHash,
         peer_id: &PeerId,
-    ) -> (Option<AnnounceResponse>, Tracker) {
+    ) -> crate::Result<AnnounceResponse> {
         tokio::time::delay_until(self.next_announce.into()).await;
 
         trace!("Announce to {}", self.url);
         let req = AnnounceRequest::new(&self.url, self.resolved_addr, info_hash, peer_id, 6881);
-        let resp = match timeout(self.mgr.announce(req), 3).await {
+        let resp = match timeout(req.announce(&mut self.buf), 3).await {
             Ok(r) => {
                 self.interval = MIN_TRACKER_INTERVAL.max(r.interval);
                 self.resolved_addr = r.resolved_addr;
-                Some(r)
+                Ok(r)
             }
-            Err(e) => {
-                warn!("Announce failed: {}", e);
-                None
-            }
+            Err(e) => Err(e),
         };
         self.next_announce = Instant::now() + Duration::from_secs(self.interval);
-        (resp, self)
+        resp
     }
 }
 
@@ -111,31 +104,12 @@ impl AnnounceRequest {
             event: Event::None,
         }
     }
-}
 
-#[derive(Clone)]
-pub struct TrackerMgr {
-    udp: UdpTrackerMgrHandle,
-    http: HttpTrackerMgr,
-}
-
-impl TrackerMgr {
-    pub async fn new() -> crate::Result<TrackerMgr> {
-        let mut mgr = UdpTrackerMgr::new().await?;
-        let udp = mgr.handle();
-        tokio::spawn(async move { mgr.listen().await });
-
-        Ok(TrackerMgr {
-            udp,
-            http: HttpTrackerMgr,
-        })
-    }
-
-    pub async fn announce(&mut self, req: AnnounceRequest) -> crate::Result<AnnounceResponse> {
-        if req.url.starts_with("http") {
-            self.http.announce(req).await
-        } else if req.url.starts_with("udp") {
-            self.udp.announce(req).await
+    pub async fn announce(self, buf: &mut [u8]) -> crate::Result<AnnounceResponse> {
+        if self.url.starts_with("http") {
+            http::announce(self).await
+        } else if self.url.starts_with("udp") {
+            udp::announce(self, buf).await
         } else {
             Err("Unsupported tracker URL".into())
         }

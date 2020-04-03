@@ -1,4 +1,3 @@
-use btrs::announce::TrackerMgr;
 use btrs::bitfield::BitField;
 use btrs::cache::Cache;
 use btrs::magnet::MagnetUri;
@@ -30,37 +29,35 @@ async fn main() -> btrs::Result<()> {
     let input = m.value_of("torrent|magnet").unwrap();
     env_logger::init();
 
-    let tracker_mgr = TrackerMgr::new().await?;
-
     if input.starts_with("magnet") {
-        magnet(input, tracker_mgr).await
+        magnet(input).await
     } else {
-        torrent_file(input, tracker_mgr).await
+        torrent_file(input).await
     }
 }
 
-pub async fn magnet(uri: &str, tracker_mgr: TrackerMgr) -> btrs::Result<()> {
+pub async fn magnet(uri: &str) -> btrs::Result<()> {
     let magnet = MagnetUri::parse_lenient(uri)?;
     let peer_id = peer::generate_peer_id();
     debug!("Our peer_id: {:?}", peer_id);
 
-    let torrent = magnet.request_metadata(peer_id, &tracker_mgr).await?;
-    download(torrent, tracker_mgr).await
+    let torrent = magnet.request_metadata(peer_id).await?;
+    download(torrent).await
 }
 
-pub async fn torrent_file(file: &str, tracker_mgr: TrackerMgr) -> btrs::Result<()> {
+pub async fn torrent_file(file: &str) -> btrs::Result<()> {
     let buf = fs::read(file)?;
     let torrent_file = TorrentFile::parse(buf).ok_or("Unable to parse torrent file")?;
 
     trace!("Parsed torrent file: {:#?}", torrent_file);
 
     let torrent = torrent_file.into_torrent();
-    download(torrent, tracker_mgr).await
+    download(torrent).await
 }
 
-pub async fn download(torrent: Torrent, tracker_mgr: TrackerMgr) -> btrs::Result<()> {
+pub async fn download(torrent: Torrent) -> btrs::Result<()> {
     let torrent_name = torrent.name.clone();
-    let mut worker = torrent.worker(tracker_mgr);
+    let mut worker = torrent.worker();
 
     let num_pieces = worker.num_pieces();
     let piece_len = torrent.piece_len;

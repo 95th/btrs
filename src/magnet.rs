@@ -1,4 +1,4 @@
-use crate::announce::{AnnounceRequest, TrackerMgr};
+use crate::announce::Tracker;
 use crate::client::Client;
 use crate::future::timeout;
 use crate::metainfo::InfoHash;
@@ -37,12 +37,8 @@ impl MagnetUri {
         parser::MagnetUriParser::new_lenient().parse(s)
     }
 
-    pub async fn request_metadata(
-        &self,
-        peer_id: Box<PeerId>,
-        tracker_mgr: &TrackerMgr,
-    ) -> crate::Result<Torrent> {
-        let (peers, peers6) = self.get_peers(&peer_id, tracker_mgr).await?;
+    pub async fn request_metadata(&self, peer_id: Box<PeerId>) -> crate::Result<Torrent> {
+        let (peers, peers6) = self.get_peers(&peer_id).await?;
 
         let mut futs: FuturesUnordered<_> = peers
             .iter()
@@ -90,22 +86,15 @@ impl MagnetUri {
         })
     }
 
-    async fn get_peers(
-        &self,
-        peer_id: &PeerId,
-        tracker_mgr: &TrackerMgr,
-    ) -> Result<(Vec<Peer>, Vec<Peer>), &'static str> {
+    async fn get_peers(&self, peer_id: &PeerId) -> Result<(Vec<Peer>, Vec<Peer>), &'static str> {
         debug!("Requesting peers");
 
         let mut futs: FuturesUnordered<_> = self
             .tracker_urls
             .iter()
-            .map(|url| {
-                let mut tracker_mgr = tracker_mgr.clone();
-                async move {
-                    let req = AnnounceRequest::new(url, None, &self.info_hash, &peer_id, 6881);
-                    timeout(tracker_mgr.announce(req), 10).await
-                }
+            .map(|url| async move {
+                let mut t = Tracker::new(url.to_owned());
+                t.announce(&self.info_hash, &peer_id).await
             })
             .collect();
 
