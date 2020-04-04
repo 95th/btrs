@@ -5,7 +5,7 @@ use crate::metainfo::InfoHash;
 use crate::msg::{Message, MetadataMsg};
 use crate::peer::{Peer, PeerId};
 use crate::torrent::Torrent;
-use ben::Node;
+use ben::{Encode, Node};
 use futures::stream::FuturesUnordered;
 use futures::stream::StreamExt;
 use log::{debug, trace};
@@ -152,7 +152,7 @@ impl MagnetUri {
         let mut buf = Vec::with_capacity(remaining);
         while remaining > 0 {
             let m = MetadataMsg::Request(piece);
-            client.send_ext(metadata.id, m.into()).await?;
+            client.send_ext(metadata.id, m.encode_to_vec()).await?;
             client.conn.flush().await?;
             let msg = client.read_in_loop().await?;
 

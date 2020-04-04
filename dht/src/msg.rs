@@ -1,28 +1,72 @@
 use crate::id::NodeId;
-use ben::Encoder;
+use ben::{Encode, Encoder};
+use std::net::SocketAddr;
 
 type TxnId = u16;
 
-pub trait Msg {
-    fn encode(&self, txn_id: TxnId) -> Vec<u8>;
+enum Query {
+    Ping,
+    FindNode,
+    GetPeers,
+    AnnouncePeer,
 }
 
-pub struct Ping(NodeId);
+impl Encode for Query {
+    fn encode<E: Encoder>(&self, enc: &mut E) {
+        match self {
+            Self::Ping => "ping".encode(enc),
+            Self::FindNode => "find_node".encode(enc),
+            Self::GetPeers => "get_peers".encode(enc),
+            Self::AnnouncePeer => "announce_peer".encode(enc),
+        }
+    }
+}
 
-impl Msg for Ping {
-    fn encode(&self, txn_id: TxnId) -> Vec<u8> {
-        let mut data = vec![];
+enum MsgKind {
+    Query,
+    Response,
+    Error,
+}
 
-        let mut dict = data.add_dict();
-        dict.add_bytes("t", &txn_id.to_be_bytes());
-        dict.add_str("y", "q");
-        dict.add_str("q", "ping");
+impl Encode for MsgKind {
+    fn encode<E: Encoder>(&self, enc: &mut E) {
+        match self {
+            Self::Query => "q".encode(enc),
+            Self::Response => "r".encode(enc),
+            Self::Error => "e".encode(enc),
+        }
+    }
+}
 
-        let mut a = dict.add_dict("a");
-        a.add_bytes("id", self.0.as_bytes());
-        a.finish();
+pub struct Msg {
+    query: Query,
+    args: MsgArgs,
+    txn_id: TxnId,
+    kind: MsgKind,
+    response: Response,
+    error: Error,
+    ip: SocketAddr,
+    read_only: bool,
+}
 
-        dict.finish();
-        data
+pub struct MsgArgs {}
+
+impl Encode for MsgArgs {
+    fn encode<E: Encoder>(&self, enc: &mut E) {
+        unimplemented!()
+    }
+}
+
+pub struct Response {}
+
+pub struct Error {}
+
+impl Encode for Msg {
+    fn encode<E: Encoder>(&self, encoder: &mut E) {
+        let mut dict = encoder.add_dict();
+        dict.add("q", &self.query);
+        dict.add("a", &self.args);
+        dict.add("t", &self.txn_id.to_be_bytes()[..]);
+        dict.add("y", &self.kind);
     }
 }

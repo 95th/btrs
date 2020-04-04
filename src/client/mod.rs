@@ -6,7 +6,7 @@ use crate::client::handshake::Handshake;
 use crate::metainfo::InfoHash;
 use crate::msg::{Message, MetadataMsg};
 use crate::peer::PeerId;
-use ben::Node;
+use ben::{Encode, Node};
 pub use conn::{AsyncStream, Connection};
 use log::trace;
 use std::io;
@@ -145,7 +145,8 @@ impl<C: AsyncStream> Client<C> {
 
     pub async fn send_ext_handshake(&mut self, id: u8) -> io::Result<()> {
         trace!("Send extended handshake");
-        self.send_ext(0, MetadataMsg::Handshake(id).into()).await
+        self.send_ext(0, MetadataMsg::Handshake(id).encode_to_vec())
+            .await
     }
 
     pub async fn send_ext(&mut self, id: u8, data: Vec<u8>) -> io::Result<()> {
@@ -334,9 +335,9 @@ mod tests {
         let mut payload = vec![];
 
         let mut list = payload.add_list();
-        list.add_int(1);
-        list.add_int(2);
-        list.add_int(3);
+        list.add(1);
+        list.add(2);
+        list.add(3);
         list.finish();
 
         tx.send_ext(1, payload).await.unwrap();

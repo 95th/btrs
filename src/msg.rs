@@ -1,4 +1,4 @@
-use ben::{Encoder, Node};
+use ben::{Encode, Encoder, Node};
 use log::trace;
 use std::io;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
@@ -346,35 +346,33 @@ pub enum MetadataMsg {
     Data(i64, i64),
 }
 
-impl From<MetadataMsg> for Vec<u8> {
-    fn from(msg: MetadataMsg) -> Self {
-        let mut v = vec![];
-        let mut dict = v.add_dict();
-        match msg {
+impl Encode for MetadataMsg {
+    fn encode<E: Encoder>(&self, encoder: &mut E) {
+        let mut dict = encoder.add_dict();
+        match *self {
             MetadataMsg::Handshake(id) => {
                 let mut m = dict.add_dict("m");
-                m.add_int("ut_metadata", id as i64);
+                m.add("ut_metadata", id as i64);
                 m.finish();
 
-                dict.add_int("p", 6881);
-                dict.add_int("reqq", 500);
+                dict.add("p", 6881);
+                dict.add("reqq", 500);
             }
             MetadataMsg::Request(piece) => {
-                dict.add_int("msg_type", msg_type::REQUEST);
-                dict.add_int("piece", piece);
+                dict.add("msg_type", msg_type::REQUEST);
+                dict.add("piece", piece);
             }
             MetadataMsg::Reject(piece) => {
-                dict.add_int("msg_type", msg_type::REJECT);
-                dict.add_int("piece", piece);
+                dict.add("msg_type", msg_type::REJECT);
+                dict.add("piece", piece);
             }
             MetadataMsg::Data(piece, total_size) => {
-                dict.add_int("msg_type", msg_type::DATA);
-                dict.add_int("piece", piece);
-                dict.add_int("total_size", total_size);
+                dict.add("msg_type", msg_type::DATA);
+                dict.add("piece", piece);
+                dict.add("total_size", total_size);
             }
         }
         dict.finish();
-        v
     }
 }
 
