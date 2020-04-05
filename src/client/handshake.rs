@@ -1,7 +1,6 @@
 use crate::client::AsyncStream;
 use crate::metainfo::InfoHash;
 use crate::peer::{Extensions, PeerId};
-use log::trace;
 use std::convert::TryInto;
 use std::io;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -64,9 +63,7 @@ impl<'a, C: AsyncStream> Handshake<'a, C> {
         let mut buf = [0; 68];
         self.conn.read_exact(&mut buf).await?;
 
-        if !buf.starts_with(PROTOCOL) {
-            return Err("Invalid Protocol".into());
-        }
+        ensure!(buf.starts_with(PROTOCOL), "Invalid Protocol");
 
         let result = HandshakeResult {
             extensions: buf[20..28].try_into().unwrap(),
@@ -74,10 +71,7 @@ impl<'a, C: AsyncStream> Handshake<'a, C> {
             peer_id: buf[48..68].try_into().unwrap(),
         };
 
-        if &result.info_hash != self.info_hash {
-            return Err("InfoHash mismatch".into());
-        }
-
+        ensure!(*self.info_hash == result.info_hash, "InfoHash mismatch");
         Ok(result)
     }
 }

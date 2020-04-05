@@ -1,7 +1,6 @@
 use crate::future::timeout;
 use crate::metainfo::InfoHash;
 use crate::peer::{Peer, PeerId};
-use log::trace;
 use std::collections::HashSet;
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
@@ -111,7 +110,7 @@ impl<'a> AnnounceRequest<'a> {
         } else if self.url.starts_with("udp") {
             udp::announce(self, buf).await
         } else {
-            Err("Unsupported tracker URL".into())
+            bail!("Unsupported tracker URL");
         }
     }
 }

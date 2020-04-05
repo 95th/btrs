@@ -1,7 +1,7 @@
 use crate::announce::{AnnounceRequest, AnnounceResponse};
 use crate::peer::Peer;
+use anyhow::Context;
 use byteorder::{ReadBytesExt, WriteBytesExt, BE};
-use log::trace;
 use rand::thread_rng;
 use rand::Rng;
 use std::io::Cursor;
@@ -59,9 +59,7 @@ impl<'a> UdpTracker<'a> {
 
         let n = self.write_connect(buf)?;
         let written = self.socket.send_to(&buf[..n], &self.addr).await?;
-        if written != n {
-            return Err("Error sending data".into());
-        }
+        ensure!(written == n, "Error sending data");
 
         let (_, mut c) = self.read_response(action::CONNECT, buf, 16).await?;
         let conn_id = c.read_u64::<BE>()?;
@@ -78,9 +76,7 @@ impl<'a> UdpTracker<'a> {
 
         let n = self.write_announce(buf)?;
         let written = self.socket.send_to(&buf[..n], &self.addr).await?;
-        if written != n {
-            return Err("Error sending data".into());
-        }
+        ensure!(written == n, "Error sending data");
 
         let (len, mut c) = self.read_response(action::ANNOUNCE, buf, 20).await?;
 
@@ -93,9 +89,7 @@ impl<'a> UdpTracker<'a> {
         trace!("leechers: {}", leechers);
 
         let mut n = len - 20;
-        if n % 6 != 0 {
-            return Err("IPs should be 6 byte each".into());
-        }
+        ensure!(n % 6 == 0, "IPs should be 6 byte each");
 
         let mut peers = hashset![];
         while n > 0 {
@@ -127,13 +121,8 @@ impl<'a> UdpTracker<'a> {
     ) -> crate::Result<(usize, Cursor<&'b [u8]>)> {
         let (len, addr) = self.socket.recv_from(buf).await?;
 
-        if addr != self.addr {
-            return Err("Packet received from unexpected address".into());
-        }
-
-        if len < min_len {
-            return Err("Packet too small".into());
-        }
+        ensure!(addr == self.addr, "Packet received from unexpected address");
+        ensure!(len >= min_len, "Packet too small");
 
         let buf = &buf[..len];
 
@@ -143,13 +132,8 @@ impl<'a> UdpTracker<'a> {
 
         trace!("Received action: {}, txn_id: {}", action, txn_id);
 
-        if expected_action != action {
-            return Err("Incorrect msg action received".into());
-        }
-
-        if self.txn_id != txn_id {
-            return Err("Txn Id mismatch".into());
-        }
+        ensure!(expected_action == action, "Incorrect msg action received");
+        ensure!(self.txn_id == txn_id, "Txn Id mismatch");
 
         Ok((len, c))
     }
@@ -182,18 +166,16 @@ impl<'a> UdpTracker<'a> {
 }
 
 async fn resolve_addr(url: &str) -> crate::Result<SocketAddr> {
-    let url: Url = url.parse().map_err(|_| "Failed to parse tracker url")?;
-    if url.scheme() != "udp" {
-        return Err("Not a UDP url".into());
-    }
+    let url: Url = url.parse().context("Failed to parse tracker url")?;
+    ensure!(url.scheme() == "udp", "Not a UDP url");
 
-    let host = url.host_str().ok_or("Missing host")?;
-    let port = url.port().ok_or("Missing port")?;
+    let host = url.host_str().context("Missing host")?;
+    let port = url.port().context("Missing port")?;
 
     for addr in lookup_host((host, port)).await? {
         trace!("Resolved {}/{} to {}", host, port, addr);
         return Ok(addr);
     }
 
-    Err("Host/port is not resolved to a socket addr".into())
+    bail!("Host/port is not resolved to a socket addr")
 }

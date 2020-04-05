@@ -6,12 +6,12 @@ use crate::metainfo::InfoHash;
 use crate::msg::Message;
 use crate::peer::{self, Peer, PeerId};
 use crate::work::{Piece, PieceWork, WorkQueue};
+use anyhow::Context;
 use ben::Node;
 use futures::channel::mpsc::Sender;
 use futures::future::poll_fn;
 use futures::stream::FuturesUnordered;
 use futures::{SinkExt, Stream};
-use log::{debug, error, info, trace, warn};
 use sha1::Sha1;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt;
@@ -50,24 +50,33 @@ impl fmt::Debug for TorrentFile {
 }
 
 impl TorrentFile {
-    pub fn parse(bytes: impl AsRef<[u8]>) -> Option<TorrentFile> {
-        let value = Node::parse(bytes.as_ref()).ok()?;
-        let dict = value.as_dict()?;
-        let announce = dict.get_str(b"announce")?;
-        let info_bytes = dict.get(b"info")?.data();
+    pub fn parse(bytes: impl AsRef<[u8]>) -> crate::Result<TorrentFile> {
+        let value = Node::parse(bytes.as_ref())?;
+        let dict = value.as_dict().context("Expected a dict")?;
+        let announce = dict.get_str(b"announce").context("`announce` not found")?;
+        let info_bytes = dict.get(b"info").context("`info` not found")?.data();
         let info_hash = Sha1::from(info_bytes).digest().bytes().into();
 
-        let info_dict = dict.get_dict(b"info")?;
-        let length = info_dict.get_int(b"length")?;
+        let info_dict = dict.get_dict(b"info").context("`info` dict not found")?;
+        let length = info_dict.get_int(b"length").context("`length` not found")?;
         let name = info_dict.get_str(b"name").unwrap_or_default();
-        let piece_len = info_dict.get_int(b"piece length")?;
-        let pieces = info_dict.get(b"pieces")?.data();
+        let piece_len = info_dict
+            .get_int(b"piece length")
+            .context("`piece length` not found")?;
+        let pieces = info_dict
+            .get(b"pieces")
+            .context("`pieces` not found")?
+            .data();
 
         let mut tracker_urls = hashset![announce.to_owned()];
         if let Some(list) = dict.get_list(b"announce-list") {
             for v in list.iter() {
-                for v in v.as_list()?.iter() {
-                    tracker_urls.insert(v.as_str()?.to_string());
+                for v in v.as_list().context("`announce-list` is not a list")?.iter() {
+                    tracker_urls.insert(
+                        v.as_str()
+                            .context("URL in `announce-list` is not a valid string")?
+                            .to_string(),
+                    );
                 }
             }
         }
@@ -81,7 +90,7 @@ impl TorrentFile {
             name: name.to_owned(),
         };
 
-        Some(torrent)
+        Ok(torrent)
     }
 
     pub fn into_torrent(self) -> Torrent {
@@ -370,10 +379,10 @@ impl<'w, 'p, C: AsyncStream> Download<'w, 'p, C> {
             }
         };
 
-        let mut p = match self.in_progress.remove(&index) {
-            Some(p) => p,
-            _ => return Err("Received a piece that was not requested".into()),
-        };
+        let mut p = self
+            .in_progress
+            .remove(&index)
+            .context("Received a piece that was not requested")?;
 
         msg.read_piece(&mut self.client.conn, &mut p.buf).await?;
         p.downloaded += len;

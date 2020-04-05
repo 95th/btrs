@@ -8,7 +8,6 @@ use crate::msg::{Message, MetadataMsg};
 use crate::peer::PeerId;
 use ben::{Encode, Node};
 pub use conn::{AsyncStream, Connection};
-use log::trace;
 use std::io;
 use std::net::SocketAddr;
 use tokio::io::AsyncWriteExt;

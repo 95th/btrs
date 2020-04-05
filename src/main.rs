@@ -4,13 +4,12 @@ use btrs::magnet::MagnetUri;
 use btrs::peer;
 use btrs::torrent::{Torrent, TorrentFile};
 use btrs::work::Piece;
+use clap::{App, Arg};
 use futures::channel::mpsc;
 use futures::StreamExt;
 use log::{debug, error, trace};
 use std::fs;
 use std::time::{Duration, Instant};
-
-use clap::{App, Arg};
 
 #[tokio::main(basic_scheduler)]
 async fn main() -> btrs::Result<()> {
@@ -47,7 +46,7 @@ pub async fn magnet(uri: &str) -> btrs::Result<()> {
 
 pub async fn torrent_file(file: &str) -> btrs::Result<()> {
     let buf = fs::read(file)?;
-    let torrent_file = TorrentFile::parse(buf).ok_or("Unable to parse torrent file")?;
+    let torrent_file = TorrentFile::parse(buf)?;
 
     trace!("Parsed torrent file: {:#?}", torrent_file);
 

@@ -1,7 +1,7 @@
 use crate::announce::{AnnounceRequest, AnnounceResponse};
 use crate::peer::Peer;
+use anyhow::Context;
 use ben::Node;
-use log::debug;
 use reqwest::Client;
 use std::collections::HashSet;
 use std::convert::TryInto;
@@ -23,7 +23,7 @@ pub async fn announce(req: AnnounceRequest<'_>) -> crate::Result<AnnounceRespons
 
     debug!("Announce response: {:?}", data);
     let value = Node::parse(&data)?;
-    let value = value.as_dict().ok_or("not a dict")?;
+    let value = value.as_dict().context("Expected a dict")?;
     let interval = value
         .get(b"interval")
         .and_then(|v| v.as_int())
@@ -34,12 +34,12 @@ pub async fn announce(req: AnnounceRequest<'_>) -> crate::Result<AnnounceRespons
         Some(peers) if peers.is_list() => {
             let mut v = hashset![];
             for peer in peers.as_list().unwrap().iter() {
-                let peer = peer.as_dict().ok_or("Peer not a dict")?;
+                let peer = peer.as_dict().context("Peer not a dict")?;
                 let ip = peer
                     .get_str(b"ip")
-                    .ok_or("IP not present")
-                    .and_then(|v| v.parse().map_err(|_| "Invalid IP/DNS name"))?;
-                let port = peer.get_int(b"port").ok_or("Port not present")?;
+                    .context("IP not present")
+                    .and_then(|v| v.parse().context("Invalid IP/DNS name"))?;
+                let port = peer.get_int(b"port").context("Port not present")?;
                 v.insert(Peer::new(ip, port as u16));
             }
             v
@@ -47,7 +47,7 @@ pub async fn announce(req: AnnounceRequest<'_>) -> crate::Result<AnnounceRespons
         Some(peers) => {
             let peers = peers.data();
             if peers.len() % 6 != 0 {
-                return Err("Invalid peer len".into());
+                bail!("Invalid peer len");
             }
 
             peers.chunks_exact(6).map(Peer::v4).collect()
@@ -58,9 +58,7 @@ pub async fn announce(req: AnnounceRequest<'_>) -> crate::Result<AnnounceRespons
     debug!("Found {} peers (v4): {:?}", peers.len(), peers);
 
     let peers6 = value.get(b"peers6").map(|v| v.data()).unwrap_or_default();
-    if peers6.len() % 18 != 0 {
-        return Err("Invalid peer len".into());
-    }
+    ensure!(peers6.len() % 18 == 0, "Invalid peer len");
 
     let peers6: HashSet<_> = peers6.chunks_exact(18).map(Peer::v6).collect();
     debug!("Found {} peers (v6): {:?}", peers6.len(), peers6);

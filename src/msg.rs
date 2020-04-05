@@ -1,5 +1,5 @@
+use anyhow::Context;
 use ben::{Encode, Encoder, Node};
-use log::trace;
 use std::io;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
@@ -121,40 +121,32 @@ impl Message {
         let id = reader.read_u8().await?;
         trace!("got id: {}", id);
 
-        macro_rules! err_if {
-            ($condition: expr, $err: expr) => {
-                if $condition {
-                    return Err($err.into());
-                }
-            };
-        }
-
         let msg = match id {
             0 => {
-                err_if!(len != 1, "Invalid Choke");
+                ensure!(len == 1, "Invalid Choke");
                 Choke
             }
             1 => {
-                err_if!(len != 1, "Invalid Unchoke");
+                ensure!(len == 1, "Invalid Unchoke");
                 Unchoke
             }
             2 => {
-                err_if!(len != 1, "Invalid Interested");
+                ensure!(len == 1, "Invalid Interested");
                 Interested
             }
             3 => {
-                err_if!(len != 1, "Invalid NotInterested");
+                ensure!(len == 1, "Invalid NotInterested");
                 NotInterested
             }
             4 => {
-                err_if!(len != 5, "Invalid Have");
+                ensure!(len == 5, "Invalid Have");
                 Have {
                     index: reader.read_u32().await?,
                 }
             }
             5 => Bitfield { len: len - 1 },
             6 => {
-                err_if!(len != 13, "Invalid Request");
+                ensure!(len == 13, "Invalid Request");
                 Request {
                     index: reader.read_u32().await?,
                     begin: reader.read_u32().await?,
@@ -162,7 +154,7 @@ impl Message {
                 }
             }
             7 => {
-                err_if!(len <= 9, "Invalid Piece");
+                ensure!(len > 9, "Invalid Piece");
                 Piece {
                     index: reader.read_u32().await?,
                     begin: reader.read_u32().await?,
@@ -170,7 +162,7 @@ impl Message {
                 }
             }
             8 => {
-                err_if!(len != 13, "Invalid Cancel");
+                ensure!(len == 13, "Invalid Cancel");
                 Cancel {
                     index: reader.read_u32().await?,
                     begin: reader.read_u32().await?,
@@ -213,20 +205,17 @@ impl Message {
         match *self {
             Message::Piece { begin, len, .. } => {
                 let begin = begin as usize;
-                if begin > buf.len() {
-                    return Err("Begin offset too high".into());
-                }
+                ensure!(begin <= buf.len(), "Begin offset too high");
 
                 let len = len as usize;
                 trace!("Reading piece message of len: {}", len);
-                if begin + len > buf.len() {
-                    return Err("Data too large".into());
-                }
+
+                ensure!(begin + len <= buf.len(), "Data too large");
 
                 rdr.read_exact(&mut buf[begin..][..len]).await?;
                 Ok(())
             }
-            _ => Err("Not a piece".into()),
+            _ => bail!("Not a piece"),
         }
     }
 
@@ -238,14 +227,12 @@ impl Message {
             Message::Bitfield { len } => {
                 let len = len as usize;
                 trace!("Reading bitfield message of len: {}", len);
-                if len > buf.len() {
-                    return Err("Data too large".into());
-                }
+                ensure!(len <= buf.len(), "Data too large");
 
                 rdr.read_exact(&mut buf[..len]).await?;
                 Ok(())
             }
-            _ => Err("Not a piece".into()),
+            _ => bail!("Not a piece"),
         }
     }
 
@@ -267,7 +254,7 @@ impl Message {
                 let msg = ExtendedMessage::new(buf)?;
                 Ok(msg)
             }
-            _ => Err("Not an Extended message".into()),
+            _ => bail!("Not an Extended message"),
         }
     }
 }
@@ -285,10 +272,9 @@ mod msg_type {
 }
 
 impl ExtendedMessage<'_> {
-    pub fn new(data: &[u8]) -> Result<ExtendedMessage, &'static str> {
+    pub fn new(data: &[u8]) -> crate::Result<ExtendedMessage> {
         let id = data[0];
-        let (value, i) = Node::parse_prefix(&data[1..])
-            .map_err(|_| "Invalid bencoded data in extended message")?;
+        let (value, i) = Node::parse_prefix(&data[1..])?;
 
         let rest = &data[i + 1..];
         Ok(ExtendedMessage { id, value, rest })
@@ -311,22 +297,18 @@ impl ExtendedMessage<'_> {
         Some(Metadata { id, len })
     }
 
-    pub fn data(&self, expected_piece: i64) -> Result<&[u8], &'static str> {
+    pub fn data(&self, expected_piece: i64) -> crate::Result<&[u8]> {
         trace!("data: {:#?}", self.value);
-        let dict = self.value.as_dict().ok_or("Not a dict")?;
+        let dict = self.value.as_dict().context("Not a dict")?;
 
-        let msg_type = dict.get_int(b"msg_type").ok_or("`msg_type` not found")?;
-        if msg_type != msg_type::DATA {
-            return Err("Not a DATA message");
-        }
+        let msg_type = dict.get_int(b"msg_type").context("`msg_type` not found")?;
+        ensure!(msg_type == msg_type::DATA, "Not a DATA message");
 
-        let piece = dict.get_int(b"piece").ok_or("`piece` not found")?;
-        if piece != expected_piece {
-            return Err("Incorrect piece");
-        }
+        let piece = dict.get_int(b"piece").context("`piece` not found")?;
+        ensure!(piece == expected_piece, "Incorrect piece");
 
         if self.rest.len() > METADATA_PIECE_LEN {
-            return Err("Piece can't be larger than 16kB");
+            bail!("Piece can't be larger than 16kB");
         }
 
         Ok(self.rest)

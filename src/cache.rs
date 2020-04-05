@@ -1,6 +1,5 @@
 use crate::fs::FileExt;
 use crate::work::Piece;
-use log::{debug, trace};
 use std::collections::BinaryHeap;
 use std::io;
 

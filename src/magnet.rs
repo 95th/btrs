@@ -5,10 +5,10 @@ use crate::metainfo::InfoHash;
 use crate::msg::{Message, MetadataMsg};
 use crate::peer::{Peer, PeerId};
 use crate::torrent::Torrent;
+use anyhow::Context;
 use ben::{Encode, Node};
 use futures::stream::FuturesUnordered;
 use futures::stream::StreamExt;
-use log::{debug, trace};
 use std::collections::HashSet;
 use std::net::SocketAddr;
 use tokio::io::AsyncWriteExt;
@@ -29,11 +29,11 @@ struct TorrentInfo {
 }
 
 impl MagnetUri {
-    pub fn parse(s: &str) -> Result<Self, &'static str> {
+    pub fn parse(s: &str) -> crate::Result<Self> {
         parser::MagnetUriParser::new().parse(s)
     }
 
-    pub fn parse_lenient(s: &str) -> Result<Self, &'static str> {
+    pub fn parse_lenient(s: &str) -> crate::Result<Self> {
         parser::MagnetUriParser::new_lenient().parse(s)
     }
 
@@ -68,7 +68,7 @@ impl MagnetUri {
             }
         }
 
-        Err("Metadata request failed".into())
+        bail!("Metadata request failed");
     }
 
     fn read_info(&self, data: &[u8]) -> Option<TorrentInfo> {
@@ -86,7 +86,7 @@ impl MagnetUri {
         })
     }
 
-    async fn get_peers(&self, peer_id: &PeerId) -> Result<(Vec<Peer>, Vec<Peer>), &'static str> {
+    async fn get_peers(&self, peer_id: &PeerId) -> crate::Result<(Vec<Peer>, Vec<Peer>)> {
         debug!("Requesting peers");
 
         let mut futs: FuturesUnordered<_> = self
@@ -114,10 +114,10 @@ impl MagnetUri {
         debug!("Got {} v4 peers and {} v6 peers", peers.len(), peers6.len());
 
         if peers.is_empty() && peers6.is_empty() {
-            Err("No peers received from trackers")
-        } else {
-            Ok((peers, peers6))
+            bail!("No peers received from trackers");
         }
+
+        Ok((peers, peers6))
     }
 
     async fn try_get(&self, peer: &Peer, peer_id: &PeerId) -> crate::Result<Vec<u8>> {
@@ -137,12 +137,12 @@ impl MagnetUri {
         };
 
         if !ext.is_handshake() {
-            return Err("Expected Extended Handshake".into());
+            bail!("Expected Extended Handshake");
         }
 
         let metadata = ext
             .metadata()
-            .ok_or("Peer doesn't support Metadata extension")?;
+            .context("Peer doesn't support Metadata extension")?;
 
         debug!("{:?}", metadata);
         client.send_ext_handshake(metadata.id).await?;
@@ -158,14 +158,10 @@ impl MagnetUri {
 
             if let Message::Extended { .. } = msg {
                 let ext = msg.read_ext(&mut client.conn, &mut ext_buf).await?;
-                if ext.id != metadata.id {
-                    return Err("Expected Metadata message".into());
-                }
+                ensure!(ext.id == metadata.id, "Expected Metadata message");
 
                 let data = ext.data(piece)?;
-                if data.len() > remaining {
-                    return Err("Incorrect data length received".into());
-                }
+                ensure!(data.len() <= remaining, "Incorrect data length received");
 
                 buf.extend(data);
                 remaining -= data.len();
@@ -204,11 +200,9 @@ mod parser {
             Self { strict: false }
         }
 
-        pub fn parse(&self, uri: &str) -> Result<MagnetUri, &'static str> {
+        pub fn parse(&self, uri: &str) -> crate::Result<MagnetUri> {
             let url = Url::parse(uri).unwrap();
-            if url.scheme() != SCHEME {
-                return Err("Incorrect scheme");
-            }
+            ensure!(url.scheme() == SCHEME, "Incorrect scheme");
 
             let mut magnet = MagnetUri::default();
             let mut has_ih = false;
@@ -219,7 +213,7 @@ mod parser {
                             let info_hash = build_info_hash(&value[INFOHASH_PREFIX.len()..])?;
 
                             if has_ih && info_hash != magnet.info_hash {
-                                return Err("Multiple infohashes found");
+                                bail!("Multiple infohashes found");
                             }
 
                             magnet.info_hash = info_hash;
@@ -234,22 +228,20 @@ mod parser {
                         Ok(addr) => magnet.peer_addrs.push(addr),
                         Err(_) => {
                             if self.strict {
-                                return Err("Invalid peer addr");
+                                bail!("Invalid peer addr");
                             }
                         }
                     },
                     _ => {}
                 }
             }
-            if has_ih {
-                Ok(magnet)
-            } else {
-                Err("No infohash found")
-            }
+
+            ensure!(has_ih, "No infohash found");
+            Ok(magnet)
         }
     }
 
-    fn build_info_hash(encoded: &str) -> Result<InfoHash, &'static str> {
+    fn build_info_hash(encoded: &str) -> crate::Result<InfoHash> {
         use data_encoding::{BASE32 as base32, HEXLOWER_PERMISSIVE as hex};
 
         let encoded = encoded.as_bytes();
@@ -258,14 +250,16 @@ mod parser {
         match encoded.len() {
             40 => {
                 hex.decode_mut(encoded, id.as_mut())
-                    .map_err(|_| "Invalid hex string")?;
+                    .ok()
+                    .context("Invalid hex string")?;
             }
             32 => {
                 base32
                     .decode_mut(encoded, id.as_mut())
-                    .map_err(|_| "Invalid base 32 string")?;
+                    .ok()
+                    .context("Invalid base 32 string")?;
             }
-            _ => return Err("Invalid infohash length"),
+            _ => bail!("Invalid infohash length"),
         }
 
         Ok(id)
@@ -351,7 +345,7 @@ mod tests {
             infohash_2.encode_hex(),
         );
         let err = MagnetUri::parse(&s).unwrap_err();
-        assert_eq!("Multiple infohashes found", err);
+        assert_eq!("Multiple infohashes found", err.to_string());
     }
 
     #[test]
