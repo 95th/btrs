@@ -29,7 +29,6 @@ struct UdpTracker<'a> {
     req: AnnounceRequest<'a>,
     conn_id: u64,
     txn_id: u32,
-    pending_action: u32,
 }
 
 impl<'a> UdpTracker<'a> {
@@ -46,7 +45,6 @@ impl<'a> UdpTracker<'a> {
             req,
             conn_id: 0,
             txn_id: 0,
-            pending_action: 0,
         })
     }
 
@@ -65,9 +63,7 @@ impl<'a> UdpTracker<'a> {
             return Err("Error sending data".into());
         }
 
-        self.pending_action = action::CONNECT;
-
-        let (_, mut c) = self.read_response(buf, 16).await?;
+        let (_, mut c) = self.read_response(action::CONNECT, buf, 16).await?;
         let conn_id = c.read_u64::<BE>()?;
         trace!("conn_id: {}", conn_id);
         self.conn_id = conn_id;
@@ -86,9 +82,7 @@ impl<'a> UdpTracker<'a> {
             return Err("Error sending data".into());
         }
 
-        self.pending_action = action::ANNOUNCE;
-
-        let (len, mut c) = self.read_response(buf, 20).await?;
+        let (len, mut c) = self.read_response(action::ANNOUNCE, buf, 20).await?;
 
         let interval = c.read_u32::<BE>()?;
         let leechers = c.read_u32::<BE>()?;
@@ -127,6 +121,7 @@ impl<'a> UdpTracker<'a> {
 
     async fn read_response<'b>(
         &mut self,
+        expected_action: u32,
         buf: &'b mut [u8],
         min_len: usize,
     ) -> crate::Result<(usize, Cursor<&'b [u8]>)> {
@@ -148,7 +143,7 @@ impl<'a> UdpTracker<'a> {
 
         trace!("Received action: {}, txn_id: {}", action, txn_id);
 
-        if self.pending_action != action {
+        if expected_action != action {
             return Err("Incorrect msg action received".into());
         }
 
