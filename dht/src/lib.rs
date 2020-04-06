@@ -1,5 +1,8 @@
 #![allow(unused)]
 
+#[macro_use]
+extern crate anyhow;
+
 mod bucket;
 mod contact;
 pub mod id;

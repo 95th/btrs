@@ -3,10 +3,10 @@ use std::net::Ipv4Addr;
 use std::time::Instant;
 
 pub struct Contact {
-    pub(crate) id: NodeId,
-    addr: Ipv4Addr,
-    port: u16,
-    pub(crate) last_updated: Instant,
+    pub id: NodeId,
+    pub addr: Ipv4Addr,
+    pub port: u16,
+    pub last_updated: Instant,
 }
 
 impl Contact {

@@ -8,3 +8,4 @@ edition = "2018"
 rand = "0.7.3"
 data-encoding = "2.1.2"
 ben =  { git = "https://github.com/95th/ben" }
+anyhow = "1.0.28"

@@ -1,130 +1,143 @@
 use crate::id::NodeId;
-use ben::{Encode, Encoder};
+use anyhow::Context;
+use ben::{Encode, Encoder, Node, Token};
+use std::convert::TryInto;
 use std::net::SocketAddr;
 
-type TxnId = u16;
+pub struct TxnId(pub u16);
 
-enum Query {
-    Ping,
-    FindNode,
-    GetPeers,
-    AnnouncePeer,
+impl Encode for TxnId {
+    fn encode<E: Encoder>(&self, enc: &mut E) {
+        enc.add_bytes(&self.0.to_be_bytes()[..]);
+    }
+}
+
+pub struct Request {
+    pub txn_id: TxnId,
+    pub query: Query,
+}
+
+pub enum Query {
+    Ping {
+        id: NodeId,
+    },
+    FindNode {
+        id: NodeId,
+        target: NodeId,
+    },
+    GetPeers {
+        id: NodeId,
+        info_hash: NodeId,
+    },
+    AnnouncePeer {
+        id: NodeId,
+        implied_port: bool,
+        info_hash: NodeId,
+        port: u16,
+        token: Vec<u8>,
+    },
+}
+
+impl Encode for Request {
+    fn encode<E: Encoder>(&self, enc: &mut E) {
+        let mut dict = enc.add_dict();
+        dict.add("a", &self.query);
+        dict.add(
+            "q",
+            match self.query {
+                Query::Ping { .. } => "ping",
+                Query::FindNode { .. } => "find_node",
+                Query::GetPeers { .. } => "get_peers",
+                Query::AnnouncePeer { .. } => "announce_peer",
+            },
+        );
+        dict.add("t", &self.txn_id);
+        dict.add("y", "q");
+        dict.finish();
+    }
 }
 
 impl Encode for Query {
     fn encode<E: Encoder>(&self, enc: &mut E) {
+        let mut dict = enc.add_dict();
         match self {
-            Self::Ping => "ping".encode(enc),
-            Self::FindNode => "find_node".encode(enc),
-            Self::GetPeers => "get_peers".encode(enc),
-            Self::AnnouncePeer => "announce_peer".encode(enc),
+            Query::Ping { id } => {
+                dict.add("id", id);
+            }
+            Query::FindNode { id, target } => {
+                dict.add("id", id);
+                dict.add("target", target);
+            }
+            Query::GetPeers { id, info_hash } => {
+                dict.add("id", id);
+                dict.add("info_hash", info_hash);
+            }
+            Query::AnnouncePeer {
+                id,
+                implied_port,
+                info_hash,
+                port,
+                token,
+            } => {
+                dict.add("id", id);
+                dict.add("info_hash", info_hash);
+                dict.add("implied_port", if *implied_port { 1 } else { 0 });
+                dict.add("port", *port as i64);
+                dict.add("token", &token[..]);
+            }
         }
+        dict.finish();
     }
 }
 
-enum MsgKind {
+pub struct Response<'a> {
+    txn_id: TxnId,
+    kind: ResponseKind,
+    data: ben::Node<'a>,
+}
+
+pub enum ResponseKind {
     Query,
     Response,
     Error,
 }
 
-impl Encode for MsgKind {
-    fn encode<E: Encoder>(&self, enc: &mut E) {
-        match self {
-            Self::Query => "q".encode(enc),
-            Self::Response => "r".encode(enc),
-            Self::Error => "e".encode(enc),
-        }
-    }
-}
+impl<'a> Response<'a> {
+    pub fn parse(buf: &'a [u8]) -> anyhow::Result<Response<'a>> {
+        let node = Node::parse(buf)?;
+        let dict = node.as_dict().context("Response must be a dictionary")?;
 
-pub struct Msg {
-    query: Query,
-    args: MsgArgs,
-    txn_id: TxnId,
-    kind: MsgKind,
-    response: Option<Response>,
-    error: Option<Error>,
-    ip: NodeAddr,
-    read_only: bool,
-}
+        let resp_type = dict.get_str(b"y").context("Response type not found")?;
+        let txn_id = dict.get(b"t").context("Transaction ID not found")?.data();
+        ensure!(txn_id.len() == 2, "Transaction ID should be 2 bytes long");
+        let txn_id = TxnId(u16::from_be_bytes(txn_id.try_into().unwrap()));
 
-pub struct MsgArgs {
-    id: NodeId,
-    info_hash: NodeId,
-    target: NodeId,
-    token: Vec<u8>,
-    port: u16,
-    implied_port: bool,
-}
-
-impl Encode for MsgArgs {
-    fn encode<E: Encoder>(&self, enc: &mut E) {
-        let mut dict = enc.add_dict();
-        dict.add("id", &self.id.as_bytes()[..]);
-        dict.add("info_hash", &self.info_hash.as_bytes()[..]);
-        dict.add("target", &self.target.as_bytes()[..]);
-        dict.add("token", &self.token[..]);
-        dict.add("port", self.port as i64);
-        dict.add("implied_port", if self.implied_port { 1 } else { 0 });
-        dict.finish();
-    }
-}
-
-pub struct Response {}
-
-impl Encode for Response {
-    fn encode<E: Encoder>(&self, enc: &mut E) {
-        unimplemented!()
-    }
-}
-
-pub struct Error {}
-
-impl Encode for Error {
-    fn encode<E: Encoder>(&self, enc: &mut E) {
-        unimplemented!()
-    }
-}
-
-struct NodeAddr(SocketAddr);
-
-impl Encode for NodeAddr {
-    fn encode<E: Encoder>(&self, enc: &mut E) {
-        match self.0 {
-            SocketAddr::V4(addr) => {
-                let mut buf = [0; 6];
-                buf.copy_from_slice(&addr.ip().octets());
-                buf[4..].copy_from_slice(&addr.port().to_be_bytes());
-                enc.add_bytes(&buf[..]);
+        match resp_type {
+            "q" => {
+                dict.get_dict(b"a").context("Args data not found")?;
+                Ok(Response {
+                    txn_id,
+                    kind: ResponseKind::Query,
+                    data: node,
+                })
             }
-            SocketAddr::V6(addr) => {
-                let mut buf = [0; 18];
-                buf.copy_from_slice(&addr.ip().octets());
-                buf[16..].copy_from_slice(&addr.port().to_be_bytes());
-                enc.add_bytes(&buf[..]);
+            "r" => {
+                dict.get_dict(b"r").context("Response data not found")?;
+                Ok(Response {
+                    txn_id,
+                    kind: ResponseKind::Response,
+                    data: node,
+                })
             }
+            "e" => {
+                dict.get_dict(b"e").context("Error data not found")?;
+                Ok(Response {
+                    txn_id,
+                    kind: ResponseKind::Error,
+                    data: node,
+                })
+            }
+            _ => bail!("Unexpected response type: {}", resp_type),
         }
-    }
-}
-
-impl Encode for Msg {
-    fn encode<E: Encoder>(&self, encoder: &mut E) {
-        let mut dict = encoder.add_dict();
-        dict.add("q", &self.query);
-        dict.add("a", &self.args);
-        dict.add("t", &self.txn_id.to_be_bytes()[..]);
-        dict.add("y", &self.kind);
-
-        if let Some(response) = &self.response {
-            dict.add("r", response);
-        }
-
-        if let Some(error) = &self.error {
-            dict.add("e", error);
-        }
-
-        dict.add("ip", &self.ip);
-        dict.add("ro", if self.read_only { 1 } else { 0 });
     }
 }

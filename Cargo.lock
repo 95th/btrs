@@ -44,7 +44,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 [[package]]
 name = "ben"
 version = "0.1.7"
-source = "git+https://github.com/95th/ben#5653eb68169d227778f55c2a4cfc951a02745c0c"
+source = "git+https://github.com/95th/ben#548c1c4c2b3126f560f856c2a2bec104328ab0ee"
 dependencies = [
  "itoa 0.4.5 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
@@ -138,6 +138,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 name = "dht"
 version = "0.1.0"
 dependencies = [
+ "anyhow 1.0.28 (registry+https://github.com/rust-lang/crates.io-index)",
  "ben 0.1.7 (git+https://github.com/95th/ben)",
  "data-encoding 2.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "rand 0.7.3 (registry+https://github.com/rust-lang/crates.io-index)",

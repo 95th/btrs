@@ -1,3 +1,4 @@
+use ben::{Encode, Encoder};
 use data_encoding::HEXUPPER;
 use rand::Rng;
 use std::ops::BitXor;
@@ -113,6 +114,12 @@ impl NodeId {
 
     pub fn as_bytes(&self) -> &[u8; Self::LEN] {
         &self.0
+    }
+}
+
+impl Encode for NodeId {
+    fn encode<E: Encoder>(&self, enc: &mut E) {
+        enc.add_bytes(&self.0[..]);
     }
 }
 
