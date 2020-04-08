@@ -1,5 +1,6 @@
 use ben::{Encode, Encoder};
 use data_encoding::HEXUPPER;
+use rand::distributions::uniform::{SampleBorrow, SampleUniform, UniformSampler};
 use rand::Rng;
 use std::ops::BitXor;
 
@@ -21,10 +22,18 @@ impl NodeId {
         Self([b; Self::LEN])
     }
 
-    pub fn random() -> Self {
+    pub fn is_zero(&self) -> bool {
+        self.0.iter().all(|b| *b == 0)
+    }
+
+    pub fn gen() -> Self {
         let mut n = Self::new();
         rand::thread_rng().fill(&mut n.0[..]);
         n
+    }
+
+    pub fn gen_range(lo: &Self, hi: &Self) -> Self {
+        rand::thread_rng().gen_range(lo, hi)
     }
 
     pub fn decode_hex(hex: &[u8]) -> Result<Self, &'static str> {
@@ -135,6 +144,69 @@ impl BitXor<&NodeId> for &NodeId {
     }
 }
 
+impl SampleUniform for NodeId {
+    type Sampler = UniformNodeId;
+}
+
+pub struct UniformNodeId {
+    low: NodeId,
+    high: NodeId,
+    inclusive: bool,
+}
+
+impl UniformSampler for UniformNodeId {
+    type X = NodeId;
+
+    fn new<B1, B2>(low: B1, high: B2) -> Self
+    where
+        B1: SampleBorrow<Self::X> + Sized,
+        B2: SampleBorrow<Self::X> + Sized,
+    {
+        let low = low.borrow();
+        let high = high.borrow();
+        assert!(low < high);
+
+        UniformNodeId {
+            low: low.clone(),
+            high: high.clone(),
+            inclusive: false,
+        }
+    }
+
+    fn new_inclusive<B1, B2>(low: B1, high: B2) -> Self
+    where
+        B1: SampleBorrow<Self::X> + Sized,
+        B2: SampleBorrow<Self::X> + Sized,
+    {
+        let low = low.borrow();
+        let high = high.borrow();
+        assert!(low <= high);
+
+        UniformNodeId {
+            low: low.clone(),
+            high: high.clone(),
+            inclusive: true,
+        }
+    }
+
+    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> NodeId {
+        let mut out = NodeId::new();
+        let low_is_zero = self.low.is_zero();
+        loop {
+            rng.fill(&mut out.0);
+            if self.inclusive {
+                if out <= self.high && (low_is_zero || out >= self.low) {
+                    break out;
+                }
+            } else {
+                if out < self.high && (low_is_zero || out >= self.low) {
+                    break out;
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -170,5 +242,14 @@ mod tests {
         let b = NodeId::of_byte(0b1100_0100);
         let c = &a ^ &b;
         assert_eq!(NodeId::of_byte(0b1100_0001), c);
+    }
+
+    #[test]
+    fn test_gen_range() {
+        let a = NodeId::of_byte(0);
+        let b = NodeId::of_byte(5);
+        let c = NodeId::gen_range(&a, &b);
+        assert!(c >= a);
+        assert!(c < b);
     }
 }
