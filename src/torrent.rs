@@ -123,12 +123,13 @@ impl Torrent {
         PieceIter::new(self)
     }
 
-    pub fn worker<'a>(&'a self) -> TorrentWorker<'a> {
+    pub fn worker(&self) -> TorrentWorker<'_> {
         let trackers = self
             .tracker_urls
             .iter()
             .map(|url| Tracker::new(url))
             .collect();
+
         TorrentWorker {
             torrent: self,
             work: WorkQueue::new(self.piece_iter().collect()),
@@ -274,7 +275,7 @@ impl TorrentWorker<'_> {
 
 struct PieceInProgress<'a> {
     piece: PieceWork<'a>,
-    buf: Vec<u8>,
+    buf: Box<[u8]>,
     downloaded: u32,
     requested: u32,
 }
@@ -424,7 +425,13 @@ impl<'w, 'p, C: AsyncStream> Download<'w, 'p, C> {
         }
 
         if let Some(piece) = self.work.borrow_mut().pop_front() {
-            let buf = vec![0; piece.len as usize];
+            // Safety: This buffer is sent to the writer task for reading only
+            // after being completely written by this download
+            let buf = unsafe {
+                let mut buf = Vec::with_capacity(piece.len as usize);
+                buf.set_len(piece.len as usize);
+                buf.into_boxed_slice()
+            };
             self.in_progress.insert(
                 piece.index,
                 PieceInProgress {

@@ -1,31 +1,45 @@
+use crate::work::Piece;
 use std::fs::File;
 use std::io;
 
-/// File extensions
-pub trait FileExt {
+pub struct StorageWriter<'a, T> {
+    piece_len: usize,
+    inner: &'a mut T,
+}
+
+impl<'a, T: Storage> StorageWriter<'a, T> {
+    pub fn new(inner: &'a mut T, piece_len: usize) -> Self {
+        Self { inner, piece_len }
+    }
+
+    pub fn insert(&mut self, piece: Piece) -> io::Result<()> {
+        trace!(
+            "Writing index {}, {} bytes [piece len: {}, so pieces: {}]",
+            piece.index,
+            piece.buf.len(),
+            self.piece_len,
+            piece.buf.len() / self.piece_len
+        );
+        let offset = self.index_to_offset(piece.index);
+        self.inner.write_all_at(&piece.buf, offset)?;
+        Ok(())
+    }
+
+    fn index_to_offset(&self, index: u32) -> u64 {
+        self.piece_len as u64 * index as u64
+    }
+}
+
+/// Storage
+pub trait Storage {
     /// Reads a number of bytes starting from a given offset.
     ///
     /// Returns the number of bytes read.
-    ///
-    /// The offset is relative to the start of the file and thus independent from the current cursor.
-    ///
-    /// The current file cursor may or may not be affected by this function depending on the OS.
-    ///
-    /// Note that similar to File::read, it is not an error to return with a short read.
     fn read_at(&self, buf: &mut [u8], offset: u64) -> io::Result<usize>;
 
     /// Writes a number of bytes starting from a given offset.
     ///
     /// Returns the number of bytes written.
-    ///
-    /// The offset is relative to the start of the file and thus independent from the current cursor.
-    ///
-    /// The current file cursor may or may not affected by this function depending on the OS.
-    ///
-    /// When writing beyond the end of the file, the file is appropriately extended. The intermediate bytes
-    /// may or may not be initialized.
-    ///
-    /// Note that similar to File::write, it is not an error to return a short write.
     fn write_at(&mut self, buf: &[u8], offset: u64) -> io::Result<usize>;
 
     fn read_exact_at(&self, mut buf: &mut [u8], mut offset: u64) -> io::Result<()> {
@@ -73,7 +87,7 @@ pub trait FileExt {
 }
 
 #[cfg(unix)]
-impl FileExt for File {
+impl Storage for File {
     fn read_at(&self, buf: &mut [u8], offset: u64) -> io::Result<usize> {
         std::os::unix::fs::FileExt::read_at(self, buf, offset)
     }
@@ -84,7 +98,7 @@ impl FileExt for File {
 }
 
 #[cfg(windows)]
-impl FileExt for File {
+impl Storage for File {
     fn read_at(&self, buf: &mut [u8], offset: u64) -> io::Result<usize> {
         std::os::windows::fs::FileExt::seek_read(self, buf, offset)
     }
@@ -94,7 +108,7 @@ impl FileExt for File {
     }
 }
 
-impl FileExt for Vec<u8> {
+impl Storage for Vec<u8> {
     fn read_at(&self, buf: &mut [u8], offset: u64) -> io::Result<usize> {
         let offset = offset as usize;
         if offset >= self.len() {
@@ -120,7 +134,7 @@ impl FileExt for Vec<u8> {
 
 #[cfg(test)]
 mod tests {
-    use crate::fs::FileExt;
+    use super::*;
     use std::env::temp_dir;
     use std::fs::{File, OpenOptions};
     use std::str;

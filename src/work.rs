@@ -21,7 +21,7 @@ impl PieceWork<'_> {
 
 pub struct Piece {
     pub index: u32,
-    pub buf: Vec<u8>,
+    pub buf: Box<[u8]>,
 }
 
 impl PartialEq for Piece {

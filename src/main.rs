@@ -1,7 +1,7 @@
 use btrs::bitfield::BitField;
-use btrs::cache::Cache;
 use btrs::magnet::MagnetUri;
 use btrs::peer;
+use btrs::storage::StorageWriter;
 use btrs::torrent::{Torrent, TorrentFile};
 use btrs::work::Piece;
 use clap::{App, Arg};
@@ -63,13 +63,13 @@ pub async fn download(torrent: Torrent) -> btrs::Result<()> {
 
     let (piece_tx, mut piece_rx) = mpsc::channel::<Piece>(200);
 
-    let handle = tokio::spawn(async move {
+    let writer_task = async move {
         let mut file = fs::OpenOptions::new()
             .create_new(true)
             .write(true)
             .open(torrent_name)
             .unwrap();
-        let mut cache = Cache::new(&mut file, 50, piece_len);
+        let mut storage = StorageWriter::new(&mut file, piece_len);
         let mut bitfield = BitField::new(num_pieces);
         let mut downloaded = 0;
         let mut tick = Instant::now();
@@ -80,7 +80,7 @@ pub async fn download(torrent: Torrent) -> btrs::Result<()> {
                 error!("Duplicate piece downloaded: {}", piece.index);
             }
 
-            cache.push(piece).unwrap();
+            storage.insert(piece).unwrap();
             bitfield.set(idx, true);
 
             downloaded += piece_len;
@@ -94,13 +94,11 @@ pub async fn download(torrent: Torrent) -> btrs::Result<()> {
                 tick = now;
             }
         }
-        cache.flush().unwrap();
         println!("All pieces downloaded: {}", bitfield.all_true());
-        file
-    });
+        println!("File downloaded; size: {}", file.metadata().unwrap().len());
+    };
 
-    worker.run_worker(piece_tx).await;
-    let file = handle.await.unwrap();
-    println!("File downloaded; size: {}", file.metadata().unwrap().len());
+    let download_task = worker.run_worker(piece_tx);
+    futures::join!(writer_task, download_task);
     Ok(())
 }
