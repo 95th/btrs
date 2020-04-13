@@ -2,13 +2,13 @@ use crate::work::Piece;
 use std::fs::File;
 use std::io;
 
-pub struct StorageWriter<'a, T> {
+pub struct StorageWriter<T> {
+    inner: T,
     piece_len: usize,
-    inner: &'a mut T,
 }
 
-impl<'a, T: Storage> StorageWriter<'a, T> {
-    pub fn new(inner: &'a mut T, piece_len: usize) -> Self {
+impl<T: Storage> StorageWriter<T> {
+    pub fn new(inner: T, piece_len: usize) -> Self {
         Self { inner, piece_len }
     }
 
@@ -23,6 +23,10 @@ impl<'a, T: Storage> StorageWriter<'a, T> {
         let offset = self.index_to_offset(piece.index);
         self.inner.write_all_at(&piece.buf, offset)?;
         Ok(())
+    }
+
+    pub fn into_inner(self) -> T {
+        self.inner
     }
 
     fn index_to_offset(&self, index: u32) -> u64 {
@@ -83,6 +87,16 @@ pub trait Storage {
             }
         }
         Ok(())
+    }
+}
+
+impl<T: Storage> Storage for &mut T {
+    fn read_at(&self, buf: &mut [u8], offset: u64) -> io::Result<usize> {
+        (&**self).read_at(buf, offset)
+    }
+
+    fn write_at(&mut self, buf: &[u8], offset: u64) -> io::Result<usize> {
+        (&mut **self).write_at(buf, offset)
     }
 }
 
