@@ -108,36 +108,34 @@ impl<'a> Response<'a> {
         let dict = node.as_dict().context("Response must be a dictionary")?;
 
         let resp_type = dict.get_str(b"y").context("Response type not found")?;
-        let txn_id = dict.get(b"t").context("Transaction ID not found")?.data();
-        ensure!(txn_id.len() == 2, "Transaction ID should be 2 bytes long");
-        let txn_id = TxnId(u16::from_be_bytes(txn_id.try_into().unwrap()));
+        let txn_id = dict
+            .get(b"t")
+            .context("Transaction ID not found")?
+            .data()
+            .try_into()
+            .context("Transaction ID must be 2 bytes long")?;
+        let txn_id = TxnId(u16::from_be_bytes(txn_id));
 
-        match resp_type {
+        let kind = match resp_type {
             "q" => {
                 dict.get_dict(b"a").context("Args data not found")?;
-                Ok(Response {
-                    txn_id,
-                    kind: ResponseKind::Query,
-                    data: node,
-                })
+                ResponseKind::Query
             }
             "r" => {
                 dict.get_dict(b"r").context("Response data not found")?;
-                Ok(Response {
-                    txn_id,
-                    kind: ResponseKind::Response,
-                    data: node,
-                })
+                ResponseKind::Response
             }
             "e" => {
                 dict.get_dict(b"e").context("Error data not found")?;
-                Ok(Response {
-                    txn_id,
-                    kind: ResponseKind::Error,
-                    data: node,
-                })
+                ResponseKind::Error
             }
             _ => bail!("Unexpected response type: {}", resp_type),
-        }
+        };
+
+        Ok(Response {
+            txn_id,
+            kind,
+            data: node,
+        })
     }
 }
