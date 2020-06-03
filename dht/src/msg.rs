@@ -1,8 +1,7 @@
 use crate::id::NodeId;
 use anyhow::Context;
-use ben::{Encode, Encoder, Node, Token};
+use ben::{Encode, Encoder, Node};
 use std::convert::TryInto;
-use std::net::SocketAddr;
 
 pub struct TxnId(pub u16);
 
@@ -81,8 +80,11 @@ impl Encode for Query {
             } => {
                 dict.add("id", id);
                 dict.add("info_hash", info_hash);
-                dict.add("implied_port", if *implied_port { 1 } else { 0 });
-                dict.add("port", *port as i64);
+                if *implied_port {
+                    dict.add("implied_port", 1);
+                } else {
+                    dict.add("port", *port as i64);
+                }
                 dict.add("token", &token[..]);
             }
         }
@@ -118,6 +120,7 @@ impl<'a> Response<'a> {
 
         let kind = match resp_type {
             "q" => {
+                dict.get_str(b"q").context("Args data not found")?;
                 dict.get_dict(b"a").context("Args data not found")?;
                 ResponseKind::Query
             }
@@ -126,7 +129,7 @@ impl<'a> Response<'a> {
                 ResponseKind::Response
             }
             "e" => {
-                dict.get_dict(b"e").context("Error data not found")?;
+                dict.get_list(b"e").context("Error data not found")?;
                 ResponseKind::Error
             }
             _ => bail!("Unexpected response type: {}", resp_type),
@@ -137,5 +140,127 @@ impl<'a> Response<'a> {
             kind,
             data: node,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn request_ping() {
+        let request = Request {
+            txn_id: TxnId(10),
+            query: Query::Ping {
+                id: NodeId::of_byte(1),
+            },
+        };
+
+        let encoded = request.encode_to_vec();
+        let expected = b"d1:ad2:id20:\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01e1:q4:ping1:t2:\x00\n1:y1:qe";
+        assert_eq!(
+            encoded[..],
+            expected[..],
+            "\nExpected : {}\nActual   : {}",
+            ascii_escape(expected),
+            ascii_escape(&encoded)
+        );
+    }
+
+    #[test]
+    fn request_find_node() {
+        let request = Request {
+            txn_id: TxnId(10),
+            query: Query::FindNode {
+                id: NodeId::of_byte(1),
+                target: NodeId::of_byte(2),
+            },
+        };
+
+        let encoded = request.encode_to_vec();
+        let expected = b"d1:ad2:id20:\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x016:target20:\x02\x02\x02\x02\x02\x02\x02\x02\x02\x02\x02\x02\x02\x02\x02\x02\x02\x02\x02\x02e1:q9:find_node1:t2:\x00\n1:y1:qe";
+        assert_eq!(
+            encoded[..],
+            expected[..],
+            "\nExpected : {}\nActual   : {}",
+            ascii_escape(expected),
+            ascii_escape(&encoded)
+        );
+    }
+
+    #[test]
+    fn request_get_peers() {
+        let request = Request {
+            txn_id: TxnId(10),
+            query: Query::GetPeers {
+                id: NodeId::of_byte(1),
+                info_hash: NodeId::of_byte(2),
+            },
+        };
+
+        let encoded = request.encode_to_vec();
+        let expected = b"d1:ad2:id20:\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x019:info_hash20:\x02\x02\x02\x02\x02\x02\x02\x02\x02\x02\x02\x02\x02\x02\x02\x02\x02\x02\x02\x02e1:q9:get_peers1:t2:\x00\n1:y1:qe";
+        assert_eq!(
+            encoded[..],
+            expected[..],
+            "\nExpected : {}\nActual   : {}",
+            ascii_escape(expected),
+            ascii_escape(&encoded)
+        );
+    }
+
+    #[test]
+    fn request_announce_peer() {
+        let request = Request {
+            txn_id: TxnId(10),
+            query: Query::AnnouncePeer {
+                id: NodeId::of_byte(1),
+                info_hash: NodeId::of_byte(2),
+                implied_port: false,
+                port: 5000,
+                token: vec![0, 1, 2],
+            },
+        };
+
+        let encoded = request.encode_to_vec();
+        let expected = b"d1:ad2:id20:\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x019:info_hash20:\x02\x02\x02\x02\x02\x02\x02\x02\x02\x02\x02\x02\x02\x02\x02\x02\x02\x02\x02\x024:porti5000e5:token3:\x00\x01\x02e1:q13:announce_peer1:t2:\x00\n1:y1:qe";
+        assert_eq!(
+            encoded[..],
+            expected[..],
+            "\nExpected : {}\nActual   : {}",
+            ascii_escape(expected),
+            ascii_escape(&encoded)
+        );
+    }
+
+    #[test]
+    fn request_announce_peer_implied_port() {
+        let request = Request {
+            txn_id: TxnId(10),
+            query: Query::AnnouncePeer {
+                id: NodeId::of_byte(1),
+                info_hash: NodeId::of_byte(2),
+                implied_port: true,
+                port: 5000,
+                token: vec![0, 1, 2],
+            },
+        };
+
+        let encoded = request.encode_to_vec();
+        let expected = b"d1:ad2:id20:\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x019:info_hash20:\x02\x02\x02\x02\x02\x02\x02\x02\x02\x02\x02\x02\x02\x02\x02\x02\x02\x02\x02\x0212:implied_porti1e5:token3:\x00\x01\x02e1:q13:announce_peer1:t2:\x00\n1:y1:qe";
+        assert_eq!(
+            encoded[..],
+            expected[..],
+            "\nExpected : {}\nActual   : {}",
+            ascii_escape(expected),
+            ascii_escape(&encoded)
+        );
+    }
+
+    pub fn ascii_escape(buf: &[u8]) -> String {
+        use std::ascii::escape_default;
+        let v = buf.iter().flat_map(|&c| escape_default(c)).collect();
+        // Safety: output of escape_default is valid UTF-8
+        unsafe { String::from_utf8_unchecked(v) }
     }
 }
