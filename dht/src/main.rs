@@ -11,7 +11,9 @@ fn main() {
 fn msg() -> Request {
     Request {
         txn_id: TxnId(123),
-        query: Query::Ping { id: NodeId::gen() },
+        query: Query::Ping {
+            id: Box::new(NodeId::gen()),
+        },
     }
 }
 

@@ -18,20 +18,20 @@ pub struct Request {
 
 pub enum Query {
     Ping {
-        id: NodeId,
+        id: Box<NodeId>,
     },
     FindNode {
-        id: NodeId,
-        target: NodeId,
+        id: Box<NodeId>,
+        target: Box<NodeId>,
     },
     GetPeers {
-        id: NodeId,
-        info_hash: NodeId,
+        id: Box<NodeId>,
+        info_hash: Box<NodeId>,
     },
     AnnouncePeer {
-        id: NodeId,
+        id: Box<NodeId>,
         implied_port: bool,
-        info_hash: NodeId,
+        info_hash: Box<NodeId>,
         port: u16,
         token: Vec<u8>,
     },
@@ -120,7 +120,6 @@ impl<'a> Response<'a> {
 
         let kind = match resp_type {
             "q" => {
-                dict.get_str(b"q").context("Args data not found")?;
                 dict.get_dict(b"a").context("Args data not found")?;
                 ResponseKind::Query
             }
@@ -152,7 +151,7 @@ mod tests {
         let request = Request {
             txn_id: TxnId(10),
             query: Query::Ping {
-                id: NodeId::of_byte(1),
+                id: Box::new(NodeId::of_byte(1)),
             },
         };
 
@@ -172,8 +171,8 @@ mod tests {
         let request = Request {
             txn_id: TxnId(10),
             query: Query::FindNode {
-                id: NodeId::of_byte(1),
-                target: NodeId::of_byte(2),
+                id: Box::new(NodeId::of_byte(1)),
+                target: Box::new(NodeId::of_byte(2)),
             },
         };
 
@@ -193,8 +192,8 @@ mod tests {
         let request = Request {
             txn_id: TxnId(10),
             query: Query::GetPeers {
-                id: NodeId::of_byte(1),
-                info_hash: NodeId::of_byte(2),
+                id: Box::new(NodeId::of_byte(1)),
+                info_hash: Box::new(NodeId::of_byte(2)),
             },
         };
 
@@ -214,8 +213,8 @@ mod tests {
         let request = Request {
             txn_id: TxnId(10),
             query: Query::AnnouncePeer {
-                id: NodeId::of_byte(1),
-                info_hash: NodeId::of_byte(2),
+                id: Box::new(NodeId::of_byte(1)),
+                info_hash: Box::new(NodeId::of_byte(2)),
                 implied_port: false,
                 port: 5000,
                 token: vec![0, 1, 2],
@@ -238,8 +237,8 @@ mod tests {
         let request = Request {
             txn_id: TxnId(10),
             query: Query::AnnouncePeer {
-                id: NodeId::of_byte(1),
-                info_hash: NodeId::of_byte(2),
+                id: Box::new(NodeId::of_byte(1)),
+                info_hash: Box::new(NodeId::of_byte(2)),
                 implied_port: true,
                 port: 5000,
                 token: vec![0, 1, 2],
@@ -257,7 +256,7 @@ mod tests {
         );
     }
 
-    pub fn ascii_escape(buf: &[u8]) -> String {
+    fn ascii_escape(buf: &[u8]) -> String {
         use std::ascii::escape_default;
         let v = buf.iter().flat_map(|&c| escape_default(c)).collect();
         // Safety: output of escape_default is valid UTF-8
