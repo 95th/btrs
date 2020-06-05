@@ -1,9 +1,16 @@
 use crate::id::NodeId;
-use anyhow::Context;
-use ben::{Encode, Encoder, Node};
+use anyhow::{bail, Context};
+use ben::{Encode, Encoder, Node as BencodeNode};
 use std::convert::TryInto;
 
-pub struct TxnId(pub u16);
+#[derive(Copy, Clone)]
+pub struct TxnId(u16);
+
+impl TxnId {
+    pub fn new(n: u16) -> Self {
+        Self(n)
+    }
+}
 
 impl Encode for TxnId {
     fn encode<E: Encoder>(&self, enc: &mut E) {
@@ -11,9 +18,127 @@ impl Encode for TxnId {
     }
 }
 
-pub struct Request {
+pub enum MsgKind {
+    Query,
+    Response,
+    Error,
+}
+
+pub struct IncomingMsg<'a> {
     pub txn_id: TxnId,
-    pub query: Query,
+    pub kind: MsgKind,
+    pub body: BencodeNode<'a>,
+}
+
+impl<'a> IncomingMsg<'a> {
+    pub fn parse(buf: &'a [u8]) -> anyhow::Result<Self> {
+        let node = BencodeNode::parse(buf)?;
+        let dict = node.as_dict().context("Message must be a dict")?;
+        let kind = match dict.get_str(b"y").context("Message type is required")? {
+            "q" => MsgKind::Query,
+            "r" => MsgKind::Response,
+            "e" => MsgKind::Error,
+            other => bail!("Unrecognized message type: {}", other),
+        };
+        let txn_id = dict.get(b"t").context("Transaction ID is required")?.data();
+        let txn_id = txn_id.try_into()?;
+        Ok(Self {
+            txn_id: TxnId(u16::from_be_bytes(txn_id)),
+            kind,
+            body: node,
+        })
+    }
+}
+
+pub struct Ping<'a> {
+    pub txn_id: TxnId,
+    pub id: &'a NodeId,
+}
+
+impl Encode for Ping<'_> {
+    fn encode<E: Encoder>(&self, enc: &mut E) {
+        let mut d = enc.add_dict();
+
+        let mut a = d.add_dict("a");
+        a.add("id", self.id);
+        a.finish();
+
+        d.add("q", "ping");
+        d.add("t", self.txn_id);
+        d.add("y", "q");
+    }
+}
+
+pub struct FindNode<'a> {
+    pub txn_id: TxnId,
+    pub id: &'a NodeId,
+    pub target: &'a NodeId,
+}
+
+impl Encode for FindNode<'_> {
+    fn encode<E: Encoder>(&self, enc: &mut E) {
+        let mut d = enc.add_dict();
+
+        let mut a = d.add_dict("a");
+        a.add("id", self.id);
+        a.add("target", self.target);
+        a.finish();
+
+        d.add("q", "find_node");
+        d.add("t", self.txn_id);
+        d.add("y", "q");
+    }
+}
+
+pub struct GetPeers<'a> {
+    pub txn_id: TxnId,
+    pub id: &'a NodeId,
+    pub info_hash: &'a NodeId,
+}
+
+impl Encode for GetPeers<'_> {
+    fn encode<E: Encoder>(&self, enc: &mut E) {
+        let mut d = enc.add_dict();
+
+        let mut a = d.add_dict("a");
+        a.add("id", self.id);
+        a.add("info_hash", self.info_hash);
+        a.finish();
+
+        d.add("q", "get_peers");
+        d.add("t", self.txn_id);
+        d.add("y", "q");
+    }
+}
+
+pub struct AnnouncePeer<'a> {
+    pub txn_id: TxnId,
+    pub id: &'a NodeId,
+    pub implied_port: bool,
+    pub info_hash: &'a NodeId,
+    pub port: u16,
+    pub token: &'a [u8],
+}
+
+impl Encode for AnnouncePeer<'_> {
+    fn encode<E: Encoder>(&self, enc: &mut E) {
+        let mut d = enc.add_dict();
+
+        let mut a = d.add_dict("a");
+        a.add("id", self.id);
+        a.add("info_hash", self.info_hash);
+        if self.implied_port {
+            a.add("implied_port", 1);
+        } else {
+            a.add("port", self.port as i64);
+        }
+        a.add("token", self.token);
+        a.finish();
+
+        d.add("q", "announce_peer");
+        d.add("t", self.txn_id);
+        d.add("y", "q");
+    }
 }
 
 pub enum Query {
@@ -37,108 +162,15 @@ pub enum Query {
     },
 }
 
-impl Encode for Request {
+pub struct Error {
+    code: i64,
+    description: String,
+}
+
+impl Encode for Error {
     fn encode<E: Encoder>(&self, enc: &mut E) {
-        let mut dict = enc.add_dict();
-        dict.add("a", &self.query);
-        dict.add(
-            "q",
-            match self.query {
-                Query::Ping { .. } => "ping",
-                Query::FindNode { .. } => "find_node",
-                Query::GetPeers { .. } => "get_peers",
-                Query::AnnouncePeer { .. } => "announce_peer",
-            },
-        );
-        dict.add("t", &self.txn_id);
-        dict.add("y", "q");
-        dict.finish();
-    }
-}
-
-impl Encode for Query {
-    fn encode<E: Encoder>(&self, enc: &mut E) {
-        let mut dict = enc.add_dict();
-        match self {
-            Query::Ping { id } => {
-                dict.add("id", id);
-            }
-            Query::FindNode { id, target } => {
-                dict.add("id", id);
-                dict.add("target", target);
-            }
-            Query::GetPeers { id, info_hash } => {
-                dict.add("id", id);
-                dict.add("info_hash", info_hash);
-            }
-            Query::AnnouncePeer {
-                id,
-                implied_port,
-                info_hash,
-                port,
-                token,
-            } => {
-                dict.add("id", id);
-                dict.add("info_hash", info_hash);
-                if *implied_port {
-                    dict.add("implied_port", 1);
-                } else {
-                    dict.add("port", *port as i64);
-                }
-                dict.add("token", &token[..]);
-            }
-        }
-        dict.finish();
-    }
-}
-
-pub struct Response<'a> {
-    txn_id: TxnId,
-    kind: ResponseKind,
-    data: ben::Node<'a>,
-}
-
-pub enum ResponseKind {
-    Query,
-    Response,
-    Error,
-}
-
-impl<'a> Response<'a> {
-    pub fn parse(buf: &'a [u8]) -> anyhow::Result<Response<'a>> {
-        let node = Node::parse(buf)?;
-        let dict = node.as_dict().context("Response must be a dictionary")?;
-
-        let resp_type = dict.get_str(b"y").context("Response type not found")?;
-        let txn_id = dict
-            .get(b"t")
-            .context("Transaction ID not found")?
-            .data()
-            .try_into()
-            .context("Transaction ID must be 2 bytes long")?;
-        let txn_id = TxnId(u16::from_be_bytes(txn_id));
-
-        let kind = match resp_type {
-            "q" => {
-                dict.get_dict(b"a").context("Args data not found")?;
-                ResponseKind::Query
-            }
-            "r" => {
-                dict.get_dict(b"r").context("Response data not found")?;
-                ResponseKind::Response
-            }
-            "e" => {
-                dict.get_list(b"e").context("Error data not found")?;
-                ResponseKind::Error
-            }
-            _ => bail!("Unexpected response type: {}", resp_type),
-        };
-
-        Ok(Response {
-            txn_id,
-            kind,
-            data: node,
-        })
+        enc.add_int(self.code);
+        enc.add_str(&self.description);
     }
 }
 
@@ -148,11 +180,9 @@ mod tests {
 
     #[test]
     fn request_ping() {
-        let request = Request {
+        let request = Ping {
             txn_id: TxnId(10),
-            query: Query::Ping {
-                id: Box::new(NodeId::of_byte(1)),
-            },
+            id: &NodeId::of_byte(1),
         };
 
         let encoded = request.encode_to_vec();
@@ -168,12 +198,10 @@ mod tests {
 
     #[test]
     fn request_find_node() {
-        let request = Request {
+        let request = FindNode {
             txn_id: TxnId(10),
-            query: Query::FindNode {
-                id: Box::new(NodeId::of_byte(1)),
-                target: Box::new(NodeId::of_byte(2)),
-            },
+            id: &NodeId::of_byte(1),
+            target: &NodeId::of_byte(2),
         };
 
         let encoded = request.encode_to_vec();
@@ -189,12 +217,10 @@ mod tests {
 
     #[test]
     fn request_get_peers() {
-        let request = Request {
+        let request = GetPeers {
             txn_id: TxnId(10),
-            query: Query::GetPeers {
-                id: Box::new(NodeId::of_byte(1)),
-                info_hash: Box::new(NodeId::of_byte(2)),
-            },
+            id: &NodeId::of_byte(1),
+            info_hash: &NodeId::of_byte(2),
         };
 
         let encoded = request.encode_to_vec();
@@ -210,15 +236,13 @@ mod tests {
 
     #[test]
     fn request_announce_peer() {
-        let request = Request {
+        let request = AnnouncePeer {
             txn_id: TxnId(10),
-            query: Query::AnnouncePeer {
-                id: Box::new(NodeId::of_byte(1)),
-                info_hash: Box::new(NodeId::of_byte(2)),
-                implied_port: false,
-                port: 5000,
-                token: vec![0, 1, 2],
-            },
+            id: &NodeId::of_byte(1),
+            info_hash: &NodeId::of_byte(2),
+            implied_port: false,
+            port: 5000,
+            token: &[0, 1, 2],
         };
 
         let encoded = request.encode_to_vec();
@@ -234,15 +258,13 @@ mod tests {
 
     #[test]
     fn request_announce_peer_implied_port() {
-        let request = Request {
+        let request = AnnouncePeer {
             txn_id: TxnId(10),
-            query: Query::AnnouncePeer {
-                id: Box::new(NodeId::of_byte(1)),
-                info_hash: Box::new(NodeId::of_byte(2)),
-                implied_port: true,
-                port: 5000,
-                token: vec![0, 1, 2],
-            },
+            id: &NodeId::of_byte(1),
+            info_hash: &NodeId::of_byte(2),
+            implied_port: true,
+            port: 5000,
+            token: &[0, 1, 2],
         };
 
         let encoded = request.encode_to_vec();

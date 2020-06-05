@@ -5,7 +5,7 @@ use rand::Rng;
 use std::ops::BitXor;
 
 #[derive(Clone, Debug, Default, PartialEq, PartialOrd, Eq, Ord)]
-pub struct NodeId([u8; NodeId::LEN]);
+pub struct NodeId(pub [u8; NodeId::LEN]);
 
 impl NodeId {
     pub const LEN: usize = 20;

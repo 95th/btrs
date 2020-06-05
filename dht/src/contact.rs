@@ -1,6 +1,12 @@
 use crate::id::NodeId;
+use ben::{Encode, Encoder};
 use std::net::Ipv4Addr;
 use std::time::Instant;
+
+pub struct Peer {
+    pub addr: Ipv4Addr,
+    pub port: u16,
+}
 
 pub struct Contact {
     pub id: NodeId,
@@ -33,5 +39,22 @@ impl Contact {
 
     pub fn touch(&mut self) {
         self.last_updated = Instant::now();
+    }
+}
+
+impl Encode for Contact {
+    fn encode<E: Encoder>(&self, enc: &mut E) {
+        let mut bytes = enc.add_n_bytes(NodeId::LEN + 6);
+        bytes.add(self.id.as_bytes());
+        bytes.add(&self.addr.octets());
+        bytes.add(&self.port.to_be_bytes());
+    }
+}
+
+impl Encode for Peer {
+    fn encode<E: Encoder>(&self, enc: &mut E) {
+        let mut bytes = enc.add_n_bytes(6);
+        bytes.add(&self.addr.octets());
+        bytes.add(&self.port.to_be_bytes());
     }
 }
