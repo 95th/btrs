@@ -19,9 +19,16 @@ impl Encode for TxnId {
 }
 
 pub enum MsgKind {
-    Query,
+    Query(QueryKind),
     Response,
     Error,
+}
+
+pub enum QueryKind {
+    Ping,
+    FindNode,
+    GetPeers,
+    AnnouncePeer,
 }
 
 pub struct IncomingMsg<'a> {
@@ -34,11 +41,23 @@ impl<'a> IncomingMsg<'a> {
     pub fn parse(buf: &'a [u8]) -> anyhow::Result<Self> {
         let node = BencodeNode::parse(buf)?;
         let dict = node.as_dict().context("Message must be a dict")?;
-        let kind = match dict.get_str(b"y").context("Message type is required")? {
-            "q" => MsgKind::Query,
+
+        let y = dict.get_str(b"y").context("Message type is required")?;
+        let kind = match y {
+            "q" => {
+                let q = dict.get_str(b"q").context("Query type is required")?;
+                let query_kind = match q {
+                    "ping" => QueryKind::Ping,
+                    "find_node" => QueryKind::FindNode,
+                    "get_peers" => QueryKind::GetPeers,
+                    "announce_peer" => QueryKind::AnnouncePeer,
+                    other => bail!("Unexpected query type: {}", other),
+                };
+                MsgKind::Query(query_kind)
+            }
             "r" => MsgKind::Response,
             "e" => MsgKind::Error,
-            other => bail!("Unrecognized message type: {}", other),
+            other => bail!("Unexpected message type: {}", other),
         };
         let txn_id = dict.get(b"t").context("Transaction ID is required")?.data();
         let txn_id = txn_id.try_into()?;
@@ -276,6 +295,13 @@ mod tests {
             ascii_escape(expected),
             ascii_escape(&encoded)
         );
+    }
+
+    #[test]
+    fn incoming_ping() {
+        let expected: &[u8] = b"d1:ad2:id20:\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01e1:q4:ping1:t2:\x00\n1:y1:qe";
+        let msg = IncomingMsg::parse(expected).unwrap();
+        assert!(matches!(msg.kind, MsgKind::Query(QueryKind::Ping)))
     }
 
     fn ascii_escape(buf: &[u8]) -> String {
