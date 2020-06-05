@@ -160,27 +160,6 @@ impl Encode for AnnouncePeer<'_> {
     }
 }
 
-pub enum Query {
-    Ping {
-        id: Box<NodeId>,
-    },
-    FindNode {
-        id: Box<NodeId>,
-        target: Box<NodeId>,
-    },
-    GetPeers {
-        id: Box<NodeId>,
-        info_hash: Box<NodeId>,
-    },
-    AnnouncePeer {
-        id: Box<NodeId>,
-        implied_port: bool,
-        info_hash: Box<NodeId>,
-        port: u16,
-        token: Vec<u8>,
-    },
-}
-
 pub struct Error {
     code: i64,
     description: String,
