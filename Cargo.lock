@@ -44,7 +44,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 [[package]]
 name = "ben"
 version = "0.1.7"
-source = "git+https://github.com/95th/ben#b8dca2d8cbbe9a05cd99d1490168a8634aa43806"
+source = "git+https://github.com/95th/ben#98201ae5644512ec460fe37e95644429baeb6e90"
 dependencies = [
  "bytes 0.5.4 (registry+https://github.com/rust-lang/crates.io-index)",
  "itoa 0.4.5 (registry+https://github.com/rust-lang/crates.io-index)",
