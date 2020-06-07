@@ -6,7 +6,7 @@ use crate::msg::{Message, MetadataMsg};
 use crate::peer::{Peer, PeerId};
 use crate::torrent::Torrent;
 use anyhow::Context;
-use ben::{Encode, Node};
+use ben::{Encode, Parser};
 use futures::stream::FuturesUnordered;
 use futures::stream::StreamExt;
 use std::collections::HashSet;
@@ -72,12 +72,13 @@ impl MagnetUri {
     }
 
     fn read_info(&self, data: &[u8]) -> Option<TorrentInfo> {
-        let node = Node::parse(&data).ok()?;
+        let mut parser = Parser::new();
+        let node = parser.parse(&data).ok()?;
         let info_dict = node.as_dict()?;
         let length = info_dict.get_int(b"length")? as usize;
         let name = info_dict.get_str(b"name").unwrap_or_default().to_string();
         let piece_len = info_dict.get_int(b"piece length")? as usize;
-        let piece_hashes = info_dict.get(b"pieces")?.data().to_vec();
+        let piece_hashes = info_dict.get_bytes(b"pieces")?.to_vec();
         Some(TorrentInfo {
             piece_len,
             length,
@@ -125,11 +126,12 @@ impl MagnetUri {
         client.handshake(&self.info_hash, peer_id).await?;
         client.conn.flush().await?;
 
-        let mut ext_buf = vec![];
+        let ext_buf = &mut vec![];
+        let parser = &mut Parser::new();
         let ext = loop {
             let msg = client.read_in_loop().await?;
             if let Message::Extended { .. } = msg {
-                let ext = msg.read_ext(&mut client.conn, &mut ext_buf).await?;
+                let ext = msg.read_ext(&mut client.conn, ext_buf, parser).await?;
                 break ext;
             } else {
                 msg.read_discard(&mut client.conn).await?;
@@ -157,7 +159,7 @@ impl MagnetUri {
             let msg = client.read_in_loop().await?;
 
             if let Message::Extended { .. } = msg {
-                let ext = msg.read_ext(&mut client.conn, &mut ext_buf).await?;
+                let ext = msg.read_ext(&mut client.conn, ext_buf, parser).await?;
                 ensure!(ext.id == metadata.id, "Expected Metadata message");
 
                 let data = ext.data(piece)?;

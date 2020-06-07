@@ -1,5 +1,5 @@
 use anyhow::Context;
-use ben::{Encode, Encoder, Node};
+use ben::{Encode, Encoder, Node, Parser};
 use std::io;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
@@ -240,6 +240,7 @@ impl Message {
         &self,
         rdr: &mut R,
         buf: &'a mut Vec<u8>,
+        parser: &'a mut Parser,
     ) -> crate::Result<ExtendedMessage<'a>>
     where
         R: AsyncRead + Unpin,
@@ -251,7 +252,7 @@ impl Message {
                 buf.clear();
                 buf.resize(len as usize, 0);
                 rdr.read_exact(buf).await?;
-                let msg = ExtendedMessage::new(buf)?;
+                let msg = ExtendedMessage::new(buf, parser)?;
                 Ok(msg)
             }
             _ => bail!("Not an Extended message"),
@@ -271,10 +272,10 @@ mod msg_type {
     pub const REJECT: i64 = 2;
 }
 
-impl ExtendedMessage<'_> {
-    pub fn new(data: &[u8]) -> crate::Result<ExtendedMessage> {
+impl<'a> ExtendedMessage<'a> {
+    pub fn new(data: &'a [u8], parser: &'a mut Parser) -> crate::Result<ExtendedMessage<'a>> {
         let id = data[0];
-        let (value, i) = Node::parse_prefix(&data[1..])?;
+        let (value, i) = parser.parse_prefix(&data[1..])?;
 
         let rest = &data[i + 1..];
         Ok(ExtendedMessage { id, value, rest })
@@ -365,10 +366,11 @@ mod tests {
 
     #[test]
     fn extended_new() {
-        let ext = ExtendedMessage::new(&[0, b'd', b'e', 1, 2, 3, 4]).unwrap();
+        let mut parser = Parser::new();
+        let ext = ExtendedMessage::new(&[0, b'd', b'e', 1, 2, 3, 4], &mut parser).unwrap();
         assert_eq!(0, ext.id);
         assert!(ext.value.is_dict());
-        assert_eq!(b"de", ext.value.data());
+        assert_eq!(b"de", ext.value.as_raw_bytes());
         assert_eq!(&[1, 2, 3, 4], ext.rest);
     }
 
@@ -510,7 +512,8 @@ mod tests {
         let m = Message::read(&mut c).await.unwrap().unwrap();
         assert_eq!(Message::Extended { len: 3 }, m);
         let mut buf = vec![0; 3];
-        let ext = m.read_ext(&mut c, &mut buf).await.unwrap();
+        let mut parser = Parser::new();
+        let ext = m.read_ext(&mut c, &mut buf, &mut parser).await.unwrap();
         assert!(!ext.is_handshake());
         assert!(ext.metadata().is_none());
         assert_eq!(v.len(), c.position() as usize);

@@ -1,10 +1,10 @@
 use crate::id::NodeId;
 use anyhow::{bail, Context};
-use ben::{Encode, Encoder, Node as BencodeNode};
+use ben::{Encode, Encoder, Node as BencodeNode, Parser};
 use std::convert::TryInto;
 
-#[derive(Copy, Clone)]
-pub struct TxnId(u16);
+#[derive(Debug, Copy, Clone)]
+pub struct TxnId(pub u16);
 
 impl TxnId {
     pub fn new(n: u16) -> Self {
@@ -18,12 +18,14 @@ impl Encode for TxnId {
     }
 }
 
+#[derive(Debug)]
 pub enum MsgKind {
     Query(QueryKind),
     Response,
     Error,
 }
 
+#[derive(Debug)]
 pub enum QueryKind {
     Ping,
     FindNode,
@@ -31,6 +33,7 @@ pub enum QueryKind {
     AnnouncePeer,
 }
 
+#[derive(Debug)]
 pub struct IncomingMsg<'a> {
     pub txn_id: TxnId,
     pub kind: MsgKind,
@@ -38,28 +41,28 @@ pub struct IncomingMsg<'a> {
 }
 
 impl<'a> IncomingMsg<'a> {
-    pub fn parse(buf: &'a [u8]) -> anyhow::Result<Self> {
-        let node = BencodeNode::parse(buf)?;
+    pub fn parse(buf: &'a [u8], parser: &'a mut Parser) -> anyhow::Result<Self> {
+        let node = parser.parse(buf)?;
         let dict = node.as_dict().context("Message must be a dict")?;
 
-        let y = dict.get_str(b"y").context("Message type is required")?;
+        let y = dict.get_bytes(b"y").context("Message type is required")?;
         let kind = match y {
-            "q" => {
-                let q = dict.get_str(b"q").context("Query type is required")?;
+            b"q" => {
+                let q = dict.get_bytes(b"q").context("Query type is required")?;
                 let query_kind = match q {
-                    "ping" => QueryKind::Ping,
-                    "find_node" => QueryKind::FindNode,
-                    "get_peers" => QueryKind::GetPeers,
-                    "announce_peer" => QueryKind::AnnouncePeer,
-                    other => bail!("Unexpected query type: {}", other),
+                    b"ping" => QueryKind::Ping,
+                    b"find_node" => QueryKind::FindNode,
+                    b"get_peers" => QueryKind::GetPeers,
+                    b"announce_peer" => QueryKind::AnnouncePeer,
+                    other => bail!("Unexpected query type: {:?}", other),
                 };
                 MsgKind::Query(query_kind)
             }
-            "r" => MsgKind::Response,
-            "e" => MsgKind::Error,
-            other => bail!("Unexpected message type: {}", other),
+            b"r" => MsgKind::Response,
+            b"e" => MsgKind::Error,
+            other => bail!("Unexpected message type: {:?}", other),
         };
-        let txn_id = dict.get(b"t").context("Transaction ID is required")?.data();
+        let txn_id = dict.get_bytes(b"t").context("Transaction ID is required")?;
         let txn_id = txn_id.try_into()?;
         Ok(Self {
             txn_id: TxnId(u16::from_be_bytes(txn_id)),
@@ -279,7 +282,8 @@ mod tests {
     #[test]
     fn incoming_ping() {
         let expected: &[u8] = b"d1:ad2:id20:\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01e1:q4:ping1:t2:\x00\n1:y1:qe";
-        let msg = IncomingMsg::parse(expected).unwrap();
+        let mut parser = Parser::new();
+        let msg = IncomingMsg::parse(expected, &mut parser).unwrap();
         assert!(matches!(msg.kind, MsgKind::Query(QueryKind::Ping)))
     }
 

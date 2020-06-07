@@ -1,7 +1,7 @@
 use crate::announce::{AnnounceRequest, AnnounceResponse};
 use crate::peer::Peer;
 use anyhow::Context;
-use ben::Node;
+use ben::Parser;
 use reqwest::Client;
 use std::collections::HashSet;
 use std::convert::TryInto;
@@ -22,7 +22,8 @@ pub async fn announce(req: AnnounceRequest<'_>) -> crate::Result<AnnounceRespons
         .await?;
 
     debug!("Announce response: {:?}", data);
-    let value = Node::parse(&data)?;
+    let mut parser = Parser::new();
+    let value = parser.parse(&data)?;
     let value = value.as_dict().context("Expected a dict")?;
     let interval = value
         .get(b"interval")
@@ -45,11 +46,8 @@ pub async fn announce(req: AnnounceRequest<'_>) -> crate::Result<AnnounceRespons
             v
         }
         Some(peers) => {
-            let peers = peers.data();
-            if peers.len() % 6 != 0 {
-                bail!("Invalid peer len");
-            }
-
+            let peers = peers.as_bytes().unwrap_or_default();
+            ensure!(peers.len() % 6 == 0, "Invalid peer len");
             peers.chunks_exact(6).map(Peer::v4).collect()
         }
         None => hashset![],
@@ -57,7 +55,7 @@ pub async fn announce(req: AnnounceRequest<'_>) -> crate::Result<AnnounceRespons
 
     debug!("Found {} peers (v4): {:?}", peers.len(), peers);
 
-    let peers6 = value.get(b"peers6").map(|v| v.data()).unwrap_or_default();
+    let peers6 = value.get_bytes(b"peers6").unwrap_or_default();
     ensure!(peers6.len() % 18 == 0, "Invalid peer len");
 
     let peers6: HashSet<_> = peers6.chunks_exact(18).map(Peer::v6).collect();

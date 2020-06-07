@@ -1,10 +1,11 @@
 use ben::{Encode, Encoder};
-use data_encoding::HEXUPPER;
+use data_encoding::HEXUPPER_PERMISSIVE as hex_decoder;
 use rand::distributions::uniform::{SampleBorrow, SampleUniform, UniformSampler};
 use rand::Rng;
 use std::ops::BitXor;
 
 #[derive(Clone, Debug, Default, PartialEq, PartialOrd, Eq, Ord)]
+#[repr(transparent)]
 pub struct NodeId(pub [u8; NodeId::LEN]);
 
 impl NodeId {
@@ -36,32 +37,23 @@ impl NodeId {
         rand::thread_rng().gen_range(lo, hi)
     }
 
-    pub fn decode_hex(hex: &[u8]) -> Result<Self, &'static str> {
+    pub fn decode_hex(hex: &[u8]) -> anyhow::Result<Self> {
+        let len = hex_decoder.decode_len(hex.len())?;
+        ensure!(len == Self::LEN, "Invalid hex for node ID");
+
         let mut n = Self::new();
-
-        let len = HEXUPPER
-            .decode_len(hex.len())
-            .map_err(|_| "Invalid hex length for node ID")?;
-
-        if len != n.0.len() {
-            return Err("Invalid hex for node ID");
+        if let Err(e) = hex_decoder.decode_mut(hex, &mut n.0) {
+            bail!("Unable to parse hex string: {:?}", e);
         }
-
-        HEXUPPER
-            .decode_mut(hex, &mut n.0)
-            .map_err(|_| "Unable to parse hex string")?;
 
         Ok(n)
     }
 
-    pub fn encode_hex(&self, buf: &mut [u8]) -> Result<(), &'static str> {
-        let len = HEXUPPER.encode_len(self.0.len());
+    pub fn encode_hex(&self, buf: &mut [u8]) -> anyhow::Result<()> {
+        let len = hex_decoder.encode_len(self.0.len());
+        ensure!(len == buf.len(), "Invalid hex for node ID");
 
-        if len != buf.len() {
-            return Err("Invalid hex for node ID");
-        }
-
-        HEXUPPER.encode_mut(&self.0, buf);
+        hex_decoder.encode_mut(&self.0, buf);
         Ok(())
     }
 

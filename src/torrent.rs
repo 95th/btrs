@@ -7,7 +7,7 @@ use crate::msg::Message;
 use crate::peer::{self, Peer, PeerId};
 use crate::work::{Piece, PieceWork, WorkQueue};
 use anyhow::Context;
-use ben::Node;
+use ben::Parser;
 use futures::channel::mpsc::Sender;
 use futures::future::poll_fn;
 use futures::stream::FuturesUnordered;
@@ -51,10 +51,14 @@ impl fmt::Debug for TorrentFile {
 
 impl TorrentFile {
     pub fn parse(bytes: impl AsRef<[u8]>) -> crate::Result<TorrentFile> {
-        let value = Node::parse(bytes.as_ref())?;
+        let mut parser = Parser::new();
+        let value = parser.parse(bytes.as_ref())?;
         let dict = value.as_dict().context("Expected a dict")?;
         let announce = dict.get_str(b"announce").context("`announce` not found")?;
-        let info_bytes = dict.get(b"info").context("`info` not found")?.data();
+        let info_bytes = dict
+            .get(b"info")
+            .context("`info` not found")?
+            .as_raw_bytes();
         let info_hash = Sha1::from(info_bytes).digest().bytes().into();
 
         let info_dict = dict.get_dict(b"info").context("`info` dict not found")?;
@@ -66,7 +70,7 @@ impl TorrentFile {
         let pieces = info_dict
             .get(b"pieces")
             .context("`pieces` not found")?
-            .data();
+            .as_raw_bytes();
 
         let mut tracker_urls = hashset![announce.to_owned()];
         if let Some(list) = dict.get_list(b"announce-list") {

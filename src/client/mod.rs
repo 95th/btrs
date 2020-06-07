@@ -6,7 +6,7 @@ use crate::client::handshake::Handshake;
 use crate::metainfo::InfoHash;
 use crate::msg::{Message, MetadataMsg};
 use crate::peer::PeerId;
-use ben::{Encode, Node};
+use ben::Encode;
 pub use conn::{AsyncStream, Connection};
 use std::io;
 use std::net::SocketAddr;
@@ -152,11 +152,14 @@ impl<C: AsyncStream> Client<C> {
         let msg = Message::Extended {
             len: data.len() as u32,
         };
-        trace!(
-            "Send extended message : {:?} ; payload: {:#?}",
-            msg,
-            Node::parse(&data).unwrap()
-        );
+        if log_enabled!(log::Level::Trace) {
+            let mut parser = ben::Parser::new();
+            trace!(
+                "Send extended message : {:?} ; payload: {:#?}",
+                msg,
+                parser.parse(&data).unwrap()
+            );
+        }
         msg.write_ext(&mut self.conn, id, &data).await
     }
 
@@ -322,9 +325,13 @@ mod tests {
         assert_eq!(Message::Extended { len: 45 }, msg);
 
         let mut buf = vec![];
-        let ext = msg.read_ext(&mut rx.conn, &mut buf).await.unwrap();
+        let mut parser = ben::Parser::new();
+        let ext = msg
+            .read_ext(&mut rx.conn, &mut buf, &mut parser)
+            .await
+            .unwrap();
         let expected = b"d1:md11:ut_metadatai1ee1:pi6881e4:reqqi500ee";
-        assert_eq!(&expected[..], ext.node().data());
+        assert_eq!(&expected[..], ext.node().as_raw_bytes());
     }
 
     #[tokio::test]
@@ -348,7 +355,11 @@ mod tests {
         assert_eq!(Message::Extended { len: 12 }, msg);
 
         let mut buf = vec![];
-        let ext_msg = msg.read_ext(&mut rx.conn, &mut buf).await.unwrap();
+        let mut parser = ben::Parser::new();
+        let ext_msg = msg
+            .read_ext(&mut rx.conn, &mut buf, &mut parser)
+            .await
+            .unwrap();
         assert_eq!(1, ext_msg.id);
 
         let list = ext_msg.node().as_list().unwrap();

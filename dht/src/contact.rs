@@ -58,3 +58,47 @@ impl Encode for Peer {
         bytes.add(&self.port.to_be_bytes());
     }
 }
+
+pub struct CompactNodes<'a> {
+    buf: &'a [u8],
+}
+
+impl<'a> CompactNodes<'a> {
+    pub fn new(buf: &'a [u8]) -> anyhow::Result<Self> {
+        ensure!(
+            buf.len() % 26 == 0,
+            "Compact node list must have length multiple of 26, actual: {}",
+            buf.len()
+        );
+
+        Ok(Self { buf })
+    }
+}
+
+impl<'a> Iterator for CompactNodes<'a> {
+    type Item = (&'a NodeId, Ipv4Addr, u16);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.buf.len() == 0 {
+            return None;
+        }
+
+        let id = unsafe { buf_as::<NodeId>(&self.buf[..20]) };
+
+        let addr = unsafe { buf_as::<[u8; 4]>(&self.buf[20..24]) };
+        let addr = Ipv4Addr::from(*addr);
+
+        let port = unsafe { buf_as::<[u8; 2]>(&self.buf[24..26]) };
+        let port = u16::from_be_bytes(*port);
+
+        self.buf = &self.buf[26..];
+        Some((id, addr, port))
+    }
+}
+
+unsafe fn buf_as<T>(buf: &[u8]) -> &T {
+    debug_assert_eq!(std::mem::size_of::<T>(), buf.len());
+    debug_assert_eq!(std::mem::align_of::<T>(), 1);
+    let p = buf.as_ptr() as *const T;
+    &*p
+}
