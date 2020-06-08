@@ -19,28 +19,23 @@ impl Encode for TxnId {
 }
 
 #[derive(Debug)]
-pub enum MsgKind {
-    Query(QueryKind),
-    Response,
-    Error,
-}
-
-#[derive(Debug)]
-pub enum QueryKind {
-    Ping,
-    FindNode,
-    GetPeers,
-    AnnouncePeer,
-}
-
-#[derive(Debug)]
-pub struct IncomingMsg<'a> {
+pub struct Msg<'a> {
     pub txn_id: TxnId,
     pub kind: MsgKind,
     pub body: BencodeNode<'a>,
 }
 
-impl<'a> IncomingMsg<'a> {
+#[derive(Debug)]
+pub enum MsgKind {
+    Ping,
+    FindNode,
+    GetPeers,
+    AnnouncePeer,
+    Response,
+    Error,
+}
+
+impl<'a> Msg<'a> {
     pub fn parse(buf: &'a [u8], parser: &'a mut Parser) -> anyhow::Result<Self> {
         let node = parser.parse(buf)?;
         let dict = node.as_dict().context("Message must be a dict")?;
@@ -49,14 +44,13 @@ impl<'a> IncomingMsg<'a> {
         let kind = match y {
             b"q" => {
                 let q = dict.get_bytes(b"q").context("Query type is required")?;
-                let query_kind = match q {
-                    b"ping" => QueryKind::Ping,
-                    b"find_node" => QueryKind::FindNode,
-                    b"get_peers" => QueryKind::GetPeers,
-                    b"announce_peer" => QueryKind::AnnouncePeer,
+                match q {
+                    b"ping" => MsgKind::Ping,
+                    b"find_node" => MsgKind::FindNode,
+                    b"get_peers" => MsgKind::GetPeers,
+                    b"announce_peer" => MsgKind::AnnouncePeer,
                     other => bail!("Unexpected query type: {:?}", other),
-                };
-                MsgKind::Query(query_kind)
+                }
             }
             b"r" => MsgKind::Response,
             b"e" => MsgKind::Error,
@@ -283,8 +277,8 @@ mod tests {
     fn incoming_ping() {
         let expected: &[u8] = b"d1:ad2:id20:\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01e1:q4:ping1:t2:\x00\n1:y1:qe";
         let mut parser = Parser::new();
-        let msg = IncomingMsg::parse(expected, &mut parser).unwrap();
-        assert!(matches!(msg.kind, MsgKind::Query(QueryKind::Ping)))
+        let msg = Msg::parse(expected, &mut parser).unwrap();
+        assert!(matches!(msg.kind, MsgKind::Ping));
     }
 
     fn ascii_escape(buf: &[u8]) -> String {
