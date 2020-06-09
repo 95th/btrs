@@ -1,26 +1,24 @@
 use crate::id::NodeId;
+use ben::encode::AddBytes;
 use ben::{Encode, Encoder};
-use std::net::Ipv4Addr;
+use std::net::SocketAddr;
 use std::time::Instant;
 
 pub struct Peer {
-    pub addr: Ipv4Addr,
-    pub port: u16,
+    pub addr: SocketAddr,
 }
 
 #[derive(Debug)]
 pub struct ContactRef<'a> {
     pub id: &'a NodeId,
-    pub addr: Ipv4Addr,
-    pub port: u16,
+    pub addr: SocketAddr,
 }
 
 impl ContactRef<'_> {
-    pub fn to_owned(self) -> Contact {
+    pub fn as_owned(&self) -> Contact {
         Contact {
             id: self.id.clone(),
             addr: self.addr,
-            port: self.port,
             last_updated: Instant::now(),
         }
     }
@@ -28,31 +26,17 @@ impl ContactRef<'_> {
 
 pub struct Contact {
     pub id: NodeId,
-    pub addr: Ipv4Addr,
-    pub port: u16,
+    pub addr: SocketAddr,
     pub last_updated: Instant,
 }
 
 impl Contact {
-    const LEN: usize = NodeId::LEN + 6;
-
-    pub fn new(id: NodeId, addr: Ipv4Addr, port: u16) -> Self {
+    pub fn new(id: NodeId, addr: SocketAddr) -> Self {
         Self {
             id,
             addr,
-            port,
             last_updated: Instant::now(),
         }
-    }
-
-    pub fn as_bytes(&self) -> [u8; Self::LEN] {
-        let mut buf = [0; Self::LEN];
-
-        buf[..NodeId::LEN].copy_from_slice(self.id.as_bytes());
-        buf[NodeId::LEN..NodeId::LEN + 4].copy_from_slice(&self.addr.octets());
-        buf[NodeId::LEN + 4..].copy_from_slice(&self.port.to_be_bytes());
-
-        buf
     }
 
     pub fn touch(&mut self) {
@@ -62,19 +46,27 @@ impl Contact {
 
 impl Encode for Contact {
     fn encode<E: Encoder>(&self, enc: &mut E) {
-        let mut bytes = enc.add_n_bytes(NodeId::LEN + 6);
+        let len = if self.addr.is_ipv4() { 6 } else { 18 };
+        let bytes = &mut enc.add_n_bytes(NodeId::LEN + len);
         bytes.add(self.id.as_bytes());
-        bytes.add(&self.addr.octets());
-        bytes.add(&self.port.to_be_bytes());
+        add_addr(bytes, &self.addr);
     }
 }
 
 impl Encode for Peer {
     fn encode<E: Encoder>(&self, enc: &mut E) {
-        let mut bytes = enc.add_n_bytes(6);
-        bytes.add(&self.addr.octets());
-        bytes.add(&self.port.to_be_bytes());
+        let len = if self.addr.is_ipv4() { 6 } else { 18 };
+        let bytes = &mut enc.add_n_bytes(len);
+        add_addr(bytes, &self.addr);
     }
+}
+
+fn add_addr<E: Encoder>(bytes: &mut AddBytes<'_, E>, addr: &SocketAddr) {
+    match addr {
+        SocketAddr::V4(addr) => bytes.add(&addr.ip().octets()),
+        SocketAddr::V6(addr) => bytes.add(&addr.ip().octets()),
+    }
+    bytes.add(&addr.port().to_be_bytes());
 }
 
 pub struct CompactNodes<'a> {
@@ -97,26 +89,62 @@ impl<'a> Iterator for CompactNodes<'a> {
     type Item = ContactRef<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.buf.len() == 0 {
+        if self.buf.len() < 26 {
+            debug_assert!(self.buf.is_empty());
             return None;
         }
 
-        let id = unsafe { buf_as::<NodeId>(&self.buf[..20]) };
+        unsafe {
+            let p = self.buf.as_ptr();
+            let id = &*(p as *const NodeId);
+            let addr = &*(p.add(20) as *const [u8; 4]);
+            let port = u16::from_be_bytes(*(p.add(24) as *const [u8; 2]));
 
-        let addr = unsafe { buf_as::<[u8; 4]>(&self.buf[20..24]) };
-        let addr = Ipv4Addr::from(*addr);
-
-        let port = unsafe { buf_as::<[u8; 2]>(&self.buf[24..26]) };
-        let port = u16::from_be_bytes(*port);
-
-        self.buf = &self.buf[26..];
-        Some(ContactRef { id, addr, port })
+            self.buf = &self.buf[26..];
+            Some(ContactRef {
+                id,
+                addr: SocketAddr::from((*addr, port)),
+            })
+        }
     }
 }
 
-unsafe fn buf_as<T>(buf: &[u8]) -> &T {
-    debug_assert_eq!(std::mem::size_of::<T>(), buf.len());
-    debug_assert_eq!(std::mem::align_of::<T>(), 1);
-    let p = buf.as_ptr() as *const T;
-    &*p
+pub struct CompactNodesV6<'a> {
+    buf: &'a [u8],
+}
+
+impl<'a> CompactNodesV6<'a> {
+    pub fn new(buf: &'a [u8]) -> anyhow::Result<Self> {
+        ensure!(
+            buf.len() % 38 == 0,
+            "Compact node list must have length multiple of 38, actual: {}",
+            buf.len()
+        );
+
+        Ok(Self { buf })
+    }
+}
+
+impl<'a> Iterator for CompactNodesV6<'a> {
+    type Item = ContactRef<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.buf.len() < 38 {
+            debug_assert!(self.buf.is_empty());
+            return None;
+        }
+
+        unsafe {
+            let p = self.buf.as_ptr();
+            let id = &*(p as *const NodeId);
+            let addr = &*(p.add(20) as *const [u8; 16]);
+            let port = u16::from_be_bytes(*(p.add(36) as *const [u8; 2]));
+
+            self.buf = &self.buf[38..];
+            Some(ContactRef {
+                id,
+                addr: SocketAddr::from((*addr, port)),
+            })
+        }
+    }
 }
