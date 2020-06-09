@@ -51,9 +51,8 @@ impl Server {
                 let nodes = r.get_bytes(b"nodes").context("nodes required")?;
                 trace!("Nodes.len(): {}", nodes.len());
 
-                for (id, addr, port) in CompactNodes::new(nodes)? {
-                    trace!("id: {:?}", id);
-                    trace!("addr: {}, port: {}", addr, port);
+                for c in CompactNodes::new(nodes)? {
+                    trace!("id: {:?}", c);
                 }
             }
 

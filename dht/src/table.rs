@@ -1,5 +1,5 @@
 use crate::bucket::Bucket;
-use crate::contact::Contact;
+use crate::contact::{Contact, ContactRef};
 use crate::id::NodeId;
 use std::collections::VecDeque;
 
@@ -16,8 +16,8 @@ impl RoutingTable {
         }
     }
 
-    pub fn update(&mut self, contact: Contact) {
-        let bucket_no = self.own_id.xor_leading_zeros(&contact.id);
+    pub fn update(&mut self, contact: ContactRef<'_>) {
+        let bucket_no = self.own_id.xor_leading_zeros(contact.id);
         self.buckets[bucket_no].update(contact);
     }
 

@@ -8,6 +8,24 @@ pub struct Peer {
     pub port: u16,
 }
 
+#[derive(Debug)]
+pub struct ContactRef<'a> {
+    pub id: &'a NodeId,
+    pub addr: Ipv4Addr,
+    pub port: u16,
+}
+
+impl ContactRef<'_> {
+    pub fn to_owned(self) -> Contact {
+        Contact {
+            id: self.id.clone(),
+            addr: self.addr,
+            port: self.port,
+            last_updated: Instant::now(),
+        }
+    }
+}
+
 pub struct Contact {
     pub id: NodeId,
     pub addr: Ipv4Addr,
@@ -76,7 +94,7 @@ impl<'a> CompactNodes<'a> {
 }
 
 impl<'a> Iterator for CompactNodes<'a> {
-    type Item = (&'a NodeId, Ipv4Addr, u16);
+    type Item = ContactRef<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.buf.len() == 0 {
@@ -92,7 +110,7 @@ impl<'a> Iterator for CompactNodes<'a> {
         let port = u16::from_be_bytes(*port);
 
         self.buf = &self.buf[26..];
-        Some((id, addr, port))
+        Some(ContactRef { id, addr, port })
     }
 }
 
