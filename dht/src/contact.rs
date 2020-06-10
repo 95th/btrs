@@ -24,6 +24,7 @@ impl ContactRef<'_> {
     }
 }
 
+#[derive(Debug)]
 pub struct Contact {
     pub id: NodeId,
     pub addr: SocketAddr,

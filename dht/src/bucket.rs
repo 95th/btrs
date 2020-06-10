@@ -1,18 +1,19 @@
 use crate::contact::{Contact, ContactRef};
 use std::collections::VecDeque;
 
-const BUCKET_SIZE: usize = 8;
+pub(crate) const BUCKET_SIZE: usize = 8;
 
+#[derive(Debug)]
 pub struct Bucket {
     pub live: VecDeque<Contact>,
-    pub replacement: VecDeque<Contact>,
+    pub extra: VecDeque<Contact>,
 }
 
 impl Bucket {
     pub fn new() -> Self {
         Bucket {
             live: VecDeque::new(),
-            replacement: VecDeque::new(),
+            extra: VecDeque::new(),
         }
     }
 

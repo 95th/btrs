@@ -16,7 +16,7 @@ pub struct Server {
 
 impl Server {
     pub async fn new(port: u16) -> anyhow::Result<Server> {
-        let addr = SocketAddr::from(([0, 0, 0, 0], port));
+        let addr = SocketAddr::from(([0u8; 4], port));
         let conn = UdpSocket::bind(addr).await?;
         let id = NodeId::gen();
 
@@ -62,12 +62,14 @@ impl Server {
 
                 for c in CompactNodes::new(nodes)? {
                     trace!("id: {:?}", c);
+                    self.table.add_contact(&c);
                 }
             }
 
             break;
         }
 
+        trace!("{:#?}", self.table);
         Ok(())
     }
 }

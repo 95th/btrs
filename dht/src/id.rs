@@ -2,11 +2,18 @@ use ben::{Encode, Encoder};
 use data_encoding::HEXUPPER_PERMISSIVE as hex_decoder;
 use rand::distributions::uniform::{SampleBorrow, SampleUniform, UniformSampler};
 use rand::Rng;
+use std::fmt;
 use std::ops::BitXor;
 
-#[derive(Clone, Debug, Default, PartialEq, PartialOrd, Eq, Ord)]
+#[derive(Clone, Default, PartialEq, PartialOrd, Eq, Ord)]
 #[repr(transparent)]
 pub struct NodeId(pub [u8; NodeId::LEN]);
+
+impl fmt::Debug for NodeId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", self.0)
+    }
+}
 
 impl NodeId {
     pub const LEN: usize = 20;
