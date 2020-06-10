@@ -6,6 +6,7 @@ extern crate anyhow;
 
 mod bucket;
 mod contact;
+pub mod future;
 pub mod id;
 pub mod msg;
 mod server;

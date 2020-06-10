@@ -2,7 +2,7 @@ use crate::bucket::Bucket;
 use crate::contact::{Contact, ContactRef};
 use crate::id::NodeId;
 use std::collections::{HashSet, VecDeque};
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::net::SocketAddr;
 
 pub enum AddContactStatus {
     Fail,
@@ -10,32 +10,10 @@ pub enum AddContactStatus {
     RequireSplit,
 }
 
-struct IpSet {
-    ips_v4: HashSet<Ipv4Addr>,
-    ips_v6: HashSet<Ipv6Addr>,
-}
-
-impl IpSet {
-    fn new() -> Self {
-        Self {
-            ips_v4: HashSet::new(),
-            ips_v6: HashSet::new(),
-        }
-    }
-
-    fn exists(&self, ip: &IpAddr) -> bool {
-        match ip {
-            IpAddr::V4(ip) => self.ips_v4.contains(ip),
-            IpAddr::V6(ip) => self.ips_v6.contains(ip),
-        }
-    }
-}
-
 pub struct RoutingTable {
-    own_id: NodeId,
-    buckets: VecDeque<Bucket>,
-    router_nodes: HashSet<SocketAddr>,
-    ips: IpSet,
+    pub own_id: NodeId,
+    pub buckets: VecDeque<Bucket>,
+    pub router_nodes: HashSet<SocketAddr>,
 }
 
 impl RoutingTable {
@@ -44,7 +22,6 @@ impl RoutingTable {
             own_id,
             buckets: VecDeque::new(),
             router_nodes: HashSet::new(),
-            ips: IpSet::new(),
         }
     }
 
@@ -57,9 +34,6 @@ impl RoutingTable {
             return AddContactStatus::Fail;
         }
 
-        if self.ips.exists(&contact.addr.ip()) {
-            return AddContactStatus::Fail;
-        }
         todo!()
     }
 

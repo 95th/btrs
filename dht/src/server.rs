@@ -4,41 +4,50 @@ use crate::msg::{FindNode, Msg, MsgKind, TxnId};
 use crate::table::RoutingTable;
 use anyhow::Context;
 use ben::{Encode, Parser};
-use tokio::net::{lookup_host, UdpSocket};
+use std::net::SocketAddr;
+use tokio::net::UdpSocket;
 
 pub struct Server {
     conn: UdpSocket,
     table: RoutingTable,
+    parser: Parser,
+    buf: Vec<u8>,
 }
 
 impl Server {
-    pub async fn boostrap(addr: &str) -> anyhow::Result<Server> {
-        let addr = lookup_host(addr)
-            .await?
-            .next()
-            .with_context(|| format!("Unable to resolve host: {}", addr))?;
-        trace!("Address resolved to {}", addr);
-
-        let mut conn = UdpSocket::bind("0.0.0.0:6881").await?;
-
+    pub async fn new(port: u16) -> anyhow::Result<Server> {
+        let addr = SocketAddr::from(([0, 0, 0, 0], port));
+        let conn = UdpSocket::bind(addr).await?;
         let id = NodeId::gen();
-        let buf = &mut Vec::with_capacity(1000);
-        let parser = &mut Parser::new();
-        loop {
+
+        Ok(Server {
+            conn,
+            table: RoutingTable::new(id),
+            parser: Parser::new(),
+            buf: Vec::with_capacity(1000),
+        })
+    }
+
+    pub async fn boostrap(&mut self, addrs: &[SocketAddr]) -> anyhow::Result<()> {
+        let id = &self.table.own_id;
+        let buf = &mut self.buf;
+        let parser = &mut self.parser;
+
+        for addr in addrs {
             buf.clear();
             let request = FindNode {
                 txn_id: TxnId(11),
-                id: &id,
-                target: &id,
+                id,
+                target: id,
             };
             request.encode(buf);
             trace!("Sending: {:#?}", parser.parse(buf).unwrap());
-            let n = conn.send_to(buf, addr).await?;
+            let n = self.conn.send_to(buf, addr).await?;
             trace!("Sent: {} bytes", n);
 
             buf.resize(1000, 0);
-            let (n, raddr) = conn.recv_from(buf).await?;
-            ensure!(raddr == addr, "Address mismatch");
+            let (n, raddr) = self.conn.recv_from(buf).await?;
+            ensure!(raddr == *addr, "Address mismatch");
             trace!("Received: {} bytes", n);
 
             let msg = Msg::parse(&buf[..n], parser)?;
@@ -59,9 +68,6 @@ impl Server {
             break;
         }
 
-        Ok(Server {
-            conn,
-            table: RoutingTable::new(id),
-        })
+        Ok(())
     }
 }
