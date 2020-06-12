@@ -108,8 +108,11 @@ impl RoutingTable {
             return BucketStatus::Fail;
         }
 
-        let bucket_idx = self.find_bucket(contact.id);
-        let Bucket { live, extra } = &mut self.buckets[bucket_idx];
+        let bkt_idx = self.find_bucket(contact.id);
+        let bkt_cnt = self.buckets.len();
+        let can_split = bkt_idx == bkt_cnt - 1 && bkt_cnt < 159;
+
+        let Bucket { live, extra } = &mut self.buckets[bkt_idx];
 
         if let Some(c) = live.iter_mut().find(|c| c.id == *contact.id) {
             if c.addr != contact.addr {
@@ -126,25 +129,33 @@ impl RoutingTable {
             .find(|(_, c)| c.id == *contact.id);
 
         if let Some((i, c)) = maybe_extra {
-            return if c.addr != contact.addr {
-                BucketStatus::Fail
+            if c.addr != contact.addr {
+                return BucketStatus::Fail;
+            }
+            // TODO: Update timeouts etc
+            if live.len() < BUCKET_SIZE {
+                live.push(extra.remove(i));
+                return BucketStatus::Success;
+            }
+
+            return if can_split {
+                BucketStatus::RequireSplit
             } else {
-                // TODO: Update timeouts etc
-                if live.len() < BUCKET_SIZE {
-                    live.push(extra.remove(i));
-                    BucketStatus::Success
-                } else {
-                    BucketStatus::RequireSplit
-                }
+                BucketStatus::Success
             };
         }
 
         if live.len() < BUCKET_SIZE {
             live.push(contact.as_owned());
-            BucketStatus::Success
-        } else {
-            BucketStatus::RequireSplit
+            return BucketStatus::Success;
         }
+
+        if can_split {
+            return BucketStatus::RequireSplit;
+        }
+
+        extra.push(contact.as_owned());
+        return BucketStatus::Success;
     }
 
     fn split_bucket(&mut self) {
@@ -270,6 +281,17 @@ mod tests {
             assert_eq!(rt.buckets.len(), 6);
         }
         assert_eq!(rt.buckets[4].live.len(), 8);
+        assert_eq!(rt.buckets[5].live.len(), 7);
+
+        // Add 1 more contacts - goes into bucket index 4 extras
+        let mut n = NodeId::of_byte(9);
+        n.0[19] = 6;
+        assert!(rt.add_contact(&ContactRef { addr, id: &n }));
+        assert_eq!(rt.len(), 15);
+        assert_eq!(rt.len_extra(), 1);
+        assert_eq!(rt.buckets.len(), 6);
+        assert_eq!(rt.buckets[4].live.len(), 8);
+        assert_eq!(rt.buckets[4].extra.len(), 1);
         assert_eq!(rt.buckets[5].live.len(), 7);
     }
 }
