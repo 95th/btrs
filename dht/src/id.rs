@@ -64,21 +64,6 @@ impl NodeId {
         Ok(())
     }
 
-    pub fn compare_ref(&self, n1: &Self, n2: &Self) -> bool {
-        let lhs = self ^ n1;
-        let rhs = self ^ n2;
-        lhs < rhs
-    }
-
-    pub fn dist_exp(&self, other: &Self) -> usize {
-        160 - self.xor_leading_zeros(other)
-    }
-
-    pub fn min_dist_exp(&self, ids: &[Self]) -> usize {
-        debug_assert_ne!(ids.len(), 0);
-        ids.iter().map(|id| self.dist_exp(id)).min().unwrap_or(160)
-    }
-
     /// Returns number of leading zeros.
     ///
     /// # Usage:
@@ -87,9 +72,9 @@ impl NodeId {
     ///
     /// let id = NodeId::of_byte(0b0010_0010);
     ///
-    /// assert_eq!(2, id.leading_zeros());
+    /// assert_eq!(2, id.lz());
     /// ```
-    pub fn leading_zeros(&self) -> usize {
+    pub fn lz(&self) -> usize {
         let mut n = 0;
         for &c in self.0.iter() {
             if c == 0 {
@@ -108,16 +93,16 @@ impl NodeId {
     /// ```
     /// # use dht::id::NodeId;
     ///
-    /// let id1 = NodeId::of_byte(0b0000_0101);
-    /// let id2 = NodeId::of_byte(0b0010_0010);
+    /// let id1 = &NodeId::of_byte(0b0000_0101);
+    /// let id2 = &NodeId::of_byte(0b0010_0010);
     ///
-    /// let n1 = id1.xor_leading_zeros(&id2);
-    /// let n2 = (&id1 ^ &id2).leading_zeros();
+    /// let n1 = id1.xlz(id2);
+    /// let n2 = (id1 ^ id2).lz();
     ///
     /// assert_eq!(n1, n2);
     /// ```
-    pub fn xor_leading_zeros(&self, other: &Self) -> usize {
-        (self ^ other).leading_zeros()
+    pub fn xlz(&self, other: &Self) -> usize {
+        (self ^ other).lz()
     }
 
     pub fn as_bytes(&self) -> &[u8; Self::LEN] {
