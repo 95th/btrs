@@ -1,7 +1,7 @@
 use crate::bucket::{Bucket, BUCKET_SIZE};
 use crate::contact::{Contact, ContactRef};
 use crate::id::NodeId;
-use std::collections::{HashSet, VecDeque};
+use std::collections::HashSet;
 use std::net::SocketAddr;
 
 #[derive(Debug)]

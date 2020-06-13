@@ -1,5 +1,4 @@
-use crate::contact::{Contact, ContactRef};
-use std::collections::VecDeque;
+use crate::contact::Contact;
 
 pub(crate) const BUCKET_SIZE: usize = 8;
 

@@ -1,4 +1,4 @@
-use crate::contact::CompactNodes;
+use crate::contact::{CompactNodes, CompactNodesV6};
 use crate::id::NodeId;
 use crate::msg::{FindNode, Msg, MsgKind, TxnId};
 use crate::table::RoutingTable;
@@ -57,10 +57,15 @@ impl Server {
             if let MsgKind::Response = msg.kind {
                 let d = msg.body.as_dict().context("Response must be a dict")?;
                 let r = d.get_dict(b"r").context("Response dict expected")?;
-                let nodes = r.get_bytes(b"nodes").context("nodes required")?;
-                trace!("Nodes.len(): {}", nodes.len());
 
+                let nodes = r.get_bytes(b"nodes").context("nodes required")?;
                 for c in CompactNodes::new(nodes)? {
+                    trace!("id: {:?}", c);
+                    self.table.add_contact(&c);
+                }
+
+                let nodes6 = r.get_bytes(b"nodes6").context("nodes required")?;
+                for c in CompactNodesV6::new(nodes6)? {
                     trace!("id: {:?}", c);
                     self.table.add_contact(&c);
                 }
