@@ -16,11 +16,7 @@ pub struct ContactRef<'a> {
 
 impl ContactRef<'_> {
     pub fn as_owned(&self) -> Contact {
-        Contact {
-            id: self.id.clone(),
-            addr: self.addr,
-            last_updated: Instant::now(),
-        }
+        Contact::new(self.id.clone(), self.addr)
     }
 }
 
@@ -29,6 +25,8 @@ pub struct Contact {
     pub id: NodeId,
     pub addr: SocketAddr,
     pub last_updated: Instant,
+    pub token: Vec<u8>,
+    timeout_count: Option<u8>,
 }
 
 impl Contact {
@@ -37,11 +35,47 @@ impl Contact {
             id,
             addr,
             last_updated: Instant::now(),
+            token: vec![],
+            timeout_count: None,
         }
     }
 
     pub fn touch(&mut self) {
         self.last_updated = Instant::now();
+    }
+
+    pub fn is_pinged(&self) -> bool {
+        self.timeout_count.is_some()
+    }
+
+    pub fn set_pinged(&mut self) {
+        if self.timeout_count.is_none() {
+            self.timeout_count = Some(0);
+        }
+    }
+
+    pub fn timed_out(&mut self) {
+        if let Some(c) = &mut self.timeout_count {
+            *c = c.saturating_add(1);
+        }
+    }
+
+    pub fn fail_count(&self) -> u8 {
+        self.timeout_count.unwrap_or(0)
+    }
+
+    pub fn failed(&self) -> bool {
+        self.fail_count() > 0
+    }
+
+    pub fn clear_timeout(&mut self) {
+        if let Some(c) = &mut self.timeout_count {
+            *c = 0;
+        }
+    }
+
+    pub fn is_confirmed(&self) -> bool {
+        matches!(self.timeout_count, Some(0))
     }
 }
 
@@ -50,7 +84,7 @@ impl Encode for Contact {
         let len = if self.addr.is_ipv4() { 6 } else { 18 };
         let bytes = &mut enc.add_n_bytes(NodeId::LEN + len);
         bytes.add(self.id.as_bytes());
-        add_addr(bytes, &self.addr);
+        encode_addr(bytes, &self.addr);
     }
 }
 
@@ -58,11 +92,11 @@ impl Encode for Peer {
     fn encode<E: Encoder>(&self, enc: &mut E) {
         let len = if self.addr.is_ipv4() { 6 } else { 18 };
         let bytes = &mut enc.add_n_bytes(len);
-        add_addr(bytes, &self.addr);
+        encode_addr(bytes, &self.addr);
     }
 }
 
-fn add_addr<E: Encoder>(bytes: &mut AddBytes<'_, E>, addr: &SocketAddr) {
+fn encode_addr<E: Encoder>(bytes: &mut AddBytes<'_, E>, addr: &SocketAddr) {
     match addr {
         SocketAddr::V4(addr) => bytes.add(&addr.ip().octets()),
         SocketAddr::V6(addr) => bytes.add(&addr.ip().octets()),
