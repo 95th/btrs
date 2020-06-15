@@ -22,7 +22,7 @@ impl RoutingTable {
     pub fn new(own_id: NodeId) -> Self {
         Self {
             own_id,
-            buckets: Vec::new(),
+            buckets: vec![Bucket::new()],
             router_nodes: HashSet::new(),
         }
     }
@@ -68,27 +68,22 @@ impl RoutingTable {
         }
     }
 
-    pub fn find_closest(&self, target: &NodeId, count: usize) -> Vec<&Contact> {
-        let mut contacts = Vec::with_capacity(count);
-
-        let bucket_no = self.own_id.xlz(target);
-        self.buckets[bucket_no].get_contacts(&mut contacts, count);
+    pub fn find_closest<'a>(&'a self, target: &NodeId, out: &mut Vec<&'a Contact>) {
+        let bucket_no = self.find_bucket(target);
+        self.buckets[bucket_no].get_contacts(out);
 
         let mut i = 1;
-        while contacts.len() < count && (i < bucket_no || bucket_no + i < self.buckets.len()) {
+        while out.len() < out.capacity() && (i < bucket_no || bucket_no + i < self.buckets.len()) {
             if i < bucket_no {
-                self.buckets[bucket_no - i].get_contacts(&mut contacts, count);
+                self.buckets[bucket_no - i].get_contacts(out);
             }
 
             if bucket_no + i < self.buckets.len() {
-                self.buckets[bucket_no + i].get_contacts(&mut contacts, count);
+                self.buckets[bucket_no + i].get_contacts(out);
             }
 
             i += 1;
         }
-
-        contacts.sort_unstable_by_key(|c| &c.id ^ target);
-        contacts
     }
 
     pub fn len(&self) -> usize {
@@ -226,14 +221,8 @@ impl RoutingTable {
         self.buckets.push(new_bucket);
     }
 
-    fn find_bucket(&mut self, id: &NodeId) -> usize {
-        if self.buckets.is_empty() {
-            self.buckets.push(Bucket::new());
-        }
-
-        let bucket_idx = self.own_id.xlz(id).min(self.buckets.len() - 1);
-
-        bucket_idx
+    fn find_bucket(&self, id: &NodeId) -> usize {
+        self.own_id.xlz(id).min(self.buckets.len() - 1)
     }
 }
 
@@ -256,7 +245,7 @@ mod tests {
         let mut rt = RoutingTable::new(NodeId::of_byte(0));
         assert_eq!(rt.len(), 0);
         assert_eq!(rt.len_extra(), 0);
-        assert_eq!(rt.buckets.len(), 0);
+        assert_eq!(rt.buckets.len(), 1);
 
         let addr = SocketAddr::from(([0u8; 4], 100));
 

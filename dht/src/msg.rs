@@ -3,14 +3,8 @@ use anyhow::{bail, Context};
 use ben::{Encode, Encoder, Node as BencodeNode, Parser};
 use std::convert::TryInto;
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 pub struct TxnId(pub u16);
-
-impl TxnId {
-    pub fn new(n: u16) -> Self {
-        Self(n)
-    }
-}
 
 impl Encode for TxnId {
     fn encode<E: Encoder>(&self, enc: &mut E) {

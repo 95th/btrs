@@ -16,13 +16,12 @@ impl Bucket {
         }
     }
 
-    pub fn get_contacts<'a>(&'a self, contacts: &mut Vec<&'a Contact>, count: usize) {
+    pub fn get_contacts<'a>(&'a self, out: &mut Vec<&'a Contact>) {
         for c in &self.live {
-            if contacts.len() < count {
-                contacts.push(c);
-            } else {
+            if out.len() >= out.capacity() {
                 break;
             }
+            out.push(c);
         }
     }
 }

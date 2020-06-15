@@ -1,10 +1,15 @@
-use dht::Server;
+use dht::{id::NodeId, Server};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     env_logger::init();
     let addr = "192.168.43.212:17742".parse()?; //"router.utorrent.com:6881";
-    let mut server = Server::new(6881).await?;
-    dht::future::timeout(server.boostrap(&[addr]), 2).await?;
+    let f = async {
+        let mut server = Server::new(6881).await?;
+        server.boostrap(&[addr]).await?;
+        server.announce(&NodeId::of_byte(1)).await?;
+        Ok(())
+    };
+    dht::future::timeout(f, 10).await?;
     Ok(())
 }

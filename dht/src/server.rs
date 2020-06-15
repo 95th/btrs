@@ -56,7 +56,7 @@ impl Server {
 
             let msg = Msg::parse(&buf[..n], parser)?;
             trace!("Data: {:#?}", msg);
-            ensure!(msg.txn_id.0 == 11, "Transaction ID mismatch");
+            ensure!(msg.txn_id == txn_id, "Transaction ID mismatch");
 
             if let MsgKind::Response = msg.kind {
                 let d = msg.body.as_dict().context("Response must be a dict")?;
@@ -92,12 +92,17 @@ impl Server {
 
         self.buf.clear();
         req.encode(&mut self.buf);
+        trace!("Sending: {:#?}", self.parser.parse(&self.buf).unwrap());
 
-        let closest = self.table.find_closest(info_hash, 8);
+        let mut closest = Vec::with_capacity(8);
+        self.table.find_closest(info_hash, &mut closest);
+
         let mut pending = vec![];
         for c in &closest {
-            self.conn.send_to(&self.buf, c.addr).await?;
-            pending.push(c.addr);
+            match self.conn.send_to(&self.buf, c.addr).await {
+                Ok(_) => pending.push(c.addr),
+                Err(e) => warn!("{}", e),
+            }
         }
 
         while !pending.is_empty() {
