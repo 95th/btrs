@@ -172,10 +172,11 @@ async fn resolve_addr(url: &str) -> crate::Result<SocketAddr> {
     let host = url.host_str().context("Missing host")?;
     let port = url.port().context("Missing port")?;
 
-    for addr in lookup_host((host, port)).await? {
+    let mut result = lookup_host((host, port)).await?;
+    if let Some(addr) = result.next() {
         trace!("Resolved {}/{} to {}", host, port, addr);
-        return Ok(addr);
+        Ok(addr)
+    } else {
+        bail!("Host/port is not resolved to a socket addr")
     }
-
-    bail!("Host/port is not resolved to a socket addr")
 }

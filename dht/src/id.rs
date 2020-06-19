@@ -182,10 +182,8 @@ impl UniformSampler for UniformNodeId {
                 if out <= self.high && (low_is_zero || out >= self.low) {
                     break out;
                 }
-            } else {
-                if out < self.high && (low_is_zero || out >= self.low) {
-                    break out;
-                }
+            } else if out < self.high && (low_is_zero || out >= self.low) {
+                break out;
             }
         }
     }

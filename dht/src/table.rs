@@ -94,6 +94,10 @@ impl RoutingTable {
         self.buckets.iter().map(|b| b.extra.len()).sum()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     fn add_contact_impl(&mut self, contact: &ContactRef<'_>) -> BucketStatus {
         if self.router_nodes.contains(&contact.addr) {
             return BucketStatus::Fail;
@@ -158,7 +162,7 @@ impl RoutingTable {
         }
 
         extra.push(contact.as_owned());
-        return BucketStatus::Success;
+        BucketStatus::Success
     }
 
     fn replace_node_impl(&mut self, contact: &ContactRef<'_>, bkt_idx: usize) -> BucketStatus {
