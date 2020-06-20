@@ -144,6 +144,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow 1.0.31 (registry+https://github.com/rust-lang/crates.io-index)",
  "ben 0.1.7 (git+https://github.com/95th/ben)",
+ "bitflags 1.2.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "bytes 0.5.5 (registry+https://github.com/rust-lang/crates.io-index)",
  "data-encoding 2.2.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "env_logger 0.7.1 (registry+https://github.com/rust-lang/crates.io-index)",

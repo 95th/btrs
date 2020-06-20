@@ -1,7 +1,7 @@
 use crate::bucket::{Bucket, BUCKET_SIZE};
 use crate::contact::{Contact, ContactRef};
 use crate::id::NodeId;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
 
 #[derive(Debug)]
@@ -15,6 +15,7 @@ pub enum BucketStatus {
 pub struct RoutingTable {
     pub own_id: NodeId,
     pub buckets: Vec<Bucket>,
+    pub tokens: HashMap<NodeId, Vec<u8>>,
     pub router_nodes: HashSet<SocketAddr>,
 }
 
@@ -23,6 +24,7 @@ impl RoutingTable {
         Self {
             own_id,
             buckets: vec![Bucket::new()],
+            tokens: HashMap::new(),
             router_nodes: HashSet::new(),
         }
     }
@@ -84,6 +86,8 @@ impl RoutingTable {
 
             i += 1;
         }
+
+        out.sort_unstable_by_key(|c| target ^ &c.id);
     }
 
     pub fn len(&self) -> usize {

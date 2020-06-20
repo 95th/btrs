@@ -1,6 +1,6 @@
-use crate::contact::{CompactNodes, CompactNodesV6};
+use crate::contact::{CompactNodes, CompactNodesV6, ContactStatus};
 use crate::id::NodeId;
-use crate::msg::{AnnouncePeer, FindNode, Msg, MsgKind, TxnId};
+use crate::msg::{AnnouncePeer, FindNode, GetPeers, Msg, MsgKind, TxnId};
 use crate::table::RoutingTable;
 use anyhow::Context;
 use ben::{Encode, Parser};
@@ -11,7 +11,7 @@ pub struct Server {
     conn: UdpSocket,
     table: RoutingTable,
     parser: Parser,
-    txn_id: u16,
+    txn_id: TxnId,
     buf: Vec<u8>,
 }
 
@@ -25,14 +25,14 @@ impl Server {
             conn,
             table: RoutingTable::new(id),
             parser: Parser::new(),
-            txn_id: 0,
+            txn_id: TxnId(0),
             buf: Vec::with_capacity(1000),
         })
     }
 
     pub async fn boostrap(&mut self, addrs: &[SocketAddr]) -> anyhow::Result<()> {
         for addr in addrs {
-            let txn_id = self.next_txn_id();
+            let txn_id = self.txn_id.next();
             let id = &self.table.own_id;
             let buf = &mut self.buf;
             let parser = &mut self.parser;
@@ -58,29 +58,80 @@ impl Server {
             trace!("Data: {:#?}", msg);
             ensure!(msg.txn_id == txn_id, "Transaction ID mismatch");
 
-            if let MsgKind::Response = msg.kind {
-                let d = msg.body.as_dict().context("Response must be a dict")?;
-                let r = d.get_dict(b"r").context("Response dict expected")?;
-
-                let nodes = r.get_bytes(b"nodes").context("nodes required")?;
-                for c in CompactNodes::new(nodes)? {
-                    self.table.add_contact(&c);
-                }
-
-                if let Some(nodes6) = r.get_bytes(b"nodes6") {
-                    for c in CompactNodesV6::new(nodes6)? {
-                        self.table.add_contact(&c);
-                    }
-                }
-            }
+            self.table.read_nodes(&msg)?;
         }
 
         trace!("{:#?}", self.table);
         Ok(())
     }
 
+    pub async fn get_peers(&mut self, info_hash: &NodeId) -> anyhow::Result<()> {
+        let mut closest = Vec::with_capacity(8);
+        self.table.find_closest(info_hash, &mut closest);
+        if closest.is_empty() {
+            return Ok(());
+        }
+
+        let start_txn = self.txn_id;
+        let mut txn_id = self.txn_id.next();
+        let mut count = 0;
+        for c in &closest {
+            let msg = GetPeers {
+                id: &self.table.own_id,
+                info_hash,
+                txn_id,
+            };
+
+            self.buf.clear();
+            msg.encode(&mut self.buf);
+
+            match self.conn.send_to(&self.buf, c.addr).await {
+                Ok(_) => {
+                    c.status.set(ContactStatus::QUERIED);
+                    txn_id = self.txn_id.next();
+                    count += 1;
+                }
+                Err(e) => {
+                    c.status.set(c.status.get() | ContactStatus::FAILED);
+                    warn!("{}", e);
+                }
+            }
+        }
+
+        let txn_range = start_txn..self.txn_id;
+
+        while count > 0 {
+            self.buf.resize(1000, 0);
+            let (n, rx_addr) = self.conn.recv_from(&mut self.buf[..]).await?;
+            count -= 1;
+            let msg = match Msg::parse(&self.buf[..n], &mut self.parser) {
+                Ok(msg) => msg,
+                Err(e) => {
+                    warn!("Error occurred while parsing DHT message: {}", e);
+                    continue;
+                }
+            };
+
+            info!("message: {:?}", msg);
+
+            if !txn_range.contains(&msg.txn_id) {
+                warn!("Response received from unexpected address: {}", rx_addr);
+                continue;
+            }
+
+            if !matches!(msg.kind, MsgKind::Response) {
+                warn!("Unexpected message type: {:?}", msg.kind);
+                continue;
+            }
+
+            self.table.read_nodes(&msg)?;
+        }
+        Ok(())
+    }
+
     pub async fn announce(&mut self, info_hash: &NodeId) -> anyhow::Result<()> {
-        let txn_id = self.next_txn_id();
+        self.get_peers(info_hash).await?;
+        let txn_id = self.txn_id.next();
         let req = AnnouncePeer {
             id: &self.table.own_id,
             implied_port: true,
@@ -124,10 +175,25 @@ impl Server {
 
         Ok(())
     }
+}
 
-    fn next_txn_id(&mut self) -> TxnId {
-        let t = self.txn_id;
-        self.txn_id = self.txn_id.wrapping_add(1);
-        TxnId(t)
+impl RoutingTable {
+    fn read_nodes(&mut self, msg: &Msg<'_>) -> anyhow::Result<()> {
+        if let MsgKind::Response = msg.kind {
+            let dict = msg.body.as_dict().context("Response must be a dict")?;
+            let resp = dict.get_dict(b"r").context("Response dict expected")?;
+
+            let nodes = resp.get_bytes(b"nodes").context("nodes required")?;
+            for c in CompactNodes::new(nodes)? {
+                self.add_contact(&c);
+            }
+
+            if let Some(nodes6) = resp.get_bytes(b"nodes6") {
+                for c in CompactNodesV6::new(nodes6)? {
+                    self.add_contact(&c);
+                }
+            }
+        }
+        Ok(())
     }
 }
