@@ -112,7 +112,7 @@ impl Encode for Peer {
     }
 }
 
-fn encode_addr<E: Encoder>(bytes: &mut AddBytes<'_, E>, addr: &SocketAddr) {
+fn encode_addr(bytes: &mut AddBytes<'_>, addr: &SocketAddr) {
     match addr {
         SocketAddr::V4(addr) => bytes.add(&addr.ip().octets()),
         SocketAddr::V6(addr) => bytes.add(&addr.ip().octets()),
