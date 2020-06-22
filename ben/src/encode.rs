@@ -223,7 +223,7 @@ impl List<'_> {
 
     /// Create a new `OrderedDict` in this list.
     pub fn add_ordered_dict(&mut self) -> OrderedDict<'_, '_> {
-        OrderedDict::new(self.enc)
+        self.enc.add_ordered_dict()
     }
 
     /// Finish building this list.
@@ -276,7 +276,7 @@ impl Dict<'_> {
     /// Create a new `OrderedDict` inside this dictionary.
     pub fn add_ordered_dict(&mut self, key: &str) -> OrderedDict<'_, '_> {
         self.add_key(key);
-        OrderedDict::new(self.enc)
+        self.enc.add_ordered_dict()
     }
 
     /// `Encode` the value for given key inside this dictionary.
