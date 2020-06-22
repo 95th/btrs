@@ -18,7 +18,7 @@ rand = "0.7.3"
 log = { version = "0.4.8", features = ["release_max_level_off"] }
 percent-encoding = "2.1.0"
 env_logger = "0.7.1"
-ben =  "0.1.8"
+ben = { path = "ben" }
 clap = "2.33.0"
 bytes = "0.5.4"
 dht = { path = "dht" }
