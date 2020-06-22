@@ -144,12 +144,16 @@ impl Encode for AnnouncePeer<'_> {
 
         let mut a = d.add_dict("a");
         a.add("id", self.id);
-        a.add("info_hash", self.info_hash);
         if self.implied_port {
             a.add("implied_port", 1);
-        } else {
+        }
+
+        a.add("info_hash", self.info_hash);
+
+        if !self.implied_port {
             a.add("port", self.port as i64);
         }
+
         a.add("token", self.token);
         a.finish();
 
@@ -279,7 +283,7 @@ mod tests {
         };
 
         let encoded = request.encode_to_vec();
-        let expected = b"d1:ad2:id20:\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x019:info_hash20:\x02\x02\x02\x02\x02\x02\x02\x02\x02\x02\x02\x02\x02\x02\x02\x02\x02\x02\x02\x0212:implied_porti1e5:token3:\x00\x01\x02e1:q13:announce_peer1:t2:\x00\n1:y1:qe";
+        let expected = b"d1:ad2:id20:\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x0112:implied_porti1e9:info_hash20:\x02\x02\x02\x02\x02\x02\x02\x02\x02\x02\x02\x02\x02\x02\x02\x02\x02\x02\x02\x025:token3:\x00\x01\x02e1:q13:announce_peer1:t2:\x00\n1:y1:qe";
         assert_eq!(
             encoded[..],
             expected[..],
