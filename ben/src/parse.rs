@@ -194,18 +194,10 @@ impl Parser {
             return Err(Error::Eof);
         }
 
-        let mut val = 0;
+        let mut val: i64 = 0;
         while let Some(&c) = buf.get(pos) {
             if let b'0'..=b'9' = c {
-                if val > i64::max_value() / 10 {
-                    return Err(Error::Overflow { pos: self.pos });
-                }
-                val *= 10;
-                let digit = (c - b'0') as i64;
-                if val > i64::max_value() - digit {
-                    return Err(Error::Overflow { pos: self.pos });
-                }
-                val += digit;
+                val = add(val, c).ok_or_else(|| Error::Overflow { pos: self.pos })?;
                 pos += 1;
             } else if c == stop_char {
                 break;
@@ -254,6 +246,12 @@ impl Parser {
         self.tok_next += 1;
         Ok(())
     }
+}
+
+fn add(mut num: i64, digit: u8) -> Option<i64> {
+    num = num.checked_mul(10)?;
+    let digit = (digit - b'0') as i64;
+    num.checked_add(digit)
 }
 
 #[cfg(test)]
