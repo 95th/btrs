@@ -239,7 +239,8 @@ impl Drop for List<'_> {
 /// Bencode Dictionary representation.
 ///
 /// Note: This will not enforce order or uniqueness of keys.
-/// These invariants have to be maintained by the caller.
+/// These invariants have to be maintained by the caller. If the keys
+/// are not known beforehand, use `OrderedDict` instead.
 ///
 /// If the invariants don't meet in debug mode, the add calls will
 /// panic.

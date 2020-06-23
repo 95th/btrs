@@ -75,13 +75,15 @@ pub async fn download(torrent: Torrent) -> btrs::Result<()> {
         let mut tick = Instant::now();
 
         while let Some(piece) = piece_rx.next().await {
-            let idx = piece.index as usize;
-            if bitfield.get(idx) {
-                error!("Duplicate piece downloaded: {}", piece.index);
+            let index = piece.index as usize;
+            match bitfield.get(index) {
+                Some(true) => error!("Duplicate piece downloaded: {}", index),
+                None => error!("Unexpected piece downloaded: {}", index),
+                _ => {}
             }
 
             storage.insert(piece).unwrap();
-            bitfield.set(idx, true);
+            bitfield.set(index, true);
 
             downloaded += piece_len;
             let now = Instant::now();

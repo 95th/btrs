@@ -308,15 +308,15 @@ impl<'a> List<'a> {
             buf: self.buf,
             tokens: self.rest,
             total: self.len(),
-            idx: 0,
+            index: 0,
             pos: 0,
         }
     }
 
     /// Returns the `Node` at the given index.
     pub fn get(&self, i: usize) -> Option<Node<'a>> {
-        let idx = self.find_idx(i)?;
-        let tokens = self.rest.get(idx..)?;
+        let index = self.find_index(i)?;
+        let tokens = self.rest.get(index..)?;
         Node::new(self.buf, tokens)
     }
 
@@ -361,20 +361,20 @@ impl<'a> List<'a> {
     }
 
     /// Find the index of i'th element in the tokens array
-    fn find_idx(&self, i: usize) -> Option<usize> {
+    fn find_index(&self, i: usize) -> Option<usize> {
         if i >= self.len() {
             return None;
         }
-        let mut idx = 0;
+        let mut index = 0;
         let mut item = 0;
 
         while item < i {
-            debug_assert!(idx < self.rest.len());
-            idx += self.rest.get(idx)?.next as usize;
+            debug_assert!(index < self.rest.len());
+            index += self.rest.get(index)?.next as usize;
             item += 1;
         }
 
-        Some(idx)
+        Some(index)
     }
 }
 
@@ -382,7 +382,7 @@ pub struct ListIter<'a> {
     buf: &'a [u8],
     tokens: &'a [Token],
     total: usize,
-    idx: usize,
+    index: usize,
     pos: usize,
 }
 
@@ -394,11 +394,11 @@ impl<'a> Iterator for ListIter<'a> {
             return None;
         }
 
-        debug_assert!(self.idx < self.tokens.len());
-        let tokens = self.tokens.get(self.idx..)?;
+        debug_assert!(self.index < self.tokens.len());
+        let tokens = self.tokens.get(self.index..)?;
         let node = Node::new(self.buf, tokens)?;
 
-        self.idx += node.token.next as usize;
+        self.index += node.token.next as usize;
         self.pos += 1;
 
         Some(node)
@@ -426,7 +426,7 @@ impl<'a> Dict<'a> {
             buf: self.buf,
             tokens: self.rest,
             total: self.len(),
-            idx: 0,
+            index: 0,
             pos: 0,
         }
     }
@@ -484,7 +484,7 @@ pub struct DictIter<'a> {
     buf: &'a [u8],
     tokens: &'a [Token],
     total: usize,
-    idx: usize,
+    index: usize,
     pos: usize,
 }
 
@@ -496,18 +496,18 @@ impl<'a> Iterator for DictIter<'a> {
             return None;
         }
 
-        debug_assert!(self.idx < self.tokens.len());
-        let tokens = self.tokens.get(self.idx..)?;
+        debug_assert!(self.index < self.tokens.len());
+        let tokens = self.tokens.get(self.index..)?;
         let key = Node::new(self.buf, tokens)?;
 
         debug_assert_eq!(TokenKind::ByteStr, key.token.kind);
-        self.idx += key.token.next as usize;
+        self.index += key.token.next as usize;
 
-        debug_assert!(self.idx < self.tokens.len());
-        let tokens = self.tokens.get(self.idx..)?;
+        debug_assert!(self.index < self.tokens.len());
+        let tokens = self.tokens.get(self.index..)?;
         let val = Node::new(self.buf, tokens)?;
 
-        self.idx += val.token.next as usize;
+        self.index += val.token.next as usize;
         self.pos += 1;
 
         Some((key, val))

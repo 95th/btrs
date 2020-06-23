@@ -318,7 +318,7 @@ impl<C> Drop for Download<'_, '_, C> {
         // Put any unfinished pieces back in the work queue
         self.work
             .borrow_mut()
-            .extend(self.in_progress.drain().map(|(_idx, p)| p.piece));
+            .extend(self.in_progress.drain().map(|(_i, p)| p.piece));
     }
 }
 

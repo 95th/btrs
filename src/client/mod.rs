@@ -240,9 +240,9 @@ mod tests {
 
         let mut rx = Client::new(Cursor::new(data));
         rx.bitfield = BitField::new(2);
-        assert!(!rx.bitfield.get(1));
+        assert_eq!(Some(false), rx.bitfield.get(1));
         assert_eq!(None, rx.read().await.unwrap());
-        assert!(rx.bitfield.get(1));
+        assert_eq!(Some(true), rx.bitfield.get(1));
     }
 
     #[tokio::test]

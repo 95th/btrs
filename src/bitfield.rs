@@ -36,23 +36,22 @@ impl BitField {
         bits
     }
 
-    pub fn get(&self, idx: usize) -> bool {
-        debug_assert!(idx < self.len);
-        if idx < self.len {
-            let i = idx / 8;
-            let offset = idx % 8;
-            (self.arr[i] & 1 << offset) != 0
+    pub fn get(&self, index: usize) -> Option<bool> {
+        if index < self.len {
+            let i = index / 8;
+            let offset = index % 8;
+            Some((self.arr[i] & 1 << offset) != 0)
         } else {
-            false
+            None
         }
     }
 
-    pub fn set(&mut self, idx: usize, value: bool) -> bool {
-        if idx >= self.len {
+    pub fn set(&mut self, index: usize, value: bool) -> bool {
+        if index >= self.len {
             return false;
         }
-        let i = idx / 8;
-        let offset = idx % 8;
+        let i = index / 8;
+        let offset = index % 8;
         if value {
             self.arr[i] |= 1 << offset;
         } else {
@@ -104,7 +103,7 @@ impl BitField {
     pub fn iter(&self) -> BitIter {
         BitIter {
             field: self,
-            idx: 0,
+            index: 0,
         }
     }
 
@@ -159,20 +158,16 @@ impl From<Vec<u8>> for BitField {
 
 pub struct BitIter<'a> {
     field: &'a BitField,
-    idx: usize,
+    index: usize,
 }
 
 impl Iterator for BitIter<'_> {
     type Item = bool;
 
     fn next(&mut self) -> Option<bool> {
-        if self.idx == self.field.len {
-            None
-        } else {
-            let value = self.field.get(self.idx);
-            self.idx += 1;
-            Some(value)
-        }
+        let value = self.field.get(self.index)?;
+        self.index += 1;
+        Some(value)
     }
 }
 
@@ -209,16 +204,15 @@ mod tests {
         let mut f = BitField::new(3);
         assert!(f.set(0, true));
         assert!(f.set(2, true));
-        assert_eq!(true, f.get(0));
-        assert_eq!(false, f.get(1));
-        assert_eq!(true, f.get(2));
+        assert_eq!(Some(true), f.get(0));
+        assert_eq!(Some(false), f.get(1));
+        assert_eq!(Some(true), f.get(2));
     }
 
     #[test]
-    #[should_panic]
     fn get_02() {
         let f = BitField::new(3);
-        f.get(3);
+        assert!(f.get(3).is_none());
     }
 
     #[test]

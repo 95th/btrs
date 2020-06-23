@@ -112,11 +112,11 @@ impl RoutingTable {
             return BucketStatus::Fail;
         }
 
-        let bkt_idx = self.find_bucket(contact.id);
-        let bkt_cnt = self.buckets.len();
-        let can_split = { bkt_idx + 1 == bkt_cnt && bkt_cnt < 159 };
+        let bucket_index = self.find_bucket(contact.id);
+        let bucket_count = self.buckets.len();
+        let can_split = { bucket_index + 1 == bucket_count && bucket_count < 159 };
 
-        let Bucket { live, extra } = &mut self.buckets[bkt_idx];
+        let Bucket { live, extra } = &mut self.buckets[bucket_index];
 
         if let Some(c) = live.iter_mut().find(|c| c.id == *contact.id) {
             if c.addr != contact.addr {
@@ -148,13 +148,13 @@ impl RoutingTable {
                 return BucketStatus::RequireSplit;
             }
 
-            let status = self.replace_node_impl(contact, bkt_idx);
+            let status = self.replace_node_impl(contact, bucket_index);
             if !matches!(status, BucketStatus::RequireSplit) {
                 return status;
             }
         }
 
-        let Bucket { live, extra } = &mut self.buckets[bkt_idx];
+        let Bucket { live, extra } = &mut self.buckets[bucket_index];
 
         if live.len() < BUCKET_SIZE {
             live.push(contact.as_owned());
@@ -169,8 +169,8 @@ impl RoutingTable {
         BucketStatus::Success
     }
 
-    fn replace_node_impl(&mut self, contact: &ContactRef<'_>, bkt_idx: usize) -> BucketStatus {
-        let Bucket { live, extra } = &mut self.buckets[bkt_idx];
+    fn replace_node_impl(&mut self, contact: &ContactRef<'_>, bucket_index: usize) -> BucketStatus {
+        let Bucket { live, extra } = &mut self.buckets[bucket_index];
         debug_assert!(live.len() >= BUCKET_SIZE);
 
         if replace_stale(live, contact) || replace_stale(extra, contact) {
@@ -185,8 +185,8 @@ impl RoutingTable {
             return;
         }
 
-        let curr_bkt_idx = self.buckets.len() - 1;
-        let Bucket { live, extra } = &mut self.buckets[curr_bkt_idx];
+        let last_bucket_index = self.buckets.len() - 1;
+        let Bucket { live, extra } = &mut self.buckets[last_bucket_index];
 
         debug_assert!(live.len() >= BUCKET_SIZE);
 
@@ -194,8 +194,8 @@ impl RoutingTable {
 
         let mut i = 0;
         while i < live.len() {
-            let bkt_idx = live[i].id.xlz(&self.own_id);
-            if bkt_idx == curr_bkt_idx {
+            let bucket_index = live[i].id.xlz(&self.own_id);
+            if bucket_index == last_bucket_index {
                 i += 1;
                 continue;
             }
@@ -209,8 +209,8 @@ impl RoutingTable {
 
         let mut i = 0;
         while i < extra.len() {
-            let bkt_idx = extra[i].id.xlz(&self.own_id);
-            if bkt_idx == curr_bkt_idx {
+            let bucket_index = extra[i].id.xlz(&self.own_id);
+            if bucket_index == last_bucket_index {
                 if live.len() >= BUCKET_SIZE {
                     i += 1;
                     continue;
