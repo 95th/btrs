@@ -67,7 +67,7 @@ impl Server {
 
     pub async fn get_peers(&mut self, info_hash: &NodeId) -> anyhow::Result<()> {
         let mut closest = Vec::with_capacity(8);
-        self.table.find_closest(info_hash, &mut closest);
+        let own_id = self.table.find_closest(info_hash, &mut closest);
         if closest.is_empty() {
             return Ok(());
         }
@@ -75,9 +75,9 @@ impl Server {
         let start_txn = self.txn_id;
         let mut txn_id = self.txn_id.next();
         let mut count = 0;
-        for c in &closest {
+        for contact in closest {
             let msg = GetPeers {
-                id: &self.table.own_id,
+                id: own_id,
                 info_hash,
                 txn_id,
             };
@@ -85,14 +85,14 @@ impl Server {
             self.buf.clear();
             msg.encode(&mut self.buf);
 
-            match self.conn.send_to(&self.buf, c.addr).await {
+            match self.conn.send_to(&self.buf, contact.addr).await {
                 Ok(_) => {
-                    c.status.set(ContactStatus::QUERIED);
+                    contact.status = ContactStatus::QUERIED;
                     txn_id = self.txn_id.next();
                     count += 1;
                 }
                 Err(e) => {
-                    c.status.set(c.status.get() | ContactStatus::FAILED);
+                    contact.status = ContactStatus::FAILED;
                     warn!("{}", e);
                 }
             }

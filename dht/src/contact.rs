@@ -1,7 +1,6 @@
 use crate::id::NodeId;
 use ben::encode::AddBytes;
 use ben::{Encode, Encoder};
-use std::cell::Cell;
 use std::net::SocketAddr;
 use std::time::Instant;
 
@@ -40,7 +39,7 @@ pub struct Contact {
     pub addr: SocketAddr,
     pub last_updated: Instant,
     pub token: Vec<u8>,
-    pub status: Cell<ContactStatus>,
+    pub status: ContactStatus,
     timeout_count: Option<u8>,
 }
 
@@ -52,7 +51,7 @@ impl Contact {
             last_updated: Instant::now(),
             token: vec![],
             timeout_count: None,
-            status: Cell::new(ContactStatus::INITIAL),
+            status: ContactStatus::INITIAL,
         }
     }
 

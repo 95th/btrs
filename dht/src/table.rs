@@ -70,24 +70,42 @@ impl RoutingTable {
         }
     }
 
-    pub fn find_closest<'a>(&'a self, target: &NodeId, out: &mut Vec<&'a Contact>) {
+    pub fn find_closest<'a>(
+        &'a mut self,
+        target: &NodeId,
+        out: &mut Vec<&'a mut Contact>,
+    ) -> &'a NodeId {
         let bucket_no = self.find_bucket(target);
-        self.buckets[bucket_no].get_contacts(out);
 
-        let mut i = 1;
-        while out.len() < out.capacity() && (i < bucket_no || bucket_no + i < self.buckets.len()) {
-            if i < bucket_no {
-                self.buckets[bucket_no - i].get_contacts(out);
+        // Safety: We're just getting mutable references to contacts in the different buckets.
+        // We're not adding or removing any bucket to the buckets vector itself. The mutable
+        // borrow of each bucket is exclusive.
+        unsafe {
+            let len = self.buckets.len();
+            let ptr = self.buckets.as_mut_ptr();
+
+            let bucket = &mut *ptr.add(bucket_no);
+            bucket.get_contacts(out);
+
+            let mut i = 1;
+
+            while out.len() < out.capacity() && (i <= bucket_no || bucket_no + i < len) {
+                if i <= bucket_no {
+                    let bucket = &mut *ptr.add(bucket_no - i);
+                    bucket.get_contacts(out);
+                }
+
+                if bucket_no + i < len {
+                    let bucket = &mut *ptr.add(bucket_no + i);
+                    bucket.get_contacts(out);
+                }
+
+                i += 1;
             }
-
-            if bucket_no + i < self.buckets.len() {
-                self.buckets[bucket_no + i].get_contacts(out);
-            }
-
-            i += 1;
         }
 
         out.sort_unstable_by_key(|c| target ^ &c.id);
+        &self.own_id
     }
 
     pub fn len(&self) -> usize {
@@ -230,7 +248,9 @@ impl RoutingTable {
     }
 
     fn find_bucket(&self, id: &NodeId) -> usize {
-        self.own_id.xlz(id).min(self.buckets.len() - 1)
+        let idx = self.own_id.xlz(id);
+        let last_idx = self.buckets.len().checked_sub(1).unwrap();
+        idx.min(last_idx)
     }
 }
 
