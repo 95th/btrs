@@ -313,6 +313,25 @@ impl<'a, 'p> List<'a, 'p> {
         }
     }
 
+    /// Returns raw bytes of this list.
+    ///
+    /// # Examples
+    ///
+    /// Basic usage:
+    /// ```
+    /// use ben::{Node, Parser};
+    ///
+    /// let bytes = b"l1:a1:be";
+    /// let parser = &mut Parser::new();
+    /// let dict = parser.parse(bytes).unwrap().to_list().unwrap();
+    /// assert_eq!(b"l1:a1:be", dict.as_raw_bytes());
+    /// ```
+    pub fn as_raw_bytes(&self) -> &'a [u8] {
+        let buf = self.buf.get(self.token.range());
+        debug_assert!(buf.is_some());
+        buf.unwrap_or_default()
+    }
+
     /// Returns the `Node` at the given index.
     pub fn get(&self, i: usize) -> Option<Node<'a, 'p>> {
         let index = self.find_index(i)?;
@@ -429,6 +448,25 @@ impl<'a, 'p> Dict<'a, 'p> {
             index: 0,
             pos: 0,
         }
+    }
+
+    /// Returns raw bytes of this dictionary.
+    ///
+    /// # Examples
+    ///
+    /// Basic usage:
+    /// ```
+    /// use ben::{Node, Parser};
+    ///
+    /// let bytes = b"d1:a1:be";
+    /// let parser = &mut Parser::new();
+    /// let dict = parser.parse(bytes).unwrap().to_dict().unwrap();
+    /// assert_eq!(b"d1:a1:be", dict.as_raw_bytes());
+    /// ```
+    pub fn as_raw_bytes(&self) -> &'a [u8] {
+        let buf = self.buf.get(self.token.range());
+        debug_assert!(buf.is_some());
+        buf.unwrap_or_default()
     }
 
     /// Returns the `Node` for the given key.
