@@ -3,13 +3,13 @@ use std::fmt;
 
 #[derive(PartialEq)]
 #[repr(C)]
-pub struct Node<'a> {
+pub struct Node<'a, 'p> {
     pub(crate) buf: &'a [u8],
-    pub(crate) token: &'a Token,
-    pub(crate) rest: &'a [Token],
+    pub(crate) token: &'p Token,
+    pub(crate) rest: &'p [Token],
 }
 
-impl fmt::Debug for Node<'_> {
+impl fmt::Debug for Node<'_, '_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.token.kind {
             TokenKind::Int => write!(f, "{}", self.as_int().unwrap()),
@@ -23,8 +23,8 @@ impl fmt::Debug for Node<'_> {
     }
 }
 
-impl<'a> Node<'a> {
-    pub(crate) fn new(buf: &'a [u8], tokens: &'a [Token]) -> Option<Self> {
+impl<'a, 'p> Node<'a, 'p> {
+    pub(crate) fn new(buf: &'a [u8], tokens: &'p [Token]) -> Option<Self> {
         if let [token, rest @ ..] = tokens {
             Some(Node { buf, token, rest })
         } else {
@@ -90,7 +90,7 @@ impl<'a> Node<'a> {
     /// assert_eq!(b"a", list.get_bytes(0).unwrap());
     /// assert_eq!(b"bc", list.get_bytes(1).unwrap());
     /// ```
-    pub fn to_list(self) -> Option<List<'a>> {
+    pub fn to_list(self) -> Option<List<'a, 'p>> {
         if self.is_list() {
             Some(List {
                 buf: self.buf,
@@ -118,7 +118,7 @@ impl<'a> Node<'a> {
     /// assert_eq!(b"a", list.get_bytes(0).unwrap());
     /// assert_eq!(b"bc", list.get_bytes(1).unwrap());
     /// ```
-    pub fn as_list(&self) -> Option<&List<'a>> {
+    pub fn as_list(&self) -> Option<&List<'a, 'p>> {
         if self.is_list() {
             let list = unsafe { std::mem::transmute(self) };
             Some(list)
@@ -142,7 +142,7 @@ impl<'a> Node<'a> {
     /// let dict = node.to_dict().unwrap();
     /// assert_eq!(b"bc", dict.get_bytes(b"a").unwrap());
     /// ```
-    pub fn to_dict(self) -> Option<Dict<'a>> {
+    pub fn to_dict(self) -> Option<Dict<'a, 'p>> {
         if self.is_dict() {
             Some(Dict {
                 buf: self.buf,
@@ -169,7 +169,7 @@ impl<'a> Node<'a> {
     /// let dict = node.as_dict().unwrap();
     /// assert_eq!(b"bc", dict.get_bytes(b"a").unwrap());
     /// ```
-    pub fn as_dict(&self) -> Option<&Dict<'a>> {
+    pub fn as_dict(&self) -> Option<&Dict<'a, 'p>> {
         if self.is_dict() {
             let dict = unsafe { std::mem::transmute(self) };
             Some(dict)
@@ -289,21 +289,21 @@ impl<'a> Node<'a> {
 
 /// A bencode list
 #[repr(C)]
-pub struct List<'a> {
+pub struct List<'a, 'p> {
     buf: &'a [u8],
-    token: &'a Token,
-    rest: &'a [Token],
+    token: &'p Token,
+    rest: &'p [Token],
 }
 
-impl fmt::Debug for List<'_> {
+impl fmt::Debug for List<'_, '_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_list().entries(self.iter()).finish()
     }
 }
 
-impl<'a> List<'a> {
+impl<'a, 'p> List<'a, 'p> {
     /// Gets an iterator over the entries of the list
-    pub fn iter(&self) -> ListIter<'a> {
+    pub fn iter(&self) -> ListIter<'a, 'p> {
         ListIter {
             buf: self.buf,
             tokens: self.rest,
@@ -314,19 +314,19 @@ impl<'a> List<'a> {
     }
 
     /// Returns the `Node` at the given index.
-    pub fn get(&self, i: usize) -> Option<Node<'a>> {
+    pub fn get(&self, i: usize) -> Option<Node<'a, 'p>> {
         let index = self.find_index(i)?;
         let tokens = self.rest.get(index..)?;
         Node::new(self.buf, tokens)
     }
 
     /// Returns the `Dict` at the given index.
-    pub fn get_dict(&self, i: usize) -> Option<Dict<'a>> {
+    pub fn get_dict(&self, i: usize) -> Option<Dict<'a, 'p>> {
         self.get(i)?.to_dict()
     }
 
     /// Returns the `List` at the given index.
-    pub fn get_list(&self, i: usize) -> Option<List<'a>> {
+    pub fn get_list(&self, i: usize) -> Option<List<'a, 'p>> {
         self.get(i)?.to_list()
     }
 
@@ -378,16 +378,16 @@ impl<'a> List<'a> {
     }
 }
 
-pub struct ListIter<'a> {
+pub struct ListIter<'a, 'p> {
     buf: &'a [u8],
-    tokens: &'a [Token],
+    tokens: &'p [Token],
     total: usize,
     index: usize,
     pos: usize,
 }
 
-impl<'a> Iterator for ListIter<'a> {
-    type Item = Node<'a>;
+impl<'a, 'p> Iterator for ListIter<'a, 'p> {
+    type Item = Node<'a, 'p>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.pos >= self.total {
@@ -407,21 +407,21 @@ impl<'a> Iterator for ListIter<'a> {
 
 /// A bencode dictionary
 #[repr(C)]
-pub struct Dict<'a> {
+pub struct Dict<'a, 'p> {
     buf: &'a [u8],
-    token: &'a Token,
-    rest: &'a [Token],
+    token: &'p Token,
+    rest: &'p [Token],
 }
 
-impl fmt::Debug for Dict<'_> {
+impl fmt::Debug for Dict<'_, '_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_map().entries(self.iter()).finish()
     }
 }
 
-impl<'a> Dict<'a> {
+impl<'a, 'p> Dict<'a, 'p> {
     /// Gets an iterator over the entries of the dictionary.
-    pub fn iter(&self) -> DictIter<'a> {
+    pub fn iter(&self) -> DictIter<'a, 'p> {
         DictIter {
             buf: self.buf,
             tokens: self.rest,
@@ -432,19 +432,19 @@ impl<'a> Dict<'a> {
     }
 
     /// Returns the `Node` for the given key.
-    pub fn get(&self, key: &[u8]) -> Option<Node<'a>> {
+    pub fn get(&self, key: &[u8]) -> Option<Node<'a, 'p>> {
         self.iter()
             .find(|(k, _)| k.as_bytes() == Some(key))
             .map(|(_, v)| v)
     }
 
     /// Returns the `Dict` for the given key.
-    pub fn get_dict(&self, key: &[u8]) -> Option<Dict<'a>> {
+    pub fn get_dict(&self, key: &[u8]) -> Option<Dict<'a, 'p>> {
         self.get(key)?.to_dict()
     }
 
     /// Returns the `List` for the given key.
-    pub fn get_list(&self, key: &[u8]) -> Option<List<'a>> {
+    pub fn get_list(&self, key: &[u8]) -> Option<List<'a, 'p>> {
         self.get(key)?.to_list()
     }
 
@@ -480,16 +480,16 @@ impl<'a> Dict<'a> {
     }
 }
 
-pub struct DictIter<'a> {
+pub struct DictIter<'a, 'p> {
     buf: &'a [u8],
-    tokens: &'a [Token],
+    tokens: &'p [Token],
     total: usize,
     index: usize,
     pos: usize,
 }
 
-impl<'a> Iterator for DictIter<'a> {
-    type Item = (Node<'a>, Node<'a>);
+impl<'a, 'p> Iterator for DictIter<'a, 'p> {
+    type Item = (Node<'a, 'p>, Node<'a, 'p>);
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.pos >= self.total {

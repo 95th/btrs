@@ -178,7 +178,7 @@ impl Server {
 }
 
 impl RoutingTable {
-    fn read_nodes(&mut self, msg: &Msg<'_>) -> anyhow::Result<()> {
+    fn read_nodes(&mut self, msg: &Msg<'_, '_>) -> anyhow::Result<()> {
         if let MsgKind::Response = msg.kind {
             let dict = msg.body.as_dict().context("Response must be a dict")?;
             let resp = dict.get_dict(b"r").context("Response dict expected")?;

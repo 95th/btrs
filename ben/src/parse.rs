@@ -39,7 +39,7 @@ impl Parser {
     }
 
     /// Parse a bencoded slice and returns a `Node` object
-    pub fn parse<'a>(&'a mut self, buf: &'a [u8]) -> Result<Node<'a>> {
+    pub fn parse<'a, 'p>(&'p mut self, buf: &'a [u8]) -> Result<Node<'a, 'p>> {
         let (node, len) = self.parse_prefix(buf)?;
         if len == buf.len() {
             Ok(node)
@@ -55,7 +55,7 @@ impl Parser {
     /// number of bytes processed.
     ///
     /// It's useful when there is trailing data after the bencoded bytes.
-    pub fn parse_prefix<'a>(&'a mut self, buf: &'a [u8]) -> Result<(Node<'a>, usize)> {
+    pub fn parse_prefix<'a, 'p>(&'p mut self, buf: &'a [u8]) -> Result<(Node<'a, 'p>, usize)> {
         if buf.is_empty() {
             return Err(Error::Eof);
         }

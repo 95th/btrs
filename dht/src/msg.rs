@@ -21,10 +21,10 @@ impl Encode for TxnId {
 }
 
 #[derive(Debug)]
-pub struct Msg<'a> {
+pub struct Msg<'a, 'p> {
     pub txn_id: TxnId,
     pub kind: MsgKind,
-    pub body: BencodeNode<'a>,
+    pub body: BencodeNode<'a, 'p>,
 }
 
 #[derive(Debug)]
@@ -37,8 +37,8 @@ pub enum MsgKind {
     Error,
 }
 
-impl<'a> Msg<'a> {
-    pub fn parse(buf: &'a [u8], parser: &'a mut Parser) -> anyhow::Result<Self> {
+impl<'a, 'p> Msg<'a, 'p> {
+    pub fn parse(buf: &'a [u8], parser: &'p mut Parser) -> anyhow::Result<Self> {
         let node = parser.parse(buf)?;
         let dict = node.as_dict().context("Message must be a dict")?;
 

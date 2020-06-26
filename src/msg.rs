@@ -236,12 +236,12 @@ impl Message {
         }
     }
 
-    pub async fn read_ext<'a, R>(
+    pub async fn read_ext<'a, 'p, R>(
         &self,
         rdr: &mut R,
         buf: &'a mut Vec<u8>,
-        parser: &'a mut Parser,
-    ) -> crate::Result<ExtendedMessage<'a>>
+        parser: &'p mut Parser,
+    ) -> crate::Result<ExtendedMessage<'a, 'p>>
     where
         R: AsyncRead + Unpin,
     {
@@ -260,9 +260,9 @@ impl Message {
     }
 }
 
-pub struct ExtendedMessage<'a> {
+pub struct ExtendedMessage<'a, 'p> {
     pub id: u8,
-    pub value: Node<'a>,
+    pub value: Node<'a, 'p>,
     pub rest: &'a [u8],
 }
 
@@ -272,8 +272,8 @@ mod msg_type {
     pub const REJECT: i64 = 2;
 }
 
-impl<'a> ExtendedMessage<'a> {
-    pub fn new(data: &'a [u8], parser: &'a mut Parser) -> crate::Result<ExtendedMessage<'a>> {
+impl<'a, 'p> ExtendedMessage<'a, 'p> {
+    pub fn new(data: &'a [u8], parser: &'p mut Parser) -> crate::Result<Self> {
         let id = data[0];
         let (value, i) = parser.parse_prefix(&data[1..])?;
 
@@ -285,7 +285,7 @@ impl<'a> ExtendedMessage<'a> {
         self.id == 0
     }
 
-    pub fn node(&self) -> &Node<'_> {
+    pub fn node(&self) -> &Node<'_, '_> {
         &self.value
     }
 
