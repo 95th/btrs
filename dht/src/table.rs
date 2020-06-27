@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
 
 #[derive(Debug)]
-pub enum BucketStatus {
+pub enum BucketResult {
     Fail,
     Success,
     RequireSplit,
@@ -34,13 +34,13 @@ impl RoutingTable {
     }
 
     pub fn add_contact(&mut self, contact: &ContactRef<'_>) -> bool {
-        let mut status = self.add_contact_impl(contact);
+        let mut result = self.add_contact_impl(contact);
         loop {
-            trace!("Adding {:?}, got: {:?}", contact, status);
-            match status {
-                BucketStatus::Success => return true,
-                BucketStatus::Fail => return false,
-                BucketStatus::RequireSplit => {}
+            trace!("Adding {:?}, got: {:?}", contact, result);
+            match result {
+                BucketResult::Success => return true,
+                BucketResult::Fail => return false,
+                BucketResult::RequireSplit => {}
             }
 
             trace!("Split the buckets, before count: {}", self.buckets.len());
@@ -48,9 +48,9 @@ impl RoutingTable {
             trace!("Split the buckets, after count : {}", self.buckets.len());
 
             if self.buckets.len() > 50 {
-                status = self.add_contact_impl(contact);
-                trace!("Try adding again, got: {:?}", status);
-                return matches!(status, BucketStatus::Success);
+                result = self.add_contact_impl(contact);
+                trace!("Try adding again, got: {:?}", result);
+                return matches!(result, BucketResult::Success);
             }
 
             if let Some(last) = self.buckets.iter().last() {
@@ -59,12 +59,12 @@ impl RoutingTable {
                 }
             }
 
-            status = self.add_contact_impl(contact);
+            result = self.add_contact_impl(contact);
 
             if let Some(last) = self.buckets.iter().last() {
                 if last.live.is_empty() {
                     self.buckets.pop();
-                    debug_assert_eq!(matches!(status, BucketStatus::RequireSplit), false);
+                    debug_assert_eq!(matches!(result, BucketResult::RequireSplit), false);
                 }
             }
         }
@@ -120,14 +120,14 @@ impl RoutingTable {
         self.len() == 0
     }
 
-    fn add_contact_impl(&mut self, contact: &ContactRef<'_>) -> BucketStatus {
+    fn add_contact_impl(&mut self, contact: &ContactRef<'_>) -> BucketResult {
         if self.router_nodes.contains(&contact.addr) {
-            return BucketStatus::Fail;
+            return BucketResult::Fail;
         }
 
         // Don't add ourselves
         if self.own_id == *contact.id {
-            return BucketStatus::Fail;
+            return BucketResult::Fail;
         }
 
         let bucket_index = self.find_bucket(contact.id);
@@ -138,10 +138,10 @@ impl RoutingTable {
 
         if let Some(c) = live.iter_mut().find(|c| c.id == *contact.id) {
             if c.addr != contact.addr {
-                return BucketStatus::Fail;
+                return BucketResult::Fail;
             } else {
                 c.clear_timeout();
-                return BucketStatus::Success;
+                return BucketResult::Success;
             }
         }
 
@@ -152,23 +152,23 @@ impl RoutingTable {
 
         if let Some((i, c)) = maybe_extra {
             if c.addr != contact.addr {
-                return BucketStatus::Fail;
+                return BucketResult::Fail;
             }
 
             c.clear_timeout();
 
             if c.is_pinged() && live.len() < BUCKET_SIZE {
                 live.push(extra.remove(i));
-                return BucketStatus::Success;
+                return BucketResult::Success;
             }
 
             if can_split {
-                return BucketStatus::RequireSplit;
+                return BucketResult::RequireSplit;
             }
 
-            let status = self.replace_node_impl(contact, bucket_index);
-            if !matches!(status, BucketStatus::RequireSplit) {
-                return status;
+            let result = self.replace_node_impl(contact, bucket_index);
+            if !matches!(result, BucketResult::RequireSplit) {
+                return result;
             }
         }
 
@@ -176,25 +176,25 @@ impl RoutingTable {
 
         if live.len() < BUCKET_SIZE {
             live.push(contact.as_owned());
-            return BucketStatus::Success;
+            return BucketResult::Success;
         }
 
         if can_split {
-            return BucketStatus::RequireSplit;
+            return BucketResult::RequireSplit;
         }
 
         extra.push(contact.as_owned());
-        BucketStatus::Success
+        BucketResult::Success
     }
 
-    fn replace_node_impl(&mut self, contact: &ContactRef<'_>, bucket_index: usize) -> BucketStatus {
+    fn replace_node_impl(&mut self, contact: &ContactRef<'_>, bucket_index: usize) -> BucketResult {
         let Bucket { live, extra } = &mut self.buckets[bucket_index];
         debug_assert!(live.len() >= BUCKET_SIZE);
 
         if replace_stale(live, contact) || replace_stale(extra, contact) {
-            BucketStatus::Success
+            BucketResult::Success
         } else {
-            BucketStatus::Fail
+            BucketResult::Fail
         }
     }
 
