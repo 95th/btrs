@@ -108,6 +108,14 @@ impl Server {
                 warn!("{}", e);
             }
         }
+
+        for (_, id) in pending {
+            if let Some(c) = self.table.find_contact(&id) {
+                c.status = ContactStatus::FAILED;
+                c.timed_out();
+            }
+        }
+
         Ok(())
     }
 

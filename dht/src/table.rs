@@ -120,6 +120,11 @@ impl RoutingTable {
         self.len() == 0
     }
 
+    pub fn find_contact(&mut self, id: &NodeId) -> Option<&mut Contact> {
+        let idx = self.find_bucket(id);
+        self.buckets[idx].live.iter_mut().find(|c| c.id == *id)
+    }
+
     fn add_contact_impl(&mut self, contact: &ContactRef<'_>) -> BucketResult {
         if self.router_nodes.contains(&contact.addr) {
             return BucketResult::Fail;
