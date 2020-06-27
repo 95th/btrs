@@ -4,7 +4,11 @@ use crate::msg::{AnnouncePeer, FindNode, GetPeers, Msg, MsgKind, TxnId};
 use crate::table::RoutingTable;
 use anyhow::Context;
 use ben::{Encode, Parser};
-use std::net::SocketAddr;
+use std::{
+    collections::HashMap,
+    net::SocketAddr,
+    time::{Duration, Instant},
+};
 use tokio::net::UdpSocket;
 
 pub struct Server {
@@ -72,9 +76,8 @@ impl Server {
             return Ok(());
         }
 
-        let start_txn = self.txn_id;
         let mut txn_id = self.txn_id.next();
-        let mut count = 0;
+        let mut pending = HashMap::new();
         for contact in closest {
             let msg = GetPeers {
                 id: own_id,
@@ -87,9 +90,9 @@ impl Server {
 
             match self.conn.send_to(&self.buf, contact.addr).await {
                 Ok(_) => {
+                    pending.insert(txn_id, contact.id.clone());
                     contact.status = ContactStatus::QUERIED;
                     txn_id = self.txn_id.next();
-                    count += 1;
                 }
                 Err(e) => {
                     contact.status = ContactStatus::FAILED;
@@ -98,35 +101,34 @@ impl Server {
             }
         }
 
-        let txn_range = start_txn..self.txn_id;
+        let timeout = Instant::now() + Duration::from_secs(5);
 
-        while count > 0 {
-            self.buf.resize(1000, 0);
-            let (n, rx_addr) = self.conn.recv_from(&mut self.buf[..]).await?;
-            count -= 1;
-            let msg = match Msg::parse(&self.buf[..n], &mut self.parser) {
-                Ok(msg) => msg,
-                Err(e) => {
-                    warn!("Error occurred while parsing DHT message: {}", e);
-                    continue;
-                }
-            };
-
-            info!("message: {:?}", msg);
-
-            if !txn_range.contains(&msg.txn_id) {
-                warn!("Response received from unexpected address: {}", rx_addr);
-                continue;
+        while !pending.is_empty() && Instant::now() < timeout {
+            if let Err(e) = self.read_get_peers_response(&mut pending).await {
+                warn!("{}", e);
             }
-
-            if !matches!(msg.kind, MsgKind::Response) {
-                warn!("Unexpected message type: {:?}", msg.kind);
-                continue;
-            }
-
-            self.table.read_nodes(&msg)?;
         }
         Ok(())
+    }
+
+    async fn read_get_peers_response(
+        &mut self,
+        pending: &mut HashMap<TxnId, NodeId>,
+    ) -> anyhow::Result<()> {
+        self.buf.resize(1000, 0);
+        let (n, _) = self.conn.recv_from(&mut self.buf[..]).await?;
+        let msg = Msg::parse(&self.buf[..n], &mut self.parser)?;
+
+        info!("message: {:?}", msg);
+        let id = pending
+            .remove(&msg.txn_id)
+            .context("Response received from unexpected address")?;
+
+        let rx_id = msg.get_id().context("Node ID is required")?;
+        ensure!(rx_id == &id, "Node ID mismatch");
+        ensure!(msg.kind == MsgKind::Response, "Expected response");
+
+        self.table.read_nodes(&msg)
     }
 
     pub async fn announce(&mut self, info_hash: &NodeId) -> anyhow::Result<()> {

@@ -3,7 +3,7 @@ use anyhow::{bail, Context};
 use ben::{Encode, Encoder, Node as BencodeNode, Parser};
 use std::convert::TryInto;
 
-#[derive(Debug, Copy, Clone, PartialEq, PartialOrd)]
+#[derive(Debug, Copy, Clone, PartialEq, PartialOrd, Eq, Ord, Hash)]
 pub struct TxnId(pub u16);
 
 impl TxnId {
@@ -27,7 +27,7 @@ pub struct Msg<'a, 'p> {
     pub body: BencodeNode<'a, 'p>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialOrd, PartialEq)]
 pub enum MsgKind {
     Ping,
     FindNode,
@@ -65,6 +65,21 @@ impl<'a, 'p> Msg<'a, 'p> {
             kind,
             body: node,
         })
+    }
+
+    pub fn get_id(&self) -> Option<&NodeId> {
+        let dict = self.body.as_dict()?;
+        let inner = match self.kind {
+            MsgKind::Response => dict.get_dict(b"r")?,
+            _ => todo!(),
+        };
+        let id = inner.get_bytes(b"id")?;
+        if id.len() == 20 {
+            unsafe { Some(&*(id.as_ptr() as *const NodeId)) }
+        } else {
+            debug!("Unexpected ID length: {}", id.len());
+            None
+        }
     }
 }
 
