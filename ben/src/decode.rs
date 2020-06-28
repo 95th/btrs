@@ -1,15 +1,56 @@
+use crate::error::{Error, Result};
 use crate::token::{Token, TokenKind};
 use std::fmt;
 
+pub trait Decode<'a, 'p>: Sized {
+    fn decode(decoder: Decoder<'a, 'p>) -> Result<Self>;
+}
+
+impl<'a, 'p> Decode<'a, 'p> for &'a [u8] {
+    fn decode(decoder: Decoder<'a, 'p>) -> Result<Self> {
+        match decoder.as_bytes() {
+            Some(val) => Ok(val),
+            None => Err(Error::Other("Not a byte string")),
+        }
+    }
+}
+
+impl<'a, 'p> Decode<'a, 'p> for &'a str {
+    fn decode(decoder: Decoder<'a, 'p>) -> Result<Self> {
+        match decoder.as_str() {
+            Some(val) => Ok(val),
+            None => Err(Error::Other("Not a UTF-8 string")),
+        }
+    }
+}
+
+impl<'a, 'p> Decode<'a, 'p> for i64 {
+    fn decode(decoder: Decoder<'a, 'p>) -> Result<Self> {
+        match decoder.as_int() {
+            Some(val) => Ok(val),
+            None => Err(Error::Other("Not a integer")),
+        }
+    }
+}
+
+impl<'a, 'p> Decode<'a, 'p> for String {
+    fn decode(decoder: Decoder<'a, 'p>) -> Result<Self> {
+        match decoder.as_str() {
+            Some(val) => Ok(String::from(val)),
+            None => Err(Error::Other("Not a UTF-8 string")),
+        }
+    }
+}
+
 #[derive(PartialEq)]
 #[repr(C)]
-pub struct Node<'a, 'p> {
+pub struct Decoder<'a, 'p> {
     pub(crate) buf: &'a [u8],
     pub(crate) token: &'p Token,
     pub(crate) rest: &'p [Token],
 }
 
-impl fmt::Debug for Node<'_, '_> {
+impl fmt::Debug for Decoder<'_, '_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.token.kind {
             TokenKind::Int => write!(f, "{}", self.as_int().unwrap()),
@@ -23,10 +64,10 @@ impl fmt::Debug for Node<'_, '_> {
     }
 }
 
-impl<'a, 'p> Node<'a, 'p> {
+impl<'a, 'p> Decoder<'a, 'p> {
     pub(crate) fn new(buf: &'a [u8], tokens: &'p [Token]) -> Option<Self> {
         if let [token, rest @ ..] = tokens {
-            Some(Node { buf, token, rest })
+            Some(Decoder { buf, token, rest })
         } else {
             None
         }
@@ -333,10 +374,10 @@ impl<'a, 'p> List<'a, 'p> {
     }
 
     /// Returns the `Node` at the given index.
-    pub fn get(&self, i: usize) -> Option<Node<'a, 'p>> {
+    pub fn get(&self, i: usize) -> Option<Decoder<'a, 'p>> {
         let index = self.find_index(i)?;
         let tokens = self.rest.get(index..)?;
-        Node::new(self.buf, tokens)
+        Decoder::new(self.buf, tokens)
     }
 
     /// Returns the `Dict` at the given index.
@@ -406,7 +447,7 @@ pub struct ListIter<'a, 'p> {
 }
 
 impl<'a, 'p> Iterator for ListIter<'a, 'p> {
-    type Item = Node<'a, 'p>;
+    type Item = Decoder<'a, 'p>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.pos >= self.total {
@@ -415,7 +456,7 @@ impl<'a, 'p> Iterator for ListIter<'a, 'p> {
 
         debug_assert!(self.index < self.tokens.len());
         let tokens = self.tokens.get(self.index..)?;
-        let node = Node::new(self.buf, tokens)?;
+        let node = Decoder::new(self.buf, tokens)?;
 
         self.index += node.token.next as usize;
         self.pos += 1;
@@ -470,7 +511,7 @@ impl<'a, 'p> Dict<'a, 'p> {
     }
 
     /// Returns the `Node` for the given key.
-    pub fn get(&self, key: &[u8]) -> Option<Node<'a, 'p>> {
+    pub fn get(&self, key: &[u8]) -> Option<Decoder<'a, 'p>> {
         self.iter()
             .find(|(k, _)| k.as_bytes() == Some(key))
             .map(|(_, v)| v)
@@ -527,7 +568,7 @@ pub struct DictIter<'a, 'p> {
 }
 
 impl<'a, 'p> Iterator for DictIter<'a, 'p> {
-    type Item = (Node<'a, 'p>, Node<'a, 'p>);
+    type Item = (Decoder<'a, 'p>, Decoder<'a, 'p>);
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.pos >= self.total {
@@ -536,14 +577,14 @@ impl<'a, 'p> Iterator for DictIter<'a, 'p> {
 
         debug_assert!(self.index < self.tokens.len());
         let tokens = self.tokens.get(self.index..)?;
-        let key = Node::new(self.buf, tokens)?;
+        let key = Decoder::new(self.buf, tokens)?;
 
         debug_assert_eq!(TokenKind::ByteStr, key.token.kind);
         self.index += key.token.next as usize;
 
         debug_assert!(self.index < self.tokens.len());
         let tokens = self.tokens.get(self.index..)?;
-        let val = Node::new(self.buf, tokens)?;
+        let val = Decoder::new(self.buf, tokens)?;
 
         self.index += val.token.next as usize;
         self.pos += 1;

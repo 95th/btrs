@@ -1,4 +1,4 @@
-use crate::decode::Node;
+use crate::decode::{Decode, Decoder};
 use crate::error::{Error, Result};
 use crate::token::{Token, TokenKind};
 
@@ -38,8 +38,25 @@ impl Parser {
         }
     }
 
+    pub fn parse_into<'a, 'p, T>(&'p mut self, buf: &'a [u8]) -> Result<T>
+    where
+        T: Decode<'a, 'p>,
+    {
+        let decoder = self.parse(buf)?;
+        T::decode(decoder)
+    }
+
+    pub fn parse_prefix_into<'a, 'p, T>(&'p mut self, buf: &'a [u8]) -> Result<(T, usize)>
+    where
+        T: Decode<'a, 'p>,
+    {
+        let (decoder, pos) = self.parse_prefix(buf)?;
+        let t = T::decode(decoder)?;
+        Ok((t, pos))
+    }
+
     /// Parse a bencoded slice and returns a `Node` object
-    pub fn parse<'a, 'p>(&'p mut self, buf: &'a [u8]) -> Result<Node<'a, 'p>> {
+    pub fn parse<'a, 'p>(&'p mut self, buf: &'a [u8]) -> Result<Decoder<'a, 'p>> {
         let (node, len) = self.parse_prefix(buf)?;
         if len == buf.len() {
             Ok(node)
@@ -55,7 +72,7 @@ impl Parser {
     /// number of bytes processed.
     ///
     /// It's useful when there is trailing data after the bencoded bytes.
-    pub fn parse_prefix<'a, 'p>(&'p mut self, buf: &'a [u8]) -> Result<(Node<'a, 'p>, usize)> {
+    pub fn parse_prefix<'a, 'p>(&'p mut self, buf: &'a [u8]) -> Result<(Decoder<'a, 'p>, usize)> {
         if buf.is_empty() {
             return Err(Error::Eof);
         }
@@ -151,7 +168,7 @@ impl Parser {
                 }
             }
         }
-        let node = Node::new(buf, &self.tokens).ok_or_else(|| Error::Eof)?;
+        let node = Decoder::new(buf, &self.tokens).ok_or_else(|| Error::Eof)?;
         Ok((node, self.pos))
     }
 

@@ -58,7 +58,7 @@ impl Server {
             ensure!(rx_addr == *addr, "Address mismatch");
             trace!("Received: {} bytes", n);
 
-            let msg = Msg::parse(&buf[..n], parser)?;
+            let msg = parser.parse_into::<Msg>(&buf[..n])?;
             trace!("Data: {:#?}", msg);
             ensure!(msg.txn_id == txn_id, "Transaction ID mismatch");
 
@@ -125,7 +125,7 @@ impl Server {
     ) -> anyhow::Result<()> {
         self.buf.resize(1000, 0);
         let (n, _) = self.conn.recv_from(&mut self.buf[..]).await?;
-        let msg = Msg::parse(&self.buf[..n], &mut self.parser)?;
+        let msg = self.parser.parse_into::<Msg>(&self.buf[..n])?;
 
         info!("message: {:?}", msg);
         let id = pending
@@ -172,7 +172,8 @@ impl Server {
             if let Some(i) = pending.iter().position(|a| *a == rx_addr) {
                 pending.remove(i);
             }
-            let msg = match Msg::parse(&self.buf[..n], &mut self.parser) {
+            let result = self.parser.parse_into::<Msg>(&self.buf[..n]);
+            let msg = match result {
                 Ok(msg) => msg,
                 Err(e) => {
                     trace!("{}", e);

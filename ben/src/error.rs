@@ -18,6 +18,9 @@ pub enum Error {
 
     /// Integer Overflow
     Overflow { pos: usize },
+
+    /// Invalid character inside Bencode string
+    Other(&'static str),
 }
 
 impl fmt::Display for Error {
@@ -28,6 +31,7 @@ impl fmt::Display for Error {
             Self::Invalid { reason, pos } => write!(f, "Invalid input at {}: {}", pos, reason),
             Self::NoMemory => write!(f, "No tokens left to parse"),
             Self::Overflow { pos } => write!(f, "Integer overflow at {}", pos),
+            Self::Other(reason) => f.write_str(reason),
         }
     }
 }

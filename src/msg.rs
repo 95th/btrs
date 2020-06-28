@@ -1,5 +1,5 @@
 use anyhow::Context;
-use ben::{Encode, Encoder, Node, Parser};
+use ben::{Decoder, Encode, Encoder, Parser};
 use std::io;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
@@ -262,7 +262,7 @@ impl Message {
 
 pub struct ExtendedMessage<'a, 'p> {
     pub id: u8,
-    pub value: Node<'a, 'p>,
+    pub value: Decoder<'a, 'p>,
     pub rest: &'a [u8],
 }
 
@@ -285,7 +285,7 @@ impl<'a, 'p> ExtendedMessage<'a, 'p> {
         self.id == 0
     }
 
-    pub fn node(&self) -> &Node<'_, '_> {
+    pub fn node(&self) -> &Decoder<'_, '_> {
         &self.value
     }
 

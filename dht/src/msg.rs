@@ -1,6 +1,6 @@
 use crate::id::NodeId;
-use anyhow::{bail, Context};
-use ben::{decode::Dict, Encode, Encoder, Node as BencodeNode, Parser};
+use ben::decode::Dict;
+use ben::{Decode, Decoder, Encode, Encoder};
 use std::convert::TryInto;
 
 #[derive(Debug, Copy, Clone, PartialEq, PartialOrd, Eq, Ord, Hash)]
@@ -35,38 +35,55 @@ pub struct Msg<'a, 'p> {
     pub kind: MsgKind,
     pub txn_id: TxnId,
     pub id: Option<&'a NodeId>,
-    pub body: BencodeNode<'a, 'p>,
+    pub body: Decoder<'a, 'p>,
 }
 
-impl<'a, 'p> Msg<'a, 'p> {
-    pub fn parse(buf: &'a [u8], parser: &'p mut Parser) -> anyhow::Result<Self> {
-        let node = parser.parse(buf)?;
-        let dict = node.as_dict().context("Message must be a dict")?;
+macro_rules! check {
+    ($expr:expr, $err:literal) => {
+        match $expr {
+            Some(val) => val,
+            None => return Err(ben::Error::Other($err)),
+        }
+    };
+}
 
-        let y = dict.get_bytes(b"y").context("Message type is required")?;
+impl<'a, 'p> Decode<'a, 'p> for Msg<'a, 'p> {
+    fn decode(decoder: Decoder<'a, 'p>) -> ben::Result<Self> {
+        use ben::Error::Other;
+
+        let dict = check!(decoder.as_dict(), "Not a dict");
+        let y = check!(dict.get_bytes(b"y"), "Message type is required");
+
         let kind = match y {
             b"q" => {
-                let q = dict.get_bytes(b"q").context("Query type is required")?;
+                let q = check!(dict.get_bytes(b"q"), "Query type is required");
                 match q {
                     b"ping" => MsgKind::Ping,
                     b"find_node" => MsgKind::FindNode,
                     b"get_peers" => MsgKind::GetPeers,
                     b"announce_peer" => MsgKind::AnnouncePeer,
-                    other => bail!("Unexpected query type: {:?}", other),
+                    other => {
+                        trace!("Unexpected Query type: {:?}", other);
+                        return Err(Other("Unexpected Query type"));
+                    }
                 }
             }
             b"r" => MsgKind::Response,
             b"e" => MsgKind::Error,
-            other => bail!("Unexpected message type: {:?}", other),
+            other => {
+                trace!("Unexpected Message type: {:?}", other);
+                return Err(Other("Unexpected Message type"));
+            }
         };
-        let txn_id = dict.get_bytes(b"t").context("Transaction ID is required")?;
-        let txn_id = txn_id.try_into()?;
+        let txn_id = check!(dict.get_bytes(b"t"), "Transaction ID is required");
+        let txn_id = check!(txn_id.try_into().ok(), "Transaction ID must be 2 bytes");
         let id = get_id(kind, dict);
+
         Ok(Self {
             kind,
             txn_id: TxnId(u16::from_be_bytes(txn_id)),
             id,
-            body: node,
+            body: decoder,
         })
     }
 }
@@ -212,6 +229,7 @@ impl Encode for Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ben::Parser;
 
     #[test]
     fn request_ping() {
@@ -317,7 +335,7 @@ mod tests {
     fn incoming_ping() {
         let expected: &[u8] = b"d1:ad2:id20:\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01e1:q4:ping1:t2:\x00\n1:y1:qe";
         let mut parser = Parser::new();
-        let msg = Msg::parse(expected, &mut parser).unwrap();
+        let msg: Msg = parser.parse_into(expected).unwrap();
         assert!(matches!(msg.kind, MsgKind::Ping));
     }
 
