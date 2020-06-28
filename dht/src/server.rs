@@ -132,7 +132,7 @@ impl Server {
             .remove(&msg.txn_id)
             .context("Response received from unexpected address")?;
 
-        let rx_id = msg.get_id().context("Node ID is required")?;
+        let rx_id = msg.id.context("Node ID is required")?;
         ensure!(rx_id == &id, "Node ID mismatch");
         ensure!(msg.kind == MsgKind::Response, "Expected response");
 

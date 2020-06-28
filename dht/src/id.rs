@@ -30,10 +30,6 @@ impl NodeId {
         Self([b; Self::LEN])
     }
 
-    pub fn is_zero(&self) -> bool {
-        self.0.iter().all(|b| *b == 0)
-    }
-
     pub fn gen() -> Self {
         let mut n = Self::new();
         rand::thread_rng().fill(&mut n.0[..]);
@@ -44,7 +40,7 @@ impl NodeId {
         rand::thread_rng().gen_range(lo, hi)
     }
 
-    pub fn decode_hex(hex: &[u8]) -> anyhow::Result<Self> {
+    pub fn from_hex(hex: &[u8]) -> anyhow::Result<Self> {
         let len = hex_decoder.decode_len(hex.len())?;
         ensure!(len == Self::LEN, "Invalid hex for node ID");
 
@@ -54,6 +50,10 @@ impl NodeId {
         }
 
         Ok(n)
+    }
+
+    pub fn is_zero(&self) -> bool {
+        self.0.iter().all(|b| *b == 0)
     }
 
     pub fn encode_hex(&self, buf: &mut [u8]) -> anyhow::Result<()> {
@@ -196,7 +196,7 @@ mod tests {
     #[test]
     fn decode_hex() {
         let h = b"3F3F3F3F3F3F3F3F3F3F3F3F3F3F3F3F3F3F3F3F";
-        let n = NodeId::decode_hex(h).unwrap();
+        let n = NodeId::from_hex(h).unwrap();
         assert_eq!(NodeId::of_byte(0x3F), n);
     }
 

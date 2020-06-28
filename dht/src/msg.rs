@@ -1,6 +1,6 @@
 use crate::id::NodeId;
 use anyhow::{bail, Context};
-use ben::{Encode, Encoder, Node as BencodeNode, Parser};
+use ben::{decode::Dict, Encode, Encoder, Node as BencodeNode, Parser};
 use std::convert::TryInto;
 
 #[derive(Debug, Copy, Clone, PartialEq, PartialOrd, Eq, Ord, Hash)]
@@ -20,14 +20,7 @@ impl Encode for TxnId {
     }
 }
 
-#[derive(Debug)]
-pub struct Msg<'a, 'p> {
-    pub txn_id: TxnId,
-    pub kind: MsgKind,
-    pub body: BencodeNode<'a, 'p>,
-}
-
-#[derive(Debug, PartialOrd, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialOrd, PartialEq)]
 pub enum MsgKind {
     Ping,
     FindNode,
@@ -35,6 +28,14 @@ pub enum MsgKind {
     AnnouncePeer,
     Response,
     Error,
+}
+
+#[derive(Debug)]
+pub struct Msg<'a, 'p> {
+    pub kind: MsgKind,
+    pub txn_id: TxnId,
+    pub id: Option<&'a NodeId>,
+    pub body: BencodeNode<'a, 'p>,
 }
 
 impl<'a, 'p> Msg<'a, 'p> {
@@ -60,26 +61,30 @@ impl<'a, 'p> Msg<'a, 'p> {
         };
         let txn_id = dict.get_bytes(b"t").context("Transaction ID is required")?;
         let txn_id = txn_id.try_into()?;
+        let id = get_id(kind, dict);
         Ok(Self {
-            txn_id: TxnId(u16::from_be_bytes(txn_id)),
             kind,
+            txn_id: TxnId(u16::from_be_bytes(txn_id)),
+            id,
             body: node,
         })
     }
+}
 
-    pub fn get_id(&self) -> Option<&NodeId> {
-        let dict = self.body.as_dict()?;
-        let inner = match self.kind {
-            MsgKind::Response => dict.get_dict(b"r")?,
-            _ => todo!(),
-        };
-        let id = inner.get_bytes(b"id")?;
-        if id.len() == 20 {
-            unsafe { Some(&*(id.as_ptr() as *const NodeId)) }
-        } else {
-            debug!("Unexpected ID length: {}", id.len());
-            None
-        }
+fn get_id<'a>(kind: MsgKind, dict: &Dict<'a, '_>) -> Option<&'a NodeId> {
+    use MsgKind::*;
+    let inner = match kind {
+        Response => dict.get_dict(b"r")?,
+        Ping | FindNode | GetPeers | AnnouncePeer => dict.get_dict(b"a")?,
+        Error => return None,
+    };
+    let id = inner.get_bytes(b"id")?;
+    if id.len() == 20 {
+        let ptr = id.as_ptr() as *const NodeId;
+        unsafe { Some(&*ptr) }
+    } else {
+        debug!("Unexpected ID length: {}", id.len());
+        None
     }
 }
 

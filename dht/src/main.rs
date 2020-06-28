@@ -10,7 +10,8 @@ async fn main() -> anyhow::Result<()> {
     let f = async {
         let mut server = Server::new(6881).await?;
         server.boostrap(addrs).await?;
-        server.get_peers(&NodeId::of_byte(1)).await
+        let info_hash = NodeId::from_hex(b"e8f5dec8c3e35f090a105da0da865d77099cf59e").unwrap();
+        server.get_peers(&info_hash).await
     };
     dht::future::timeout(f, 10).await?;
     Ok(())
