@@ -110,6 +110,12 @@ impl NodeId {
     }
 }
 
+impl From<[u8; Self::LEN]> for NodeId {
+    fn from(buf: [u8; Self::LEN]) -> Self {
+        Self(buf)
+    }
+}
+
 impl Encode for NodeId {
     fn encode<E: Encoder>(&self, enc: &mut E) {
         enc.add_bytes(&self.0[..]);

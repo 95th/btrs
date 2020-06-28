@@ -47,12 +47,6 @@ impl RoutingTable {
             self.split_bucket();
             trace!("Split the buckets, after count : {}", self.buckets.len());
 
-            if self.buckets.len() > 50 {
-                result = self.add_contact_impl(contact);
-                trace!("Try adding again, got: {:?}", result);
-                return matches!(result, BucketResult::Success);
-            }
-
             if let Some(last) = self.buckets.iter().last() {
                 if last.live.len() > BUCKET_SIZE {
                     continue;
@@ -344,5 +338,33 @@ mod tests {
         assert_eq!(rt.buckets[4].live.len(), 8);
         assert_eq!(rt.buckets[4].extra.len(), 1);
         assert_eq!(rt.buckets[5].live.len(), 7);
+    }
+
+    #[test]
+    fn test_closest() {
+        let mut table = RoutingTable::new(NodeId::of_byte(0));
+        let addr = SocketAddr::from(([0u8; 4], 100));
+
+        fn node(idx: usize) -> NodeId {
+            let mut buf = [0; 20];
+            buf[idx] = 1;
+            NodeId::from(buf)
+        }
+
+        for i in 0..20 {
+            let added = table.add_contact(&ContactRef { id: &node(i), addr });
+            assert!(added, "Adding contact failed at {}", i);
+        }
+
+        let mut closest = Vec::with_capacity(20);
+        let own_id = table.find_closest(&NodeId::of_byte(1), &mut closest);
+        assert_eq!(own_id, &NodeId::of_byte(0));
+
+        let mut closest_iter = closest.into_iter();
+        for i in 0..20 {
+            assert_eq!(closest_iter.next().unwrap().id, node(i));
+        }
+
+        assert!(closest_iter.next().is_none());
     }
 }
