@@ -200,8 +200,8 @@ pub struct List<'a> {
 }
 
 impl List<'_> {
-    /// create a new list
-    pub fn new(enc: &mut Vec<u8>) -> List<'_> {
+    /// Create a new list
+    fn new(enc: &mut Vec<u8>) -> List<'_> {
         enc.push(b'l');
         List { enc }
     }
@@ -253,7 +253,7 @@ pub struct Dict<'a> {
 
 impl Dict<'_> {
     /// Create a new dict
-    pub fn new(enc: &mut Vec<u8>) -> Dict<'_> {
+    fn new(enc: &mut Vec<u8>) -> Dict<'_> {
         enc.push(b'd');
         Dict {
             enc,
@@ -293,17 +293,18 @@ impl Dict<'_> {
 
     #[cfg(debug_assertions)]
     fn assert_key_ordering(&mut self, key: &str) {
+        let key = key.as_bytes();
         if let Some(last_key) = &mut self.last_key {
-            if key.as_bytes() < &last_key[..] {
+            if key < &last_key[..] {
                 panic!("Keys must be sorted");
             }
-            if key.as_bytes() == &last_key[..] {
+            if key == &last_key[..] {
                 panic!("Keys must be unique");
             }
             last_key.clear();
-            last_key.extend(key.as_bytes());
+            last_key.extend(key);
         } else {
-            self.last_key = Some(key.as_bytes().to_vec());
+            self.last_key = Some(key.to_vec());
         }
     }
 
@@ -330,7 +331,7 @@ pub struct OrderedDict<'a, 'k> {
 
 impl<'a, 'k> OrderedDict<'a, 'k> {
     /// Create a new dict
-    pub fn new(enc: &'a mut Vec<u8>) -> OrderedDict<'a, 'k> {
+    fn new(enc: &'a mut Vec<u8>) -> OrderedDict<'a, 'k> {
         OrderedDict {
             enc,
             entries: BTreeMap::new(),

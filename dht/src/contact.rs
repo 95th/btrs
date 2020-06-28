@@ -97,7 +97,7 @@ impl Contact {
 impl Encode for Contact {
     fn encode<E: Encoder>(&self, enc: &mut E) {
         let len = if self.addr.is_ipv4() { 6 } else { 18 };
-        let bytes = &mut enc.add_n_bytes(NodeId::LEN + len);
+        let bytes = &mut enc.add_n_bytes(20 + len);
         bytes.add(self.id.as_bytes());
         encode_addr(bytes, &self.addr);
     }

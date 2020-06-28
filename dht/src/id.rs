@@ -7,7 +7,7 @@ use std::ops::BitXor;
 
 #[derive(Clone, Default, PartialEq, PartialOrd, Eq, Ord)]
 #[repr(transparent)]
-pub struct NodeId(pub [u8; NodeId::LEN]);
+pub struct NodeId(pub [u8; 20]);
 
 impl fmt::Debug for NodeId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -16,8 +16,6 @@ impl fmt::Debug for NodeId {
 }
 
 impl NodeId {
-    pub const LEN: usize = 20;
-
     pub fn new() -> Self {
         Self::default()
     }
@@ -27,7 +25,7 @@ impl NodeId {
     }
 
     pub fn of_byte(b: u8) -> Self {
-        Self([b; Self::LEN])
+        Self([b; 20])
     }
 
     pub fn gen() -> Self {
@@ -42,7 +40,7 @@ impl NodeId {
 
     pub fn from_hex(hex: &[u8]) -> anyhow::Result<Self> {
         let len = hex_decoder.decode_len(hex.len())?;
-        ensure!(len == Self::LEN, "Invalid hex for node ID");
+        ensure!(len == 20, "Invalid hex for node ID");
 
         let mut n = Self::new();
         if let Err(e) = hex_decoder.decode_mut(hex, &mut n.0) {
@@ -105,13 +103,13 @@ impl NodeId {
         (self ^ other).lz()
     }
 
-    pub fn as_bytes(&self) -> &[u8; Self::LEN] {
+    pub fn as_bytes(&self) -> &[u8; 20] {
         &self.0
     }
 }
 
-impl From<[u8; Self::LEN]> for NodeId {
-    fn from(buf: [u8; Self::LEN]) -> Self {
+impl From<[u8; 20]> for NodeId {
+    fn from(buf: [u8; 20]) -> Self {
         Self(buf)
     }
 }
@@ -209,7 +207,7 @@ mod tests {
     #[test]
     fn encode_hex() {
         let n = NodeId::of_byte(0x3F);
-        let mut buf = [0; NodeId::LEN * 2];
+        let mut buf = [0; 40];
         n.encode_hex(&mut buf).unwrap();
         assert_eq!(b"3F3F3F3F3F3F3F3F3F3F3F3F3F3F3F3F3F3F3F3F"[..], buf[..]);
     }
