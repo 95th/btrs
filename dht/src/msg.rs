@@ -35,7 +35,7 @@ pub struct Msg<'a, 'p> {
     pub kind: MsgKind,
     pub txn_id: TxnId,
     pub id: Option<&'a NodeId>,
-    pub body: Decoder<'a, 'p>,
+    pub body: Dict<'a, 'p>,
 }
 
 macro_rules! check {
@@ -51,7 +51,7 @@ impl<'a, 'p> Decode<'a, 'p> for Msg<'a, 'p> {
     fn decode(decoder: Decoder<'a, 'p>) -> ben::Result<Self> {
         use ben::Error::Other;
 
-        let dict = check!(decoder.as_dict(), "Not a dict");
+        let dict = check!(decoder.to_dict(), "Not a dict");
         let y = check!(dict.get_bytes(b"y"), "Message type is required");
 
         let kind = match y {
@@ -77,13 +77,13 @@ impl<'a, 'p> Decode<'a, 'p> for Msg<'a, 'p> {
         };
         let txn_id = check!(dict.get_bytes(b"t"), "Transaction ID is required");
         let txn_id = check!(txn_id.try_into().ok(), "Transaction ID must be 2 bytes");
-        let id = get_id(kind, dict);
+        let id = get_id(kind, &dict);
 
         Ok(Self {
             kind,
             txn_id: TxnId(u16::from_be_bytes(txn_id)),
             id,
-            body: decoder,
+            body: dict,
         })
     }
 }

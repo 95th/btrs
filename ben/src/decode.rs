@@ -15,15 +15,19 @@ impl<'a, 'p> Decode<'a, 'p> for Decoder<'a, 'p> {
 
 impl<'a, 'p> Decode<'a, 'p> for List<'a, 'p> {
     fn decode(decoder: Decoder<'a, 'p>) -> Result<Self> {
-        decoder.to_list().ok_or_else(|| Error::Other("Not a list"))
+        match decoder.to_list() {
+            Some(dict) => Ok(dict),
+            None => Err(Error::TypeMismatch("Not a list")),
+        }
     }
 }
 
 impl<'a, 'p> Decode<'a, 'p> for Dict<'a, 'p> {
     fn decode(decoder: Decoder<'a, 'p>) -> Result<Self> {
-        decoder
-            .to_dict()
-            .ok_or_else(|| Error::Other("Not a dictionary"))
+        match decoder.to_dict() {
+            Some(dict) => Ok(dict),
+            None => Err(Error::TypeMismatch("Not a dictionary")),
+        }
     }
 }
 
@@ -31,7 +35,7 @@ impl<'a, 'p> Decode<'a, 'p> for &'a [u8] {
     fn decode(decoder: Decoder<'a, 'p>) -> Result<Self> {
         match decoder.as_bytes() {
             Some(val) => Ok(val),
-            None => Err(Error::Other("Not a byte string")),
+            None => Err(Error::TypeMismatch("Not a byte string")),
         }
     }
 }
@@ -40,7 +44,7 @@ impl<'a, 'p> Decode<'a, 'p> for Vec<u8> {
     fn decode(decoder: Decoder<'a, 'p>) -> Result<Self> {
         match decoder.as_bytes() {
             Some(val) => Ok(val.to_vec()),
-            None => Err(Error::Other("Not a byte string")),
+            None => Err(Error::TypeMismatch("Not a byte string")),
         }
     }
 }
@@ -49,7 +53,7 @@ impl<'a, 'p> Decode<'a, 'p> for &'a str {
     fn decode(decoder: Decoder<'a, 'p>) -> Result<Self> {
         match decoder.as_str() {
             Some(val) => Ok(val),
-            None => Err(Error::Other("Not a UTF-8 string")),
+            None => Err(Error::TypeMismatch("Not a UTF-8 string")),
         }
     }
 }
@@ -58,7 +62,7 @@ impl<'a, 'p> Decode<'a, 'p> for i64 {
     fn decode(decoder: Decoder<'a, 'p>) -> Result<Self> {
         match decoder.as_int() {
             Some(val) => Ok(val),
-            None => Err(Error::Other("Not a integer")),
+            None => Err(Error::TypeMismatch("Not a integer")),
         }
     }
 }
@@ -67,7 +71,7 @@ impl<'a, 'p> Decode<'a, 'p> for String {
     fn decode(decoder: Decoder<'a, 'p>) -> Result<Self> {
         match decoder.as_str() {
             Some(val) => Ok(String::from(val)),
-            None => Err(Error::Other("Not a UTF-8 string")),
+            None => Err(Error::TypeMismatch("Not a UTF-8 string")),
         }
     }
 }
@@ -678,13 +682,7 @@ mod tests {
         let s = b"de";
         let parser = &mut Parser::new();
         let err = parser.parse::<List>(s).unwrap_err();
-        assert_eq!(
-            err,
-            Error::Invalid {
-                reason: "Not a list",
-                pos: 0
-            }
-        );
+        assert_eq!(err, Error::TypeMismatch("Not a list"));
     }
 
     #[test]
