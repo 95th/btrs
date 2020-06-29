@@ -36,6 +36,15 @@ impl<'a, 'p> Decode<'a, 'p> for &'a [u8] {
     }
 }
 
+impl<'a, 'p> Decode<'a, 'p> for Vec<u8> {
+    fn decode(decoder: Decoder<'a, 'p>) -> Result<Self> {
+        match decoder.as_bytes() {
+            Some(val) => Ok(val.to_vec()),
+            None => Err(Error::Other("Not a byte string")),
+        }
+    }
+}
+
 impl<'a, 'p> Decode<'a, 'p> for &'a str {
     fn decode(decoder: Decoder<'a, 'p>) -> Result<Self> {
         match decoder.as_str() {
@@ -616,7 +625,7 @@ impl<'a, 'p> Iterator for DictIter<'a, 'p> {
 
 #[cfg(test)]
 mod tests {
-    use super::Decoder;
+    use super::*;
     use crate::parse::*;
     use crate::Error;
 
@@ -624,8 +633,7 @@ mod tests {
     fn list_get() {
         let s = b"ld1:alee1:be";
         let parser = &mut Parser::new();
-        let decoder = parser.parse::<Decoder>(s).unwrap();
-        let list = decoder.as_list().unwrap();
+        let list = parser.parse::<List>(s).unwrap();
         let n = list.get(1).unwrap();
         assert_eq!(b"b", n.as_raw_bytes());
     }
@@ -634,33 +642,31 @@ mod tests {
     fn list_get_nested() {
         let s = b"l1:ad1:al1:aee1:be";
         let parser = &mut Parser::new();
-        let decoder = parser.parse::<Decoder>(s).unwrap();
-        let decoder = decoder.as_list().unwrap();
-        assert_eq!(b"a", decoder.get(0).unwrap().as_raw_bytes());
-        assert_eq!(b"d1:al1:aee", decoder.get(1).unwrap().as_raw_bytes());
-        assert_eq!(b"b", decoder.get(2).unwrap().as_raw_bytes());
-        assert_eq!(None, decoder.get(3));
+        let list = parser.parse::<List>(s).unwrap();
+        assert_eq!(b"a", list.get(0).unwrap().as_raw_bytes());
+        assert_eq!(b"d1:al1:aee", list.get(1).unwrap().as_raw_bytes());
+        assert_eq!(b"b", list.get(2).unwrap().as_raw_bytes());
+        assert_eq!(None, list.get(3));
     }
 
     #[test]
     fn list_get_overflow() {
         let s = b"l1:al1:ad1:al1:aee1:be1:be";
         let parser = &mut Parser::new();
-        let decoder = parser.parse::<Decoder>(s).unwrap();
-        let decoder = decoder.as_list().unwrap();
-        let decoder = decoder.get_list(1).unwrap();
-        assert_eq!(b"a", decoder.get(0).unwrap().as_raw_bytes());
-        assert_eq!(b"d1:al1:aee", decoder.get(1).unwrap().as_raw_bytes());
-        assert_eq!(b"b", decoder.get(2).unwrap().as_raw_bytes());
-        assert_eq!(None, decoder.get(3));
+        let list = parser.parse::<List>(s).unwrap();
+        let list = list.get_list(1).unwrap();
+        assert_eq!(b"a", list.get(0).unwrap().as_raw_bytes());
+        assert_eq!(b"d1:al1:aee", list.get(1).unwrap().as_raw_bytes());
+        assert_eq!(b"b", list.get(2).unwrap().as_raw_bytes());
+        assert_eq!(None, list.get(3));
     }
 
     #[test]
     fn list_iter() {
         let s = b"l1:ad1:al1:aee1:be";
         let parser = &mut Parser::new();
-        let decoder = parser.parse::<Decoder>(s).unwrap();
-        let mut iter = decoder.as_list().unwrap().iter();
+        let list = parser.parse::<List>(s).unwrap();
+        let mut iter = list.iter();
         assert_eq!(b"a", iter.next().unwrap().as_raw_bytes());
         assert_eq!(b"d1:al1:aee", iter.next().unwrap().as_raw_bytes());
         assert_eq!(b"b", iter.next().unwrap().as_raw_bytes());
@@ -671,17 +677,22 @@ mod tests {
     fn list_iter_not_a_list() {
         let s = b"de";
         let parser = &mut Parser::new();
-        let decoder = parser.parse::<Decoder>(s).unwrap();
-        let decoder = decoder.as_list();
-        assert!(decoder.is_none());
+        let err = parser.parse::<List>(s).unwrap_err();
+        assert_eq!(
+            err,
+            Error::Invalid {
+                reason: "Not a list",
+                pos: 0
+            }
+        );
     }
 
     #[test]
     fn dict_iter() {
         let s = b"d1:a2:bc3:def4:ghije";
         let parser = &mut Parser::new();
-        let decoder = parser.parse::<Decoder>(s).unwrap();
-        let mut iter = decoder.as_dict().unwrap().iter();
+        let dict = parser.parse::<Dict>(s).unwrap();
+        let mut iter = dict.iter();
 
         let (k, v) = iter.next().unwrap();
         assert_eq!(b"a", k.as_raw_bytes());
@@ -698,8 +709,8 @@ mod tests {
     fn dict_iter_2() {
         let s = b"d1:alee";
         let parser = &mut Parser::new();
-        let decoder = parser.parse::<Decoder>(s).unwrap();
-        let mut iter = decoder.as_dict().unwrap().iter();
+        let dict = parser.parse::<Dict>(s).unwrap();
+        let mut iter = dict.iter();
 
         let (k, v) = iter.next().unwrap();
         assert_eq!(b"a", k.as_raw_bytes());
@@ -712,8 +723,8 @@ mod tests {
     fn dict_iter_inside_list() {
         let s = b"ld1:alee1:a1:ae";
         let parser = &mut Parser::new();
-        let decoder = parser.parse::<Decoder>(s).unwrap();
-        let mut list_iter = decoder.as_list().unwrap().iter();
+        let list = parser.parse::<List>(s).unwrap();
+        let mut list_iter = list.iter();
 
         let dict = list_iter.next().unwrap();
         assert_eq!(b"a", list_iter.next().unwrap().as_raw_bytes());
@@ -733,22 +744,22 @@ mod tests {
     fn int_value() {
         let s = b"i12e";
         let parser = &mut Parser::new();
-        let decoder = parser.parse::<Decoder>(s).unwrap();
-        assert_eq!(12, decoder.as_int().unwrap());
+        let n = parser.parse::<i64>(s).unwrap();
+        assert_eq!(12, n);
     }
 
     #[test]
     fn int_value_negative() {
         let s = b"i-12e";
         let parser = &mut Parser::new();
-        let decoder = parser.parse::<Decoder>(s).unwrap();
-        assert_eq!(-12, decoder.as_int().unwrap());
+        let n = parser.parse::<i64>(s).unwrap();
+        assert_eq!(-12, n);
     }
 
     #[test]
     fn int_value_invalid() {
         let s = b"ixyze";
-        let err = Parser::new().parse::<Decoder>(s).unwrap_err();
+        let err = Parser::new().parse::<i64>(s).unwrap_err();
         assert_eq!(Error::Unexpected { pos: 1 }, err);
     }
 
@@ -756,16 +767,15 @@ mod tests {
     fn str_value() {
         let s = b"5:abcde";
         let parser = &mut Parser::new();
-        let decoder = parser.parse::<Decoder>(s).unwrap();
-        assert_eq!(b"abcde", decoder.as_bytes().unwrap());
+        let bytes = parser.parse::<&[u8]>(s).unwrap();
+        assert_eq!(b"abcde", bytes);
     }
 
     #[test]
     fn dict_get() {
         let s = b"d1:ai1e1:bi2ee";
         let parser = &mut Parser::new();
-        let decoder = parser.parse::<Decoder>(s).unwrap();
-        let dict = decoder.as_dict().unwrap();
+        let dict = parser.parse::<Dict>(s).unwrap();
         let b = dict.get(b"b").unwrap();
         assert_eq!(2, b.as_int().unwrap());
     }
@@ -774,8 +784,7 @@ mod tests {
     fn dict_get_invalid() {
         let s = b"d1:ai1e1:bi2ee";
         let parser = &mut Parser::new();
-        let decoder = parser.parse::<Decoder>(s).unwrap();
-        let dict = decoder.as_dict().unwrap();
+        let dict = parser.parse::<Dict>(s).unwrap();
         assert!(dict.get_dict(b"b").is_none());
         assert!(dict.get_list(b"b").is_none());
     }
@@ -784,10 +793,9 @@ mod tests {
     fn list_get_invalid() {
         let s = b"l1:a1:be";
         let parser = &mut Parser::new();
-        let decoder = parser.parse::<Decoder>(s).unwrap();
-        let dict = decoder.as_list().unwrap();
-        assert!(dict.get_dict(0).is_none());
-        assert!(dict.get_list(1).is_none());
+        let list = parser.parse::<List>(s).unwrap();
+        assert!(list.get_dict(0).is_none());
+        assert!(list.get_list(1).is_none());
     }
 
     #[test]
@@ -821,50 +829,50 @@ mod tests {
     fn empty_dict_len() {
         let s = b"de";
         let parser = &mut Parser::new();
-        let decoder = parser.parse::<Decoder>(s).unwrap();
-        assert!(decoder.as_dict().unwrap().is_empty());
+        let dict = parser.parse::<Dict>(s).unwrap();
+        assert!(dict.is_empty());
     }
 
     #[test]
     fn non_empty_dict_len() {
         let s = b"d1:a1:be";
         let parser = &mut Parser::new();
-        let decoder = parser.parse::<Decoder>(s).unwrap();
-        assert!(!decoder.as_dict().unwrap().is_empty());
-        assert_eq!(decoder.as_dict().unwrap().len(), 1);
+        let dict = parser.parse::<Dict>(s).unwrap();
+        assert!(!dict.is_empty());
+        assert_eq!(dict.len(), 1);
     }
 
     #[test]
     fn non_empty_dict_nested_len() {
         let s = b"d1:al1:ad1:al1:aee1:bee";
         let parser = &mut Parser::new();
-        let decoder = parser.parse::<Decoder>(s).unwrap();
-        assert!(!decoder.as_dict().unwrap().is_empty());
-        assert_eq!(decoder.as_dict().unwrap().len(), 1);
+        let dict = parser.parse::<Dict>(s).unwrap();
+        assert!(!dict.is_empty());
+        assert_eq!(dict.len(), 1);
     }
     #[test]
     fn empty_list_len() {
         let s = b"le";
         let parser = &mut Parser::new();
-        let decoder = parser.parse::<Decoder>(s).unwrap();
-        assert!(decoder.as_list().unwrap().is_empty());
+        let list = parser.parse::<List>(s).unwrap();
+        assert!(list.is_empty());
     }
 
     #[test]
     fn non_empty_list_len() {
         let s = b"l1:a1:be";
         let parser = &mut Parser::new();
-        let decoder = parser.parse::<Decoder>(s).unwrap();
-        assert!(!decoder.as_list().unwrap().is_empty());
-        assert_eq!(decoder.as_list().unwrap().len(), 2);
+        let list = parser.parse::<List>(s).unwrap();
+        assert!(!list.is_empty());
+        assert_eq!(list.len(), 2);
     }
 
     #[test]
     fn non_empty_list_nested_len() {
         let s = b"l1:ad1:al1:aee1:be";
         let parser = &mut Parser::new();
-        let decoder = parser.parse::<Decoder>(s).unwrap();
-        assert!(!decoder.as_list().unwrap().is_empty());
-        assert_eq!(decoder.as_list().unwrap().len(), 3);
+        let list = parser.parse::<List>(s).unwrap();
+        assert!(!list.is_empty());
+        assert_eq!(list.len(), 3);
     }
 }
