@@ -7,6 +7,7 @@ use crate::msg::Message;
 use crate::peer::{self, Peer, PeerId};
 use crate::work::{Piece, PieceWork, WorkQueue};
 use anyhow::Context;
+use ben::decode::Dict;
 use ben::Parser;
 use futures::channel::mpsc::Sender;
 use futures::future::poll_fn;
@@ -52,8 +53,7 @@ impl fmt::Debug for TorrentFile {
 impl TorrentFile {
     pub fn parse(bytes: impl AsRef<[u8]>) -> crate::Result<TorrentFile> {
         let mut parser = Parser::new();
-        let value = parser.parse(bytes.as_ref())?;
-        let dict = value.as_dict().context("Expected a dict")?;
+        let dict = parser.parse::<Dict>(bytes.as_ref())?;
         let announce = dict.get_str(b"announce").context("`announce` not found")?;
         let info_bytes = dict
             .get(b"info")

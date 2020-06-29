@@ -6,6 +6,7 @@ use crate::msg::{Message, MetadataMsg};
 use crate::peer::{Peer, PeerId};
 use crate::torrent::Torrent;
 use anyhow::Context;
+use ben::decode::Dict;
 use ben::{Encode, Parser};
 use futures::stream::FuturesUnordered;
 use futures::stream::StreamExt;
@@ -73,8 +74,7 @@ impl MagnetUri {
 
     fn read_info(&self, data: &[u8]) -> Option<TorrentInfo> {
         let mut parser = Parser::new();
-        let node = parser.parse(&data).ok()?;
-        let info_dict = node.as_dict()?;
+        let info_dict = parser.parse::<Dict>(&data).ok()?;
         let length = info_dict.get_int(b"length")? as usize;
         let name = info_dict.get_str(b"name").unwrap_or_default().to_string();
         let piece_len = info_dict.get_int(b"piece length")? as usize;

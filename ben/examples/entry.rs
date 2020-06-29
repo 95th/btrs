@@ -1,3 +1,4 @@
+use ben::decode::List;
 use ben::{Encoder, Parser};
 
 fn main() {
@@ -15,6 +16,6 @@ fn main() {
     list.finish();
 
     let mut parser = Parser::new();
-    let n = parser.parse(&v).unwrap();
+    let n = parser.parse::<List>(&v).unwrap();
     println!("{:#?}", n);
 }

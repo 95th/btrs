@@ -3,7 +3,7 @@ use crate::id::NodeId;
 use crate::msg::{AnnouncePeer, FindNode, GetPeers, Msg, MsgKind, TxnId};
 use crate::table::RoutingTable;
 use anyhow::Context;
-use ben::{Encode, Parser};
+use ben::{Decoder, Encode, Parser};
 use std::{
     collections::HashMap,
     net::SocketAddr,
@@ -49,7 +49,7 @@ impl Server {
 
             buf.clear();
             request.encode(buf);
-            trace!("Sending: {:#?}", parser.parse(buf).unwrap());
+            trace!("Sending: {:#?}", parser.parse::<Decoder>(buf).unwrap());
             let n = self.conn.send_to(buf, addr).await?;
             trace!("Sent: {} bytes", n);
 
@@ -58,7 +58,7 @@ impl Server {
             ensure!(rx_addr == *addr, "Address mismatch");
             trace!("Received: {} bytes", n);
 
-            let msg = parser.parse_into::<Msg>(&buf[..n])?;
+            let msg = parser.parse::<Msg>(&buf[..n])?;
             trace!("Data: {:#?}", msg);
             ensure!(msg.txn_id == txn_id, "Transaction ID mismatch");
 
@@ -125,7 +125,7 @@ impl Server {
     ) -> anyhow::Result<()> {
         self.buf.resize(1000, 0);
         let (n, _) = self.conn.recv_from(&mut self.buf[..]).await?;
-        let msg = self.parser.parse_into::<Msg>(&self.buf[..n])?;
+        let msg = self.parser.parse::<Msg>(&self.buf[..n])?;
 
         info!("message: {:?}", msg);
         let id = pending
@@ -153,7 +153,10 @@ impl Server {
 
         self.buf.clear();
         req.encode(&mut self.buf);
-        trace!("Sending: {:#?}", self.parser.parse(&self.buf).unwrap());
+        trace!(
+            "Sending: {:#?}",
+            self.parser.parse::<Decoder>(&self.buf).unwrap()
+        );
 
         let mut closest = Vec::with_capacity(8);
         self.table.find_closest(info_hash, &mut closest);
@@ -172,7 +175,7 @@ impl Server {
             if let Some(i) = pending.iter().position(|a| *a == rx_addr) {
                 pending.remove(i);
             }
-            let result = self.parser.parse_into::<Msg>(&self.buf[..n]);
+            let result = self.parser.parse::<Msg>(&self.buf[..n]);
             let msg = match result {
                 Ok(msg) => msg,
                 Err(e) => {

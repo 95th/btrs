@@ -1,6 +1,7 @@
 use crate::announce::{AnnounceRequest, AnnounceResponse};
 use crate::peer::Peer;
 use anyhow::Context;
+use ben::decode::Dict;
 use ben::Parser;
 use reqwest::Client;
 use std::collections::HashSet;
@@ -23,8 +24,7 @@ pub async fn announce(req: AnnounceRequest<'_>) -> crate::Result<AnnounceRespons
 
     debug!("Announce response: {:?}", data);
     let mut parser = Parser::new();
-    let value = parser.parse(&data)?;
-    let value = value.as_dict().context("Expected a dict")?;
+    let value = parser.parse::<Dict>(&data)?;
     let interval = value
         .get(b"interval")
         .and_then(|v| v.as_int())

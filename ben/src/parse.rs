@@ -38,28 +38,14 @@ impl Parser {
         }
     }
 
-    pub fn parse_into<'a, 'p, T>(&'p mut self, buf: &'a [u8]) -> Result<T>
+    /// Parse a bencoded slice and returns the parsed object
+    pub fn parse<'a, 'p, T>(&'p mut self, buf: &'a [u8]) -> Result<T>
     where
         T: Decode<'a, 'p>,
     {
-        let decoder = self.parse(buf)?;
-        T::decode(decoder)
-    }
-
-    pub fn parse_prefix_into<'a, 'p, T>(&'p mut self, buf: &'a [u8]) -> Result<(T, usize)>
-    where
-        T: Decode<'a, 'p>,
-    {
-        let (decoder, pos) = self.parse_prefix(buf)?;
-        let t = T::decode(decoder)?;
-        Ok((t, pos))
-    }
-
-    /// Parse a bencoded slice and returns a `Node` object
-    pub fn parse<'a, 'p>(&'p mut self, buf: &'a [u8]) -> Result<Decoder<'a, 'p>> {
-        let (node, len) = self.parse_prefix(buf)?;
+        let (dec, len) = self.parse_prefix_impl(buf)?;
         if len == buf.len() {
-            Ok(node)
+            T::decode(dec)
         } else {
             Err(Error::Invalid {
                 reason: "Extra bytes at the end",
@@ -68,11 +54,20 @@ impl Parser {
         }
     }
 
-    /// Parse one object from the beginning of given slice and return the parsed `Node` and
+    /// Parse one object from the beginning of given slice and return the parsed object and
     /// number of bytes processed.
     ///
     /// It's useful when there is trailing data after the bencoded bytes.
-    pub fn parse_prefix<'a, 'p>(&'p mut self, buf: &'a [u8]) -> Result<(Decoder<'a, 'p>, usize)> {
+    pub fn parse_prefix<'a, 'p, T>(&'p mut self, buf: &'a [u8]) -> Result<(T, usize)>
+    where
+        T: Decode<'a, 'p>,
+    {
+        let (dec, pos) = self.parse_prefix_impl(buf)?;
+        let t = T::decode(dec)?;
+        Ok((t, pos))
+    }
+
+    fn parse_prefix_impl<'a, 'p>(&'p mut self, buf: &'a [u8]) -> Result<(Decoder<'a, 'p>, usize)> {
         if buf.is_empty() {
             return Err(Error::Eof);
         }
@@ -168,8 +163,8 @@ impl Parser {
                 }
             }
         }
-        let node = Decoder::new(buf, &self.tokens).ok_or_else(|| Error::Eof)?;
-        Ok((node, self.pos))
+        let decoder = Decoder::new(buf, &self.tokens).ok_or_else(|| Error::Eof)?;
+        Ok((decoder, self.pos))
     }
 
     fn clear(&mut self) {
@@ -279,7 +274,7 @@ mod tests {
     fn parse_int() {
         let s = b"i12e";
         let mut parser = Parser::new();
-        parser.parse(s).unwrap();
+        parser.parse::<Decoder>(s).unwrap();
         assert_eq!(&[Token::new(TokenKind::Int, 1, 3)], &parser.tokens[..]);
     }
 
@@ -287,7 +282,7 @@ mod tests {
     fn parse_string() {
         let s = b"3:abc";
         let mut parser = Parser::new();
-        parser.parse(s).unwrap();
+        parser.parse::<Decoder>(s).unwrap();
         assert_eq!(&[Token::new(TokenKind::ByteStr, 2, 5)], &parser.tokens[..]);
     }
 
@@ -295,7 +290,7 @@ mod tests {
     fn parse_string_too_long() {
         let s = b"3:abcd";
         let mut parser = Parser::new();
-        let err = parser.parse(s).unwrap_err();
+        let err = parser.parse::<Decoder>(s).unwrap_err();
         assert_eq!(
             Error::Invalid {
                 reason: "Extra bytes at the end",
@@ -309,7 +304,7 @@ mod tests {
     fn parse_string_too_short() {
         let s = b"3:ab";
         let mut parser = Parser::new();
-        let err = parser.parse(s).unwrap_err();
+        let err = parser.parse::<Decoder>(s).unwrap_err();
         assert_eq!(Error::Eof, err);
     }
 
@@ -317,28 +312,28 @@ mod tests {
     fn empty_dict() {
         let s = b"de";
         let mut parser = Parser::new();
-        parser.parse(s).unwrap();
+        parser.parse::<Decoder>(s).unwrap();
         assert_eq!(&[Token::new(TokenKind::Dict, 0, 2)], &parser.tokens[..]);
     }
 
     #[test]
     fn unclosed_dict() {
         let s = b"d";
-        let err = Parser::new().parse(s).unwrap_err();
+        let err = Parser::new().parse::<Decoder>(s).unwrap_err();
         assert_eq!(Error::Eof, err);
     }
 
     #[test]
     fn key_only_dict() {
         let s = b"d1:ae";
-        let err = Parser::new().parse(s).unwrap_err();
+        let err = Parser::new().parse::<Decoder>(s).unwrap_err();
         assert_eq!(Error::Eof, err);
     }
 
     #[test]
     fn key_only_dict_2() {
         let s = b"d1:a1:a1:ae";
-        let err = Parser::new().parse(s).unwrap_err();
+        let err = Parser::new().parse::<Decoder>(s).unwrap_err();
         assert_eq!(Error::Eof, err);
     }
 
@@ -346,7 +341,7 @@ mod tests {
     fn dict_string_values() {
         let s = b"d1:a2:ab3:abc4:abcde";
         let mut parser = Parser::new();
-        parser.parse(s).unwrap();
+        parser.parse::<Decoder>(s).unwrap();
         assert_eq!(
             &[
                 Token::with_size(TokenKind::Dict, 0, 20, 4, 5),
@@ -363,7 +358,7 @@ mod tests {
     fn dict_mixed_values() {
         let s = b"d1:a1:b1:ci1e1:x1:y1:dde1:fle1:g1:he";
         let mut parser = Parser::new();
-        parser.parse(s).unwrap();
+        parser.parse::<Decoder>(s).unwrap();
         assert_eq!(
             &[
                 Token::with_size(TokenKind::Dict, 0, 36, 12, 13),
@@ -388,14 +383,14 @@ mod tests {
     fn empty_list() {
         let s = b"le";
         let mut parser = Parser::new();
-        parser.parse(s).unwrap();
+        parser.parse::<Decoder>(s).unwrap();
         assert_eq!(&[Token::new(TokenKind::List, 0, 2)], &parser.tokens[..]);
     }
 
     #[test]
     fn unclosed_list() {
         let s = b"l";
-        let err = Parser::new().parse(s).unwrap_err();
+        let err = Parser::new().parse::<Decoder>(s).unwrap_err();
         assert_eq!(Error::Eof, err);
     }
 
@@ -403,7 +398,7 @@ mod tests {
     fn list_string_values() {
         let s = b"l1:a2:ab3:abc4:abcde";
         let mut parser = Parser::new();
-        parser.parse(s).unwrap();
+        parser.parse::<Decoder>(s).unwrap();
         assert_eq!(
             &[
                 Token::with_size(TokenKind::List, 0, 20, 4, 5),
@@ -420,7 +415,7 @@ mod tests {
     fn list_nested() {
         let s = b"lllleeee";
         let mut parser = Parser::new();
-        parser.parse(s).unwrap();
+        parser.parse::<Decoder>(s).unwrap();
         assert_eq!(
             &[
                 Token::with_size(TokenKind::List, 0, 8, 1, 4),
@@ -436,7 +431,7 @@ mod tests {
     fn list_nested_complex() {
         let s = b"ld1:ald2:ablleeeeee";
         let mut parser = Parser::new();
-        parser.parse(s).unwrap();
+        parser.parse::<Decoder>(s).unwrap();
         assert_eq!(
             &[
                 Token::with_size(TokenKind::List, 0, 19, 1, 8),
@@ -456,7 +451,7 @@ mod tests {
     fn token_limit() {
         let s = b"l1:a2:ab3:abc4:abcde";
         let mut parser = Parser::with_token_limit(3);
-        let err = parser.parse(s).unwrap_err();
+        let err = parser.parse::<Decoder>(s).unwrap_err();
         assert_eq!(Error::NoMemory, err);
     }
 
@@ -468,28 +463,28 @@ mod tests {
                 reason: "Extra bytes at the end",
                 pos: 3,
             },
-            parser.parse(b"1:a1:b").unwrap_err()
+            parser.parse::<Decoder>(b"1:a1:b").unwrap_err()
         );
         assert_eq!(
             Error::Invalid {
                 reason: "Extra bytes at the end",
                 pos: 3,
             },
-            parser.parse(b"i1e1:b").unwrap_err()
+            parser.parse::<Decoder>(b"i1e1:b").unwrap_err()
         );
         assert_eq!(
             Error::Invalid {
                 reason: "Extra bytes at the end",
                 pos: 5,
             },
-            parser.parse(b"l1:aede").unwrap_err()
+            parser.parse::<Decoder>(b"l1:aede").unwrap_err()
         );
         assert_eq!(
             Error::Invalid {
                 reason: "Extra bytes at the end",
                 pos: 2,
             },
-            parser.parse(b"lel1:ae").unwrap_err()
+            parser.parse::<Decoder>(b"lel1:ae").unwrap_err()
         );
     }
 
@@ -497,7 +492,7 @@ mod tests {
     fn parse_prefix() {
         let s = b"lede";
         let mut parser = Parser::new();
-        let (_, len) = parser.parse_prefix(s).unwrap();
+        let (_, len) = parser.parse_prefix::<Decoder>(s).unwrap();
         assert_eq!(
             &[Token::with_size(TokenKind::List, 0, 2, 0, 1)],
             &parser.tokens[..]
@@ -509,7 +504,7 @@ mod tests {
     fn parse_prefix_in() {
         let s = b"lede";
         let mut parser = Parser::new();
-        let (_, len) = parser.parse_prefix(s).unwrap();
+        let (_, len) = parser.parse_prefix::<Decoder>(s).unwrap();
         assert_eq!(
             &[Token::with_size(TokenKind::List, 0, 2, 0, 1)],
             &parser.tokens[..]
@@ -521,7 +516,7 @@ mod tests {
     fn parse_empty_string() {
         let s = b"0:";
         let mut parser = Parser::new();
-        parser.parse(s).unwrap();
+        parser.parse::<Decoder>(s).unwrap();
         assert_eq!(
             &[Token::with_size(TokenKind::ByteStr, 2, 2, 0, 1)],
             &parser.tokens[..]

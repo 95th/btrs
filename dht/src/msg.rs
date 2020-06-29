@@ -335,7 +335,7 @@ mod tests {
     fn incoming_ping() {
         let expected: &[u8] = b"d1:ad2:id20:\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01e1:q4:ping1:t2:\x00\n1:y1:qe";
         let mut parser = Parser::new();
-        let msg: Msg = parser.parse_into(expected).unwrap();
+        let msg = parser.parse::<Msg>(expected).unwrap();
         assert!(matches!(msg.kind, MsgKind::Ping));
     }
 
