@@ -117,8 +117,14 @@ impl Drop for BytesExact<'_> {
     }
 }
 
+mod sealed {
+    pub trait Sealed {}
+
+    impl Sealed for Vec<u8> {}
+}
+
 /// Bencode Encoder trait.
-pub trait Encoder {
+pub trait Encoder: sealed::Sealed {
     /// Encode an integer value.
     fn add_int(&mut self, value: i64);
 
