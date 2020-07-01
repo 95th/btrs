@@ -12,11 +12,9 @@ use std::{
 use tokio::net::UdpSocket;
 
 pub struct Server {
-    socket: UdpSocket,
+    socket: BufSocket,
     table: RoutingTable,
-    parser: Parser,
     txn_id: TxnId,
-    buf: Vec<u8>,
 }
 
 impl Server {
@@ -26,11 +24,9 @@ impl Server {
         let id = NodeId::gen();
 
         Ok(Server {
-            socket,
+            socket: BufSocket::new(socket),
             table: RoutingTable::new(id),
-            parser: Parser::new(),
             txn_id: TxnId(0),
-            buf: Vec::with_capacity(1000),
         })
     }
 
@@ -38,8 +34,6 @@ impl Server {
         for addr in addrs {
             let txn_id = self.txn_id.next();
             let id = &self.table.own_id;
-            let buf = &mut self.buf;
-            let parser = &mut self.parser;
 
             let request = FindNode {
                 txn_id,
@@ -47,19 +41,11 @@ impl Server {
                 target: id,
             };
 
-            buf.clear();
-            request.encode(buf);
-            trace!("Sending: {:#?}", parser.parse::<Decoder>(buf).unwrap());
-            let n = self.socket.send_to(buf, addr).await?;
-            trace!("Sent: {} bytes", n);
+            self.socket.send(request, addr).await?;
 
-            buf.resize(1000, 0);
-            let (n, rx_addr) = self.socket.recv_from(buf).await?;
+            let (msg, rx_addr) = self.socket.recv().await?;
+
             ensure!(rx_addr == *addr, "Address mismatch");
-            trace!("Received: {} bytes", n);
-
-            let msg = parser.parse::<Msg>(&buf[..n])?;
-            trace!("Data: {:#?}", msg);
             ensure!(msg.txn_id == txn_id, "Transaction ID mismatch");
 
             self.table.read_nodes(&msg)?;
@@ -85,10 +71,7 @@ impl Server {
                 txn_id,
             };
 
-            self.buf.clear();
-            msg.encode(&mut self.buf);
-
-            match self.socket.send_to(&self.buf, &contact.addr).await {
+            match self.socket.send(msg, &contact.addr).await {
                 Ok(_) => {
                     pending.insert(txn_id, contact.id.clone());
                     contact.status = ContactStatus::QUERIED;
@@ -123,11 +106,8 @@ impl Server {
         &mut self,
         pending: &mut HashMap<TxnId, NodeId>,
     ) -> anyhow::Result<()> {
-        self.buf.resize(1000, 0);
-        let (n, _) = self.socket.recv_from(&mut self.buf[..]).await?;
-        let msg = self.parser.parse::<Msg>(&self.buf[..n])?;
+        let (msg, _) = self.socket.recv().await?;
 
-        info!("message: {:?}", msg);
         let id = pending
             .remove(&msg.txn_id)
             .context("Response received from unexpected address")?;
@@ -141,50 +121,33 @@ impl Server {
 
     pub async fn announce(&mut self, info_hash: &NodeId) -> anyhow::Result<()> {
         self.get_peers(info_hash).await?;
-        let txn_id = self.txn_id.next();
-        let req = AnnouncePeer {
-            id: &self.table.own_id,
-            implied_port: true,
-            port: 0,
-            token: &[0],
-            info_hash,
-            txn_id,
-        };
-
-        self.buf.clear();
-        req.encode(&mut self.buf);
-        trace!(
-            "Sending: {:#?}",
-            self.parser.parse::<Decoder>(&self.buf).unwrap()
-        );
 
         let mut closest = Vec::with_capacity(8);
-        self.table.find_closest(info_hash, &mut closest);
+        let own_id = self.table.find_closest(info_hash, &mut closest);
 
         let mut pending = vec![];
         for c in &closest {
-            match self.socket.send_to(&self.buf, c.addr).await {
+            let txn_id = self.txn_id.next();
+            let req = AnnouncePeer {
+                id: own_id,
+                implied_port: true,
+                port: 0,
+                token: &[0],
+                info_hash,
+                txn_id,
+            };
+
+            match self.socket.send(&req, &c.addr).await {
                 Ok(_) => pending.push(c.addr),
                 Err(e) => warn!("{}", e),
             }
         }
 
         while !pending.is_empty() {
-            self.buf.clear();
-            let (n, rx_addr) = self.socket.recv_from(&mut self.buf).await?;
+            let (_msg, rx_addr) = self.socket.recv().await?;
             if let Some(i) = pending.iter().position(|a| *a == rx_addr) {
                 pending.remove(i);
             }
-            let result = self.parser.parse::<Msg>(&self.buf[..n]);
-            let msg = match result {
-                Ok(msg) => msg,
-                Err(e) => {
-                    trace!("{}", e);
-                    continue;
-                }
-            };
-
-            trace!("{:#?}", msg);
         }
 
         Ok(())
@@ -208,5 +171,48 @@ impl RoutingTable {
             }
         }
         Ok(())
+    }
+}
+
+struct BufSocket {
+    socket: UdpSocket,
+    buf: Vec<u8>,
+    parser: Parser,
+}
+
+impl BufSocket {
+    fn new(socket: UdpSocket) -> Self {
+        Self {
+            socket,
+            buf: Vec::new(),
+            parser: Parser::new(),
+        }
+    }
+
+    async fn send<E: Encode>(&mut self, msg: E, addr: &SocketAddr) -> anyhow::Result<()> {
+        self.buf.clear();
+        msg.encode(&mut self.buf);
+
+        trace!(
+            "Sending: {:#?}",
+            self.parser.parse::<Decoder>(&self.buf).unwrap()
+        );
+
+        let n = self.socket.send_to(&self.buf, addr).await?;
+        trace!("Sent: {} bytes", n);
+
+        Ok(())
+    }
+
+    async fn recv(&mut self) -> anyhow::Result<(Msg<'_, '_>, SocketAddr)> {
+        self.buf.resize(1000, 0);
+
+        let (n, addr) = self.socket.recv_from(&mut self.buf).await?;
+        trace!("Received: {} bytes", n);
+
+        let msg = self.parser.parse::<Msg>(&self.buf[..n])?;
+        trace!("message: {:?}", msg);
+
+        Ok((msg, addr))
     }
 }
