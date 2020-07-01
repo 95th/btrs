@@ -96,7 +96,7 @@ impl_arr![
 /// Drop will panic if the expected number of bytes
 /// is not equal to actually added bytes.
 pub struct BytesExact<'a> {
-    enc: &'a mut Vec<u8>,
+    buf: &'a mut Vec<u8>,
     expected: usize,
     written: usize,
 }
@@ -105,7 +105,7 @@ impl BytesExact<'_> {
     /// Add given byte slice.
     pub fn add(&mut self, buf: &[u8]) {
         self.written += buf.len();
-        self.enc.extend(buf);
+        self.buf.extend(buf);
     }
 
     pub fn finish(self) {}
@@ -167,7 +167,7 @@ impl Encoder for Vec<u8> {
         self.extend(buf.format(len).as_bytes());
         self.push(b':');
         BytesExact {
-            enc: self,
+            buf: self,
             expected: len,
             written: 0,
         }
@@ -196,40 +196,40 @@ impl Encoder for Vec<u8> {
 
 /// Bencode List representation.
 pub struct List<'a> {
-    enc: &'a mut Vec<u8>,
+    buf: &'a mut Vec<u8>,
 }
 
 impl List<'_> {
     /// Create a new list
-    fn new(enc: &mut Vec<u8>) -> List<'_> {
-        enc.push(b'l');
-        List { enc }
+    fn new(buf: &mut Vec<u8>) -> List<'_> {
+        buf.push(b'l');
+        List { buf }
     }
 
     /// `Encode` a value in this list.
     pub fn add<E: Encode>(&mut self, value: E) {
-        value.encode(self.enc);
+        value.encode(self.buf);
     }
 
     /// Create a new object which accepts exactly given number of
     /// bytes lazily.
     pub fn add_bytes_exact(&mut self, len: usize) -> BytesExact<'_> {
-        self.enc.add_bytes_exact(len)
+        self.buf.add_bytes_exact(len)
     }
 
     /// Create a new `List` in this list.
     pub fn add_list(&mut self) -> List<'_> {
-        self.enc.add_list()
+        self.buf.add_list()
     }
 
     /// Create a new `Dict` in this list.
     pub fn add_dict(&mut self) -> Dict<'_> {
-        self.enc.add_dict()
+        self.buf.add_dict()
     }
 
     /// Create a new `OrderedDict` in this list.
     pub fn add_ordered_dict(&mut self) -> OrderedDict<'_, '_> {
-        self.enc.add_ordered_dict()
+        self.buf.add_ordered_dict()
     }
 
     /// Finish building this list.
@@ -238,7 +238,7 @@ impl List<'_> {
 
 impl Drop for List<'_> {
     fn drop(&mut self) {
-        self.enc.push(b'e');
+        self.buf.push(b'e');
     }
 }
 
@@ -251,7 +251,7 @@ impl Drop for List<'_> {
 /// If the invariants don't meet in debug mode, the add calls will
 /// panic.
 pub struct Dict<'a> {
-    enc: &'a mut Vec<u8>,
+    buf: &'a mut Vec<u8>,
 
     #[cfg(debug_assertions)]
     last_key: Option<Vec<u8>>,
@@ -259,10 +259,10 @@ pub struct Dict<'a> {
 
 impl Dict<'_> {
     /// Create a new dict
-    fn new(enc: &mut Vec<u8>) -> Dict<'_> {
-        enc.push(b'd');
+    fn new(buf: &mut Vec<u8>) -> Dict<'_> {
+        buf.push(b'd');
         Dict {
-            enc,
+            buf,
             #[cfg(debug_assertions)]
             last_key: None,
         }
@@ -271,37 +271,37 @@ impl Dict<'_> {
     /// `Encode` the value for given key inside this dictionary.
     pub fn add<E: Encode>(&mut self, key: &str, value: E) {
         self.add_key(key);
-        value.encode(self.enc);
+        value.encode(self.buf);
     }
 
     /// Create a new object which accepts exactly given number of
     /// bytes lazily.
     pub fn add_bytes_exact(&mut self, key: &str, len: usize) -> BytesExact<'_> {
         self.add_key(key);
-        self.enc.add_bytes_exact(len)
+        self.buf.add_bytes_exact(len)
     }
 
     /// Create a new `List` for given key inside this dictionary.
     pub fn add_list(&mut self, key: &str) -> List<'_> {
         self.add_key(key);
-        self.enc.add_list()
+        self.buf.add_list()
     }
 
     /// Create a new `Dict` for given key inside this dictionary.
     pub fn add_dict(&mut self, key: &str) -> Dict<'_> {
         self.add_key(key);
-        self.enc.add_dict()
+        self.buf.add_dict()
     }
 
     /// Create a new `OrderedDict` inside this dictionary.
     pub fn add_ordered_dict(&mut self, key: &str) -> OrderedDict<'_, '_> {
         self.add_key(key);
-        self.enc.add_ordered_dict()
+        self.buf.add_ordered_dict()
     }
 
     fn add_key(&mut self, key: &str) {
         self.assert_key_ordering(key);
-        self.enc.add_str(key);
+        self.buf.add_str(key);
     }
 
     #[cfg(debug_assertions)]
@@ -330,7 +330,7 @@ impl Dict<'_> {
 
 impl Drop for Dict<'_> {
     fn drop(&mut self) {
-        self.enc.push(b'e');
+        self.buf.push(b'e');
     }
 }
 
@@ -338,15 +338,15 @@ impl Drop for Dict<'_> {
 ///
 /// This will maintain keys to be unique and sorted.
 pub struct OrderedDict<'a, 'k> {
-    enc: &'a mut Vec<u8>,
+    buf: &'a mut Vec<u8>,
     entries: BTreeMap<&'k [u8], Vec<u8>>,
 }
 
 impl<'a, 'k> OrderedDict<'a, 'k> {
     /// Create a new dict
-    fn new(enc: &'a mut Vec<u8>) -> OrderedDict<'a, 'k> {
+    fn new(buf: &'a mut Vec<u8>) -> OrderedDict<'a, 'k> {
         OrderedDict {
-            enc,
+            buf,
             entries: BTreeMap::new(),
         }
     }
@@ -368,8 +368,8 @@ impl<'a, 'k> OrderedDict<'a, 'k> {
 
     /// `Encode` the value for given key inside this dictionary.
     pub fn add<E: Encode>(&mut self, key: &'k str, value: E) {
-        let enc = self.add_key(key);
-        value.encode(enc);
+        let buf = self.add_key(key);
+        value.encode(buf);
     }
 
     fn add_key(&mut self, key: &'k str) -> &mut Vec<u8> {
@@ -384,12 +384,12 @@ impl<'a, 'k> OrderedDict<'a, 'k> {
 
 impl Drop for OrderedDict<'_, '_> {
     fn drop(&mut self) {
-        self.enc.push(b'd');
+        self.buf.push(b'd');
         for (k, v) in &self.entries {
-            self.enc.add_bytes(k);
-            self.enc.extend(v);
+            self.buf.add_bytes(k);
+            self.buf.extend(v);
         }
-        self.enc.push(b'e');
+        self.buf.push(b'e');
     }
 }
 
