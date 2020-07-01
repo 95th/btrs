@@ -12,7 +12,7 @@ use std::{
 use tokio::net::UdpSocket;
 
 pub struct Server {
-    conn: UdpSocket,
+    socket: UdpSocket,
     table: RoutingTable,
     parser: Parser,
     txn_id: TxnId,
@@ -22,11 +22,11 @@ pub struct Server {
 impl Server {
     pub async fn new(port: u16) -> anyhow::Result<Server> {
         let addr = SocketAddr::from(([0u8; 4], port));
-        let conn = UdpSocket::bind(addr).await?;
+        let socket = UdpSocket::bind(addr).await?;
         let id = NodeId::gen();
 
         Ok(Server {
-            conn,
+            socket,
             table: RoutingTable::new(id),
             parser: Parser::new(),
             txn_id: TxnId(0),
@@ -50,11 +50,11 @@ impl Server {
             buf.clear();
             request.encode(buf);
             trace!("Sending: {:#?}", parser.parse::<Decoder>(buf).unwrap());
-            let n = self.conn.send_to(buf, addr).await?;
+            let n = self.socket.send_to(buf, addr).await?;
             trace!("Sent: {} bytes", n);
 
             buf.resize(1000, 0);
-            let (n, rx_addr) = self.conn.recv_from(buf).await?;
+            let (n, rx_addr) = self.socket.recv_from(buf).await?;
             ensure!(rx_addr == *addr, "Address mismatch");
             trace!("Received: {} bytes", n);
 
@@ -88,7 +88,7 @@ impl Server {
             self.buf.clear();
             msg.encode(&mut self.buf);
 
-            match self.conn.send_to(&self.buf, contact.addr).await {
+            match self.socket.send_to(&self.buf, &contact.addr).await {
                 Ok(_) => {
                     pending.insert(txn_id, contact.id.clone());
                     contact.status = ContactStatus::QUERIED;
@@ -124,7 +124,7 @@ impl Server {
         pending: &mut HashMap<TxnId, NodeId>,
     ) -> anyhow::Result<()> {
         self.buf.resize(1000, 0);
-        let (n, _) = self.conn.recv_from(&mut self.buf[..]).await?;
+        let (n, _) = self.socket.recv_from(&mut self.buf[..]).await?;
         let msg = self.parser.parse::<Msg>(&self.buf[..n])?;
 
         info!("message: {:?}", msg);
@@ -163,7 +163,7 @@ impl Server {
 
         let mut pending = vec![];
         for c in &closest {
-            match self.conn.send_to(&self.buf, c.addr).await {
+            match self.socket.send_to(&self.buf, c.addr).await {
                 Ok(_) => pending.push(c.addr),
                 Err(e) => warn!("{}", e),
             }
@@ -171,7 +171,7 @@ impl Server {
 
         while !pending.is_empty() {
             self.buf.clear();
-            let (n, rx_addr) = self.conn.recv_from(&mut self.buf).await?;
+            let (n, rx_addr) = self.socket.recv_from(&mut self.buf).await?;
             if let Some(i) = pending.iter().position(|a| *a == rx_addr) {
                 pending.remove(i);
             }
