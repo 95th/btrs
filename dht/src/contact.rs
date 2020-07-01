@@ -1,5 +1,5 @@
 use crate::id::NodeId;
-use ben::encode::AddBytes;
+use ben::encode::BytesExact;
 use ben::{Encode, Encoder};
 use std::net::SocketAddr;
 use std::time::Instant;
@@ -97,7 +97,7 @@ impl Contact {
 impl Encode for Contact {
     fn encode<E: Encoder>(&self, enc: &mut E) {
         let len = if self.addr.is_ipv4() { 6 } else { 18 };
-        let bytes = &mut enc.add_n_bytes(20 + len);
+        let bytes = &mut enc.add_bytes_exact(20 + len);
         bytes.add(self.id.as_bytes());
         encode_addr(bytes, &self.addr);
     }
@@ -106,12 +106,12 @@ impl Encode for Contact {
 impl Encode for Peer {
     fn encode<E: Encoder>(&self, enc: &mut E) {
         let len = if self.addr.is_ipv4() { 6 } else { 18 };
-        let bytes = &mut enc.add_n_bytes(len);
+        let bytes = &mut enc.add_bytes_exact(len);
         encode_addr(bytes, &self.addr);
     }
 }
 
-fn encode_addr(bytes: &mut AddBytes<'_>, addr: &SocketAddr) {
+fn encode_addr(bytes: &mut BytesExact<'_>, addr: &SocketAddr) {
     match addr {
         SocketAddr::V4(addr) => bytes.add(&addr.ip().octets()),
         SocketAddr::V6(addr) => bytes.add(&addr.ip().octets()),

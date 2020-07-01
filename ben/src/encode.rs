@@ -86,8 +86,8 @@ macro_rules! impl_arr {
 }
 
 impl_arr![
-    1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27,
-    28, 29, 30, 31, 32, 64, 128, 256, 512, 1024
+    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25,
+    26, 27, 28, 29, 30, 31, 32, 64, 128, 256, 512, 1024
 ];
 
 /// Add bytes lazily to given encoder.
@@ -95,13 +95,13 @@ impl_arr![
 /// # Panic
 /// Drop will panic if the expected number of bytes
 /// is not equal to actually added bytes.
-pub struct AddBytes<'a> {
+pub struct BytesExact<'a> {
     enc: &'a mut Vec<u8>,
-    len: usize,
+    expected: usize,
     written: usize,
 }
 
-impl AddBytes<'_> {
+impl BytesExact<'_> {
     /// Add given byte slice.
     pub fn add(&mut self, buf: &[u8]) {
         self.written += buf.len();
@@ -111,9 +111,9 @@ impl AddBytes<'_> {
     pub fn finish(self) {}
 }
 
-impl Drop for AddBytes<'_> {
+impl Drop for BytesExact<'_> {
     fn drop(&mut self) {
-        assert_eq!(self.len, self.written)
+        assert_eq!(self.expected, self.written);
     }
 }
 
@@ -129,7 +129,7 @@ pub trait Encoder {
     ///
     /// The returned object will panic if the total number of added bytes
     /// is not equal to 'n'.
-    fn add_n_bytes(&mut self, len: usize) -> AddBytes<'_>;
+    fn add_bytes_exact(&mut self, len: usize) -> BytesExact<'_>;
 
     /// Encode string slice.
     fn add_str(&mut self, value: &str);
@@ -162,13 +162,13 @@ impl Encoder for Vec<u8> {
     }
 
     #[inline]
-    fn add_n_bytes(&mut self, len: usize) -> AddBytes<'_> {
+    fn add_bytes_exact(&mut self, len: usize) -> BytesExact<'_> {
         let mut buf = Buffer::new();
         self.extend(buf.format(len).as_bytes());
         self.push(b':');
-        AddBytes {
+        BytesExact {
             enc: self,
-            len,
+            expected: len,
             written: 0,
         }
     }
@@ -209,6 +209,12 @@ impl List<'_> {
     /// `Encode` a value in this list.
     pub fn add<E: Encode>(&mut self, value: E) {
         value.encode(self.enc);
+    }
+
+    /// Create a new object which accepts exactly given number of
+    /// bytes lazily.
+    pub fn add_bytes_exact(&mut self, len: usize) -> BytesExact<'_> {
+        self.enc.add_bytes_exact(len)
     }
 
     /// Create a new `List` in this list.
@@ -262,6 +268,19 @@ impl Dict<'_> {
         }
     }
 
+    /// `Encode` the value for given key inside this dictionary.
+    pub fn add<E: Encode>(&mut self, key: &str, value: E) {
+        self.add_key(key);
+        value.encode(self.enc);
+    }
+
+    /// Create a new object which accepts exactly given number of
+    /// bytes lazily.
+    pub fn add_bytes_exact(&mut self, key: &str, len: usize) -> BytesExact<'_> {
+        self.add_key(key);
+        self.enc.add_bytes_exact(len)
+    }
+
     /// Create a new `List` for given key inside this dictionary.
     pub fn add_list(&mut self, key: &str) -> List<'_> {
         self.add_key(key);
@@ -278,12 +297,6 @@ impl Dict<'_> {
     pub fn add_ordered_dict(&mut self, key: &str) -> OrderedDict<'_, '_> {
         self.add_key(key);
         self.enc.add_ordered_dict()
-    }
-
-    /// `Encode` the value for given key inside this dictionary.
-    pub fn add<E: Encode>(&mut self, key: &str, value: E) {
-        self.add_key(key);
-        value.encode(self.enc);
     }
 
     fn add_key(&mut self, key: &str) {
@@ -512,7 +525,7 @@ mod tests {
     #[test]
     fn encode_add_bytes2_ok() {
         let mut e = vec![];
-        let mut bytes = e.add_n_bytes(4);
+        let mut bytes = e.add_bytes_exact(4);
         bytes.add(&[0; 2]);
         bytes.add(&[0; 2]);
         drop(bytes);
@@ -523,7 +536,7 @@ mod tests {
     #[should_panic]
     fn encode_add_bytes2_panic() {
         let mut e = vec![];
-        let mut bytes = e.add_n_bytes(4);
+        let mut bytes = e.add_bytes_exact(4);
         bytes.add(&[0; 100]);
     }
 
