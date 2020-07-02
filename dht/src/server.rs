@@ -144,9 +144,13 @@ impl Server {
         }
 
         while !pending.is_empty() {
-            let (_msg, rx_addr) = self.socket.recv::<Msg>().await?;
-            if let Some(i) = pending.iter().position(|a| *a == rx_addr) {
-                pending.remove(i);
+            match self.socket.recv::<Msg>().await {
+                Ok((_msg, rx_addr)) => {
+                    if let Some(i) = pending.iter().position(|a| *a == rx_addr) {
+                        pending.remove(i);
+                    }
+                }
+                Err(e) => warn!("{}", e),
             }
         }
 
@@ -200,6 +204,8 @@ impl BufSocket {
 
         let n = self.socket.send_to(&self.buf, addr).await?;
         trace!("Sent: {} bytes", n);
+
+        ensure!(n == self.buf.len(), "Failed to send complete message");
 
         Ok(())
     }
