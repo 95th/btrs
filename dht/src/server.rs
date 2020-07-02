@@ -3,7 +3,7 @@ use crate::id::NodeId;
 use crate::msg::{AnnouncePeer, FindNode, GetPeers, Msg, MsgKind, TxnId};
 use crate::table::RoutingTable;
 use anyhow::Context;
-use ben::{Decoder, Encode, Parser};
+use ben::{Decode, Decoder, Encode, Parser};
 use std::{
     collections::HashMap,
     net::SocketAddr,
@@ -43,7 +43,7 @@ impl Server {
 
             self.socket.send(request, addr).await?;
 
-            let (msg, rx_addr) = self.socket.recv().await?;
+            let (msg, rx_addr) = self.socket.recv::<Msg>().await?;
 
             ensure!(rx_addr == *addr, "Address mismatch");
             ensure!(msg.txn_id == txn_id, "Transaction ID mismatch");
@@ -106,7 +106,7 @@ impl Server {
         &mut self,
         pending: &mut HashMap<TxnId, NodeId>,
     ) -> anyhow::Result<()> {
-        let (msg, _) = self.socket.recv().await?;
+        let (msg, _) = self.socket.recv::<Msg>().await?;
 
         let id = pending
             .remove(&msg.txn_id)
@@ -144,7 +144,7 @@ impl Server {
         }
 
         while !pending.is_empty() {
-            let (_msg, rx_addr) = self.socket.recv().await?;
+            let (_msg, rx_addr) = self.socket.recv::<Msg>().await?;
             if let Some(i) = pending.iter().position(|a| *a == rx_addr) {
                 pending.remove(i);
             }
@@ -204,13 +204,16 @@ impl BufSocket {
         Ok(())
     }
 
-    async fn recv(&mut self) -> anyhow::Result<(Msg<'_, '_>, SocketAddr)> {
+    async fn recv<'a, D>(&'a mut self) -> anyhow::Result<(D, SocketAddr)>
+    where
+        D: Decode<'a, 'a> + std::fmt::Debug,
+    {
         self.buf.resize(1000, 0);
 
         let (n, addr) = self.socket.recv_from(&mut self.buf).await?;
         trace!("Received: {} bytes", n);
 
-        let msg = self.parser.parse::<Msg>(&self.buf[..n])?;
+        let msg = self.parser.parse(&self.buf[..n])?;
         trace!("message: {:?}", msg);
 
         Ok((msg, addr))
