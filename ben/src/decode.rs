@@ -583,8 +583,7 @@ impl<'a, 'p> Dict<'a, 'p> {
 
     /// Returns the number of entries
     pub fn len(&self) -> usize {
-        debug_assert_eq!(self.token.children % 2, 0);
-        self.token.children as usize / 2
+        self.token.children as usize
     }
 
     /// Returns true if the dictionary is empty

@@ -4,9 +4,6 @@ use crate::token::{Token, TokenKind};
 
 /// Bencode Parser
 pub struct Parser {
-    pos: usize,
-    tok_next: usize,
-    tok_super: isize,
     token_limit: usize,
     tokens: Vec<Token>,
 }
@@ -14,9 +11,6 @@ pub struct Parser {
 impl Default for Parser {
     fn default() -> Self {
         Self {
-            pos: 0,
-            tok_next: 0,
-            tok_super: -1,
             token_limit: usize::max_value(),
             tokens: vec![],
         }
@@ -72,198 +66,168 @@ impl Parser {
             return Err(Error::Eof);
         }
 
-        self.clear();
-        let mut depth = 0;
-        while self.pos < buf.len() {
-            let c = buf[self.pos];
-            match c {
-                b'i' => {
-                    self.update_super(TokenKind::Int)?;
-                    self.pos += 1;
-                    let start = self.pos;
-                    self.parse_int(buf, b'e')?;
-                    let token = Token::new(TokenKind::Int, start as i32, self.pos as i32);
-                    self.alloc_token(token)?;
-                    self.pos += 1;
-                }
-                b'l' => {
-                    depth += 1;
-                    let token = Token::new(TokenKind::List, self.pos as i32, -1);
-                    self.pos += 1;
-                    self.alloc_token(token)?;
-                    self.update_super(TokenKind::List)?;
-                    self.tok_super = self.tok_next as isize - 1;
-                }
-                b'd' => {
-                    depth += 1;
-                    let token = Token::new(TokenKind::Dict, self.pos as i32, -1);
-                    self.pos += 1;
-                    self.alloc_token(token)?;
-                    self.update_super(TokenKind::Dict)?;
-                    self.tok_super = self.tok_next as isize - 1;
-                }
-                b'0'..=b'9' => {
-                    self.parse_string(buf)?;
-                    self.update_super(TokenKind::ByteStr)?;
-                }
-                b'e' => {
-                    self.pos += 1;
-                    depth -= 1;
-                    let mut i = (self.tok_next - 1) as i32;
-                    while i >= 0 {
-                        let token = &mut self.tokens[i as usize];
-                        if token.start >= 0 && token.end < 0 {
-                            token.next = self.tok_next as u32 - i as u32;
-                            self.tok_super = -1;
-                            token.end = self.pos as i32;
-                            break;
-                        } else {
-                            i -= 1
-                        }
-                    }
-
-                    // Error if unclosed object
-                    if i == -1 {
-                        return Err(Error::Invalid {
-                            reason: "Unclosed object",
-                            pos: self.pos,
-                        });
-                    }
-
-                    while i >= 0 {
-                        let token = &self.tokens[i as usize];
-                        if token.start >= 0 && token.end < 0 {
-                            self.tok_super = i as isize;
-                            break;
-                        } else {
-                            i -= 1
-                        }
-                    }
-                }
-                _ => {
-                    // Unexpected char
-                    return Err(Error::Unexpected { pos: self.pos });
-                }
-            }
-            if depth == 0 {
-                break;
-            }
-        }
-        for i in (0..self.tok_next).rev() {
-            let token = &self.tokens[i];
-
-            // Unclosed object
-            if token.start >= 0 && token.end < 0 {
-                return Err(Error::Eof);
-            }
-
-            if let TokenKind::Dict = token.kind {
-                if token.children % 2 != 0 {
-                    return Err(Error::Eof);
-                }
-            }
-        }
-        let decoder = Decoder::new(buf, &self.tokens).ok_or_else(|| Error::Eof)?;
-        Ok((decoder, self.pos))
-    }
-
-    fn clear(&mut self) {
         self.tokens.clear();
-        self.pos = 0;
-        self.tok_next = 0;
-        self.tok_super = -1;
-    }
+        let mut state = State {
+            buf,
+            pos: 0,
+            tokens: &mut self.tokens,
+            token_limit: self.token_limit,
+        };
 
-    fn update_super(&mut self, curr_kind: TokenKind) -> Result<()> {
-        if self.tok_super < 0 {
-            return Ok(());
-        }
-
-        let parent = &mut self.tokens[self.tok_super as usize];
-        parent.children += 1;
-        if let TokenKind::Dict = parent.kind {
-            if curr_kind != TokenKind::ByteStr && parent.children % 2 != 0 {
-                return Err(Error::Invalid {
-                    reason: "Dictionary key must be a string",
-                    pos: self.pos,
-                });
-            }
-        }
-        Ok(())
-    }
-
-    /// Parse bencode int.
-    fn parse_int(&mut self, buf: &[u8], stop_char: u8) -> Result<i64> {
-        let mut negative = false;
-        let mut pos = self.pos;
-
-        if let Some(b'-') = buf.get(pos) {
-            pos += 1;
-            negative = true;
-        }
-
-        if pos >= buf.len() {
-            return Err(Error::Eof);
-        }
-
-        let mut val: i64 = 0;
-        while let Some(&c) = buf.get(pos) {
-            if let b'0'..=b'9' = c {
-                val = add(val, c).ok_or_else(|| Error::Overflow { pos: self.pos })?;
-                pos += 1;
-            } else if c == stop_char {
-                break;
-            } else {
-                return Err(Error::Unexpected { pos });
-            }
-        }
-        self.pos = pos;
-
-        if negative {
-            val *= -1;
-        }
-
-        Ok(val)
-    }
-
-    /// Fills next token with bencode string.
-    fn parse_string(&mut self, buf: &[u8]) -> Result<()> {
-        let len = self.parse_int(buf, b':')?;
-        if len < 0 {
-            return Err(Error::Invalid {
-                reason: "String length must be positive",
-                pos: self.pos,
-            });
-        }
-
-        self.pos += 1; // Skip the ':'
-
-        let len = len as usize;
-        if self.pos + len > buf.len() {
-            return Err(Error::Eof);
-        }
-
-        let token = Token::new(TokenKind::ByteStr, self.pos as i32, (self.pos + len) as i32);
-        self.alloc_token(token)?;
-        self.pos += len;
-        Ok(())
-    }
-
-    /// Adds a new token.
-    fn alloc_token(&mut self, token: Token) -> Result<()> {
-        if self.tokens.len() >= self.token_limit {
-            return Err(Error::NoMemory);
-        }
-        self.tokens.push(token);
-        self.tok_next += 1;
-        Ok(())
+        state.parse_object()?;
+        let pos = state.pos;
+        let d = Decoder::new(buf, &self.tokens).ok_or_else(|| Error::Eof)?;
+        Ok((d, pos))
     }
 }
 
-fn add(mut num: i64, digit: u8) -> Option<i64> {
-    num = num.checked_mul(10)?;
-    let digit = (digit - b'0') as i64;
-    num.checked_add(digit)
+struct State<'a, 't> {
+    buf: &'a [u8],
+    pos: usize,
+    tokens: &'t mut Vec<Token>,
+    token_limit: usize,
+}
+
+impl<'a, 't> State<'a, 't> {
+    fn peek_char(&self) -> Result<u8> {
+        self.buf.get(self.pos).copied().ok_or_else(|| Error::Eof)
+    }
+
+    fn next_char(&mut self) -> Result<u8> {
+        let c = self.peek_char()?;
+        self.pos += 1;
+        Ok(c)
+    }
+
+    fn parse_object(&mut self) -> Result<()> {
+        match self.peek_char()? {
+            b'd' => self.parse_dict(),
+            b'l' => self.parse_list(),
+            b'i' => self.parse_int(),
+            b'0'..=b'9' => self.parse_string(),
+            _ => Err(Error::Unexpected { pos: self.pos }),
+        }
+    }
+
+    fn parse_dict(&mut self) -> Result<()> {
+        let token_pos = self.create_token(TokenKind::Dict)?;
+
+        // Consume the opening 'd'
+        self.next_char()?;
+
+        let mut children = 0;
+        while self.peek_char()? != b'e' {
+            self.parse_string()?;
+            self.parse_object()?;
+            children += 1;
+        }
+
+        // Consume the closing 'e'
+        self.next_char()?;
+
+        let next = self.tokens.len() - token_pos;
+        let token = &mut self.tokens[token_pos];
+        token.end = self.pos as u32;
+        token.children = children;
+        token.next = next as u32;
+
+        Ok(())
+    }
+
+    fn parse_list(&mut self) -> Result<()> {
+        let token_pos = self.create_token(TokenKind::List)?;
+
+        // Consume the opening 'l'
+        self.next_char()?;
+
+        let mut children = 0;
+        while self.peek_char()? != b'e' {
+            self.parse_object()?;
+            children += 1;
+        }
+
+        // Consume the closing 'e'
+        self.next_char()?;
+
+        let next = self.tokens.len() - token_pos;
+        let token = &mut self.tokens[token_pos];
+        token.end = self.pos as u32;
+        token.children = children;
+        token.next = next as u32;
+
+        Ok(())
+    }
+
+    fn parse_int(&mut self) -> Result<()> {
+        // Consume the opening 'i'
+        self.next_char()?;
+
+        let token_pos = self.create_token(TokenKind::Int)?;
+
+        // Can be negative
+        if self.peek_char()? == b'-' {
+            self.pos += 1;
+        }
+
+        if self.peek_char()? == b'e' {
+            return Err(Error::Unexpected { pos: self.pos });
+        }
+
+        let mut val: i64 = 0;
+
+        loop {
+            match self.next_char()? {
+                c @ b'0'..=b'9' => {
+                    let digit = (c - b'0') as i64;
+                    match val.checked_mul(10).and_then(|n| n.checked_add(digit)) {
+                        Some(n) => val = n,
+                        None => return Err(Error::Overflow { pos: self.pos }),
+                    }
+                }
+                b'e' => {
+                    self.tokens[token_pos].end = (self.pos - 1) as u32;
+                    return Ok(());
+                }
+                _ => return Err(Error::Unexpected { pos: self.pos - 1 }),
+            }
+        }
+    }
+
+    fn parse_string(&mut self) -> Result<()> {
+        let mut len: usize = 0;
+
+        loop {
+            match self.next_char()? {
+                c @ b'0'..=b'9' => {
+                    let digit = (c - b'0') as usize;
+                    match len.checked_mul(10).and_then(|n| n.checked_add(digit)) {
+                        Some(n) => len = n,
+                        None => return Err(Error::Overflow { pos: self.pos }),
+                    }
+                }
+                b':' => break,
+                _ => return Err(Error::Unexpected { pos: self.pos }),
+            }
+        }
+
+        if self.pos + len <= self.buf.len() {
+            let token_pos = self.create_token(TokenKind::ByteStr)?;
+            self.pos += len;
+            self.tokens[token_pos].end = self.pos as u32;
+            Ok(())
+        } else {
+            Err(Error::Eof)
+        }
+    }
+
+    fn create_token(&mut self, kind: TokenKind) -> Result<usize> {
+        if self.tokens.len() == self.token_limit {
+            return Err(Error::NoMemory);
+        }
+        let token = Token::new(kind, self.pos as u32, self.pos as u32);
+        self.tokens.push(token);
+        Ok(self.tokens.len() - 1)
+    }
 }
 
 #[cfg(test)]
@@ -327,14 +291,14 @@ mod tests {
     fn key_only_dict() {
         let s = b"d1:ae";
         let err = Parser::new().parse::<Decoder>(s).unwrap_err();
-        assert_eq!(Error::Eof, err);
+        assert_eq!(Error::Unexpected { pos: 4 }, err);
     }
 
     #[test]
     fn key_only_dict_2() {
         let s = b"d1:a1:a1:ae";
         let err = Parser::new().parse::<Decoder>(s).unwrap_err();
-        assert_eq!(Error::Eof, err);
+        assert_eq!(Error::Unexpected { pos: 10 }, err);
     }
 
     #[test]
@@ -344,7 +308,7 @@ mod tests {
         parser.parse::<Decoder>(s).unwrap();
         assert_eq!(
             &[
-                Token::with_size(TokenKind::Dict, 0, 20, 4, 5),
+                Token::with_size(TokenKind::Dict, 0, 20, 2, 5),
                 Token::with_size(TokenKind::ByteStr, 3, 4, 0, 1),
                 Token::with_size(TokenKind::ByteStr, 6, 8, 0, 1),
                 Token::with_size(TokenKind::ByteStr, 10, 13, 0, 1),
@@ -361,7 +325,7 @@ mod tests {
         parser.parse::<Decoder>(s).unwrap();
         assert_eq!(
             &[
-                Token::with_size(TokenKind::Dict, 0, 36, 12, 13),
+                Token::with_size(TokenKind::Dict, 0, 36, 6, 13),
                 Token::with_size(TokenKind::ByteStr, 3, 4, 0, 1),
                 Token::with_size(TokenKind::ByteStr, 6, 7, 0, 1),
                 Token::with_size(TokenKind::ByteStr, 9, 10, 0, 1),
@@ -435,10 +399,10 @@ mod tests {
         assert_eq!(
             &[
                 Token::with_size(TokenKind::List, 0, 19, 1, 8),
-                Token::with_size(TokenKind::Dict, 1, 18, 2, 7),
+                Token::with_size(TokenKind::Dict, 1, 18, 1, 7),
                 Token::with_size(TokenKind::ByteStr, 4, 5, 0, 1),
                 Token::with_size(TokenKind::List, 5, 17, 1, 5),
-                Token::with_size(TokenKind::Dict, 6, 16, 2, 4),
+                Token::with_size(TokenKind::Dict, 6, 16, 1, 4),
                 Token::with_size(TokenKind::ByteStr, 9, 11, 0, 1),
                 Token::with_size(TokenKind::List, 11, 15, 1, 2),
                 Token::with_size(TokenKind::List, 12, 14, 0, 1),
