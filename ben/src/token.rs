@@ -32,9 +32,6 @@ impl Token {
     }
 
     /// Returns this token's bounds in the original buffer.
-    ///
-    /// # Panics
-    /// If the token is not valid
     pub fn range(&self) -> Range<usize> {
         debug_assert!(self.end >= self.start);
 

@@ -133,8 +133,8 @@ pub trait Encoder: sealed::Sealed {
 
     /// Create a new object which accepts exactly 'n' bytes lazily.
     ///
-    /// The returned object will panic if the total number of added bytes
-    /// is not equal to 'n'.
+    /// The returned object's drop will panic if the total number of
+    /// added bytes is not equal to 'n'.
     fn add_bytes_exact(&mut self, len: usize) -> BytesExact<'_>;
 
     /// Encode string slice.
