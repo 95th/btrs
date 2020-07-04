@@ -1,7 +1,5 @@
 use crate::contact::Contact;
 
-pub(crate) const BUCKET_SIZE: usize = 8;
-
 #[derive(Debug, Default)]
 pub struct Bucket {
     pub live: Vec<Contact>,
@@ -9,6 +7,9 @@ pub struct Bucket {
 }
 
 impl Bucket {
+    // The 'K' constant in Kademlia algorithm
+    pub const MAX_LEN: usize = 8;
+
     pub fn new() -> Self {
         Self::default()
     }
