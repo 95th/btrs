@@ -23,12 +23,11 @@ impl Parser {
         Self::default()
     }
 
-    /// Create a new Bencode parser with limit on number of tokens that
-    /// can be created during parsing.
-    pub fn with_token_limit(token_limit: usize) -> Self {
+    /// Set a limit on number of tokens that can be created during parsing.
+    pub fn token_limit(self, token_limit: usize) -> Self {
         Self {
             token_limit,
-            ..Self::default()
+            ..self
         }
     }
 
@@ -222,7 +221,7 @@ impl<'a, 't> State<'a, 't> {
 
     fn create_token(&mut self, kind: TokenKind) -> Result<usize> {
         if self.tokens.len() == self.token_limit {
-            return Err(Error::NoMemory);
+            return Err(Error::TokenLimit);
         }
         let token = Token::new(kind, self.pos as u32, self.pos as u32);
         self.tokens.push(token);
@@ -414,9 +413,9 @@ mod tests {
     #[test]
     fn token_limit() {
         let s = b"l1:a2:ab3:abc4:abcde";
-        let mut parser = Parser::with_token_limit(3);
+        let mut parser = Parser::new().token_limit(3);
         let err = parser.parse::<Decoder>(s).unwrap_err();
-        assert_eq!(Error::NoMemory, err);
+        assert_eq!(Error::TokenLimit, err);
     }
 
     #[test]

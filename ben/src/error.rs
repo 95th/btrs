@@ -14,7 +14,7 @@ pub enum Error {
     Invalid { reason: &'static str, pos: usize },
 
     /// Not enough tokens were provided
-    NoMemory,
+    TokenLimit,
 
     /// Integer Overflow
     Overflow { pos: usize },
@@ -32,7 +32,7 @@ impl fmt::Display for Error {
             Self::Eof => write!(f, "Unexpected End of File"),
             Self::Unexpected { pos } => write!(f, "Unexpected character at {}", pos),
             Self::Invalid { reason, pos } => write!(f, "Invalid input at {}: {}", pos, reason),
-            Self::NoMemory => write!(f, "No tokens left to parse"),
+            Self::TokenLimit => write!(f, "No tokens left to parse"),
             Self::Overflow { pos } => write!(f, "Integer overflow at {}", pos),
             Self::TypeMismatch(reason) => write!(f, "Type mismatch: {}", reason),
             Self::Other(reason) => f.write_str(reason),
