@@ -4,31 +4,43 @@ use crate::token::{Token, TokenKind};
 
 /// Bencode Parser
 pub struct Parser {
-    token_limit: usize,
     tokens: Vec<Token>,
+    token_limit: usize,
+    depth_limit: usize,
 }
 
 impl Default for Parser {
     fn default() -> Self {
         Self {
-            token_limit: usize::max_value(),
             tokens: vec![],
+            token_limit: usize::max_value(),
+            depth_limit: usize::max_value(),
         }
     }
 }
 
 impl Parser {
-    /// Create a new Bencode parser
+    /// Create a new Bencode parser.
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Set a limit on number of tokens that can be created during parsing.
-    pub fn token_limit(self, token_limit: usize) -> Self {
+    /// Create a new Bencode parser with given initial token capacity.
+    pub fn with_capacity(capacity: usize) -> Self {
         Self {
-            token_limit,
-            ..self
+            tokens: Vec::with_capacity(capacity),
+            ..Self::default()
         }
+    }
+
+    /// Set a limit on number of tokens that can be created during parsing.
+    pub fn token_limit(&mut self, token_limit: usize) {
+        self.token_limit = token_limit;
+    }
+
+    /// Set a limit on depth of object nesting that is allowed during parsing.
+    pub fn depth_limit(&mut self, depth_limit: usize) {
+        self.depth_limit = depth_limit
     }
 
     /// Parse a bencoded slice and returns the parsed object
@@ -71,6 +83,8 @@ impl Parser {
             pos: 0,
             tokens: &mut self.tokens,
             token_limit: self.token_limit,
+            depth_limit: self.depth_limit,
+            current_depth: 0,
         };
 
         state.parse_object()?;
@@ -85,6 +99,8 @@ struct State<'a, 't> {
     pos: usize,
     tokens: &'t mut Vec<Token>,
     token_limit: usize,
+    depth_limit: usize,
+    current_depth: usize,
 }
 
 impl<'a, 't> State<'a, 't> {
@@ -99,13 +115,24 @@ impl<'a, 't> State<'a, 't> {
     }
 
     fn parse_object(&mut self) -> Result<()> {
-        match self.peek_char()? {
+        self.current_depth += 1;
+
+        if self.current_depth > self.depth_limit {
+            return Err(Error::DepthLimit {
+                limit: self.depth_limit,
+            });
+        }
+
+        let result = match self.peek_char()? {
             b'd' => self.parse_dict(),
             b'l' => self.parse_list(),
             b'i' => self.parse_int(),
             b'0'..=b'9' => self.parse_string(),
             _ => Err(Error::Unexpected { pos: self.pos }),
-        }
+        };
+
+        self.current_depth -= 1;
+        result
     }
 
     fn parse_dict(&mut self) -> Result<()> {
@@ -221,7 +248,9 @@ impl<'a, 't> State<'a, 't> {
 
     fn create_token(&mut self, kind: TokenKind) -> Result<usize> {
         if self.tokens.len() == self.token_limit {
-            return Err(Error::TokenLimit);
+            return Err(Error::TokenLimit {
+                limit: self.token_limit,
+            });
         }
         let token = Token::new(kind, self.pos as u32, self.pos as u32);
         self.tokens.push(token);
@@ -412,10 +441,30 @@ mod tests {
 
     #[test]
     fn token_limit() {
+        let mut parser = Parser::new();
+        parser.token_limit(3);
+
         let s = b"l1:a2:ab3:abc4:abcde";
-        let mut parser = Parser::new().token_limit(3);
         let err = parser.parse::<Decoder>(s).unwrap_err();
-        assert_eq!(Error::TokenLimit, err);
+        assert_eq!(Error::TokenLimit { limit: 3 }, err);
+
+        let decoder = parser.parse::<Decoder>(b"le").unwrap();
+        assert_eq!(b"le", decoder.as_raw_bytes());
+    }
+
+    #[test]
+    fn depth_limit() {
+        let mut parser = Parser::new();
+        parser.depth_limit(3);
+
+        let err = parser.parse::<Decoder>(b"lllleeee").unwrap_err();
+        assert_eq!(Error::DepthLimit { limit: 3 }, err);
+
+        let decoder = parser.parse::<Decoder>(b"llleee").unwrap();
+        assert_eq!(b"llleee", decoder.as_raw_bytes());
+
+        let decoder = parser.parse::<Decoder>(b"ld1:aleee").unwrap();
+        assert_eq!(b"ld1:aleee", decoder.as_raw_bytes());
     }
 
     #[test]

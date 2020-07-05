@@ -4,11 +4,9 @@ use crate::msg::{AnnouncePeer, FindNode, GetPeers, Msg, MsgKind, TxnId};
 use crate::table::RoutingTable;
 use anyhow::Context;
 use ben::{Decode, Decoder, Encode, Parser};
-use std::{
-    collections::HashMap,
-    net::SocketAddr,
-    time::{Duration, Instant},
-};
+use std::collections::HashMap;
+use std::net::SocketAddr;
+use std::time::{Duration, Instant};
 use tokio::net::UdpSocket;
 
 pub struct Server {

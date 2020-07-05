@@ -13,8 +13,11 @@ pub enum Error {
     /// Invalid data at given position
     Invalid { reason: &'static str, pos: usize },
 
-    /// Not enough tokens were provided
-    TokenLimit,
+    /// Exceeded Token limit
+    TokenLimit { limit: usize },
+
+    /// Exceeded Depth limit
+    DepthLimit { limit: usize },
 
     /// Integer Overflow
     Overflow { pos: usize },
@@ -32,7 +35,8 @@ impl fmt::Display for Error {
             Self::Eof => write!(f, "Unexpected End of File"),
             Self::Unexpected { pos } => write!(f, "Unexpected character at {}", pos),
             Self::Invalid { reason, pos } => write!(f, "Invalid input at {}: {}", pos, reason),
-            Self::TokenLimit => write!(f, "No tokens left to parse"),
+            Self::TokenLimit { limit } => write!(f, "Exceeded Token limit of {}", limit),
+            Self::DepthLimit { limit } => write!(f, "Exceeded Depth limit of {}", limit),
             Self::Overflow { pos } => write!(f, "Integer overflow at {}", pos),
             Self::TypeMismatch(reason) => write!(f, "Type mismatch: {}", reason),
             Self::Other(reason) => f.write_str(reason),
