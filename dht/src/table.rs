@@ -36,7 +36,6 @@ impl RoutingTable {
     pub fn add_contact(&mut self, contact: &ContactRef<'_>) -> bool {
         let mut result = self.add_contact_impl(contact);
         loop {
-            trace!("Adding {:?}, got: {:?}", contact, result);
             match result {
                 BucketResult::Success => return true,
                 BucketResult::Fail => return false,
@@ -64,11 +63,8 @@ impl RoutingTable {
         }
     }
 
-    pub fn find_closest<'a>(
-        &'a mut self,
-        target: &NodeId,
-        out: &mut Vec<&'a mut Contact>,
-    ) -> &'a NodeId {
+    pub fn find_closest<'a>(&'a mut self, target: &NodeId, count: usize) -> Vec<&'a mut Contact> {
+        let mut out = Vec::with_capacity(count);
         let bucket_no = self.find_bucket(target);
 
         // Safety: We're just getting mutable references to contacts in the different buckets.
@@ -79,19 +75,19 @@ impl RoutingTable {
             let ptr = self.buckets.as_mut_ptr();
 
             let bucket = &mut *ptr.add(bucket_no);
-            bucket.get_contacts(out);
+            bucket.get_contacts(&mut out);
 
             let mut i = 1;
 
             while out.len() < out.capacity() && (i <= bucket_no || bucket_no + i < len) {
                 if i <= bucket_no {
                     let bucket = &mut *ptr.add(bucket_no - i);
-                    bucket.get_contacts(out);
+                    bucket.get_contacts(&mut out);
                 }
 
                 if bucket_no + i < len {
                     let bucket = &mut *ptr.add(bucket_no + i);
-                    bucket.get_contacts(out);
+                    bucket.get_contacts(&mut out);
                 }
 
                 i += 1;
@@ -99,7 +95,7 @@ impl RoutingTable {
         }
 
         out.sort_unstable_by_key(|c| target ^ &c.id);
-        &self.own_id
+        out
     }
 
     pub fn len(&self) -> usize {
@@ -114,9 +110,15 @@ impl RoutingTable {
         self.len() == 0
     }
 
-    pub fn find_contact(&mut self, id: &NodeId) -> Option<&mut Contact> {
+    pub fn find_contact_by_id(&mut self, id: &NodeId) -> Option<&mut Contact> {
         let idx = self.find_bucket(id);
         self.buckets[idx].live.iter_mut().find(|c| c.id == *id)
+    }
+
+    pub fn find_contact(&mut self, addr: &SocketAddr) -> Option<&mut Contact> {
+        self.buckets
+            .iter_mut()
+            .find_map(|b| b.live.iter_mut().find(|c| c.addr == *addr))
     }
 
     fn add_contact_impl(&mut self, contact: &ContactRef<'_>) -> BucketResult {
@@ -356,9 +358,7 @@ mod tests {
             assert!(added, "Adding contact failed at {}", i);
         }
 
-        let mut closest = Vec::with_capacity(20);
-        let own_id = table.find_closest(&NodeId::of_byte(1), &mut closest);
-        assert_eq!(own_id, &NodeId::of_byte(0));
+        let closest = table.find_closest(&NodeId::of_byte(1), 20);
 
         let mut closest_iter = closest.into_iter();
         for i in 0..20 {

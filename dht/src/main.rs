@@ -13,6 +13,6 @@ async fn main() -> anyhow::Result<()> {
         let info_hash = NodeId::from_hex(b"e8f5dec8c3e35f090a105da0da865d77099cf59e").unwrap();
         server.get_peers(&info_hash).await
     };
-    dht::future::timeout(f, 10).await?;
+    dht::future::timeout(f, 60).await?;
     Ok(())
 }
