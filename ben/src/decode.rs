@@ -272,9 +272,7 @@ impl<'a, 'p> Decoder<'a, 'p> {
         }
         let mut val = 0;
         let mut negative = false;
-        let bytes = self.buf.get(self.token.range());
-        debug_assert!(bytes.is_some());
-        for &c in bytes? {
+        for &c in self.as_raw_bytes() {
             if c == b'-' {
                 negative = true;
             } else {
@@ -283,8 +281,8 @@ impl<'a, 'p> Decoder<'a, 'p> {
             }
         }
         if negative {
-            val *= -1
-        };
+            val *= -1;
+        }
         Some(val)
     }
 
@@ -303,9 +301,7 @@ impl<'a, 'p> Decoder<'a, 'p> {
     /// ```
     pub fn as_bytes(&self) -> Option<&'a [u8]> {
         if let TokenKind::ByteStr = self.token.kind {
-            let bytes = self.buf.get(self.token.range());
-            debug_assert!(bytes.is_some());
-            bytes
+            Some(self.as_raw_bytes())
         } else {
             None
         }
