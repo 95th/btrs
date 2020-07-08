@@ -267,7 +267,7 @@ impl<'a, 'p> Decoder<'a, 'p> {
     /// assert_eq!(123, decoder.as_int().unwrap());
     /// ```
     pub fn as_int(&self) -> Option<i64> {
-        if self.token.kind != TokenKind::Int {
+        if !self.is_int() {
             return None;
         }
         let mut val = 0;
@@ -300,7 +300,7 @@ impl<'a, 'p> Decoder<'a, 'p> {
     /// assert_eq!(b"abc", decoder.as_bytes().unwrap());
     /// ```
     pub fn as_bytes(&self) -> Option<&'a [u8]> {
-        if let TokenKind::ByteStr = self.token.kind {
+        if self.is_bytes() {
             Some(self.as_raw_bytes())
         } else {
             None
