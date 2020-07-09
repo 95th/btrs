@@ -1,9 +1,11 @@
+use crate::bucket::Bucket;
 use crate::contact::{CompactNodes, CompactNodesV6, ContactStatus};
 use crate::id::NodeId;
-use crate::msg::{AnnouncePeer, FindNode, GetPeers, Msg, MsgKind, TxnId};
+use crate::msg::{FindNode, Msg, MsgKind, TxnId};
 use crate::table::RoutingTable;
-use anyhow::Context;
-use ben::{Decode, Decoder, Encode, Parser};
+use anyhow::Context as _;
+use ben::{Decoder, Encode, Parser};
+use futures::FutureExt;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
@@ -14,10 +16,14 @@ pub struct Server {
     table: RoutingTable,
     txn_id: TxnId,
     own_id: NodeId,
+    txns: HashMap<TxnId, SocketAddr>,
+    bootstrapping: bool,
+    bootstrap_nodes: Vec<SocketAddr>,
+    next_refresh: Instant,
 }
 
 impl Server {
-    pub async fn new(port: u16) -> anyhow::Result<Server> {
+    pub async fn new(port: u16, bootstrap_nodes: Vec<SocketAddr>) -> anyhow::Result<Server> {
         let addr = SocketAddr::from(([0u8; 4], port));
         let socket = UdpSocket::bind(addr).await?;
         let id = NodeId::gen();
@@ -27,216 +33,183 @@ impl Server {
             table: RoutingTable::new(id.clone()),
             txn_id: TxnId(0),
             own_id: id,
+            txns: HashMap::new(),
+            bootstrapping: true,
+            bootstrap_nodes,
+            next_refresh: Instant::now(),
         })
     }
 
-    pub async fn boostrap(&mut self, addrs: &[SocketAddr]) -> anyhow::Result<()> {
-        trace!("Bootstrapping");
-
-        let id = &self.own_id.clone();
-        self.find_node(id, addrs).await?;
-
-        let mut distance = NodeId::max();
+    pub async fn run(mut self) {
         loop {
-            debug!("distance now: {:?}", distance);
-            let closest = self.table.find_closest(id, 8);
-            if let Some(closest) = closest.first() {
-                let min_dist = &closest.id ^ id;
-                if min_dist >= distance {
-                    debug!("Minimum distance reached");
-                    break;
-                }
-                debug!("Closer distance found: {:?}", min_dist);
-                distance = min_dist;
-            } else {
-                debug!("No nodes to begin with");
+            self.bootstrap().await;
+
+            if self.check_client_request() {
+                // TODO: Save DHT state on disk
                 break;
             }
 
-            let addrs: Vec<_> = closest.iter().map(|c| c.addr).collect();
-            self.find_node(id, &addrs).await?;
-        }
+            self.recv_response().await;
 
-        trace!("{:#?}", self.table);
-        Ok(())
+            // Self refresh after 15 mins
+            const REFRESH_INTERVAL: Duration = Duration::from_secs(15 * 60);
+
+            if Instant::now() >= self.next_refresh {
+                self.bootstrapping = true;
+                self.next_refresh = Instant::now() + REFRESH_INTERVAL;
+            }
+
+            self.check_stale_transactions();
+        }
     }
 
-    pub async fn find_node(&mut self, target: &NodeId, addrs: &[SocketAddr]) -> anyhow::Result<()> {
-        debug!("Find nodes for target: {:?}", target);
+    async fn bootstrap(&mut self) {
+        if !self.bootstrapping {
+            return;
+        }
 
-        let mut pending = HashMap::new();
-        let mut txn_id = self.txn_id.next();
-        for addr in addrs {
-            let request = FindNode {
-                txn_id,
-                id: &self.table.own_id,
-                target,
-            };
+        let mut min_dist = NodeId::max();
+        let own_id = &self.own_id.clone();
 
-            match self.socket.send(request, addr).await {
-                Ok(_) => {
-                    pending.insert(txn_id, addr);
-                    txn_id = self.txn_id.next();
-                }
-                Err(e) => {
-                    warn!("{}", e);
-                    continue;
-                }
+        loop {
+            self.find_node(own_id).await;
+            self.recv_response().await;
+
+            let dist = self.table.min_dist(own_id);
+            if dist < min_dist {
+                min_dist = dist;
+                trace!("Found closer distance: {:?}", min_dist);
+            } else {
+                trace!("Reached closest distance: {:?}", min_dist);
+                break;
             }
         }
 
-        debug!("Sent {} FIND_NODE messages", pending.len());
-
-        let f = async {
-            while !pending.is_empty() {
-                if let Err(e) = self.read_find_node_response(&mut pending).await {
-                    warn!("{}", e);
-                }
-            }
-        };
-
-        let timeout = Instant::now() + Duration::from_secs(5);
-        if let Err(e) = tokio::time::timeout_at(timeout.into(), f).await {
-            warn!("Timed out: {}", e);
-        }
-
-        for (_, addr) in pending {
-            if let Some(c) = self.table.find_contact(addr) {
-                c.status = ContactStatus::FAILED;
-                c.timed_out();
-            }
-        }
-
-        Ok(())
+        self.bootstrapping = false;
     }
 
-    async fn read_find_node_response(
-        &mut self,
-        pending: &mut HashMap<TxnId, &SocketAddr>,
-    ) -> anyhow::Result<()> {
-        let (msg, rx_addr) = self.socket.recv::<Msg>().await?;
+    async fn find_node(&mut self, target: &NodeId) -> usize {
+        let mut contacts = vec![];
+        self.table
+            .find_closest(target, &mut contacts, Bucket::MAX_LEN);
 
-        let addr = pending
-            .remove(&msg.txn_id)
-            .context("Response received from unexpected address")?;
-
-        ensure!(rx_addr == *addr, "Address mismatch");
-        ensure!(msg.kind == MsgKind::Response, "Expected response");
-
-        self.table.read_nodes(&msg)
-    }
-
-    pub async fn get_peers(&mut self, info_hash: &NodeId) -> anyhow::Result<()> {
-        debug!("Get peers for infohash: {:?}", info_hash);
-
-        let closest = self.table.find_closest(info_hash, 8);
-        if closest.is_empty() {
-            return Ok(());
-        }
-
-        let mut txn_id = self.txn_id.next();
-        let mut pending = HashMap::new();
-        for contact in closest {
-            let msg = GetPeers {
-                id: &self.own_id,
-                info_hash,
-                txn_id,
-            };
-
-            match self.socket.send(msg, &contact.addr).await {
-                Ok(_) => {
-                    pending.insert(txn_id, contact.addr);
-                    contact.status = ContactStatus::QUERIED;
-                    txn_id = self.txn_id.next();
-                }
-                Err(e) => {
-                    contact.status = ContactStatus::FAILED;
-                    warn!("{}", e);
-                }
-            }
-        }
-
-        debug!("Sent {} GET_PEERS messages", pending.len());
-
-        let f = async {
-            while !pending.is_empty() {
-                if let Err(e) = self.read_get_peers_response(&mut pending).await {
-                    warn!("{}", e);
-                }
-            }
-        };
-
-        let timeout = Instant::now() + Duration::from_secs(5);
-        if let Err(e) = tokio::time::timeout_at(timeout.into(), f).await {
-            warn!("Timed out: {}", e);
-        }
-
-        for (_, addr) in pending {
-            if let Some(c) = self.table.find_contact(&addr) {
-                c.status = ContactStatus::FAILED;
-                c.timed_out();
-            }
-        }
-
-        Ok(())
-    }
-
-    async fn read_get_peers_response(
-        &mut self,
-        pending: &mut HashMap<TxnId, SocketAddr>,
-    ) -> anyhow::Result<()> {
-        let (msg, rx_addr) = self.socket.recv::<Msg>().await?;
-
-        let addr = pending
-            .remove(&msg.txn_id)
-            .context("Response received from unexpected address")?;
-
-        ensure!(rx_addr == addr, "Address mismatch");
-        ensure!(msg.kind == MsgKind::Response, "Expected response");
-
-        self.table.read_nodes(&msg)
-    }
-
-    pub async fn announce(&mut self, info_hash: &NodeId) -> anyhow::Result<()> {
-        self.get_peers(info_hash).await?;
-
-        let closest = self.table.find_closest(info_hash, 8);
-
-        let mut pending = vec![];
-        for c in &closest {
-            let txn_id = self.txn_id.next();
-            let req = AnnouncePeer {
-                id: &self.own_id,
-                implied_port: true,
-                port: 0,
-                token: &[0],
-                info_hash,
-                txn_id,
-            };
-
-            match self.socket.send(&req, &c.addr).await {
-                Ok(_) => pending.push(c.addr),
-                Err(e) => warn!("{}", e),
-            }
-        }
-
-        while !pending.is_empty() {
-            match self.socket.recv::<Msg>().await {
-                Ok((_msg, rx_addr)) => {
-                    if let Some(i) = pending.iter().position(|a| *a == rx_addr) {
-                        pending.remove(i);
+        let mut sent = 0;
+        if contacts.is_empty() {
+            trace!("No contacts in routing table, use bootstrap nodes");
+            for node in &self.bootstrap_nodes {
+                let m = FindNode {
+                    id: &self.own_id,
+                    target,
+                    txn_id: self.txn_id.next(),
+                };
+                match self.socket.send(&m, node).await {
+                    Ok(_) => {
+                        sent += 1;
+                        self.txns.insert(m.txn_id, *node);
                     }
+                    Err(e) => warn!("FIND_NODE to bootstrap node {} failed: {}", node, e),
                 }
-                Err(e) => warn!("{}", e),
             }
         }
 
-        Ok(())
+        for c in contacts {
+            let m = FindNode {
+                id: &self.own_id,
+                target,
+                txn_id: self.txn_id.next(),
+            };
+            match self.socket.send(&m, &c.addr).await {
+                Ok(_) => {
+                    c.status = ContactStatus::QUERIED;
+                    c.last_queried = Instant::now();
+                    self.txns.insert(m.txn_id, c.addr);
+                    sent += 1;
+                }
+                Err(e) => {
+                    warn!("FIND_NODE to {} failed: {}", c.addr, e);
+                }
+            }
+        }
+        sent
+    }
+
+    fn check_client_request(&mut self) -> bool {
+        // TODO
+        false
+    }
+
+    async fn recv_response(&mut self) {
+        let (msg, _) = match self.socket.recv_now().await {
+            Ok(Some(x)) => x,
+            Ok(None) => return,
+            Err(e) => {
+                warn!("{}", e);
+                return;
+            }
+        };
+
+        if let MsgKind::Response = msg.kind {
+            let addr = match self.txns.remove(&msg.txn_id) {
+                Some(x) => x,
+                None => {
+                    warn!(
+                        "Message received (txn id: {:?}) from unexpected address",
+                        msg.txn_id
+                    );
+                    return;
+                }
+            };
+
+            if let Some(c) = self.table.find_contact(&addr) {
+                c.status = ContactStatus::ALIVE | ContactStatus::QUERIED;
+                c.clear_timeout();
+                c.last_updated = Instant::now();
+            }
+
+            self.table.handle_response(&msg);
+            return;
+        }
+
+        if let MsgKind::Error = msg.kind {
+            warn!("{:?}", msg);
+            return;
+        }
+
+        self.table.handle_query(&msg);
+    }
+
+    fn check_stale_transactions(&mut self) {
+        const TIMEOUT: Duration = Duration::from_secs(5);
+
+        let txns = std::mem::replace(&mut self.txns, HashMap::new());
+        for (txn_id, addr) in txns {
+            if let Some(c) = self.table.find_contact(&addr) {
+                if Instant::now() - c.last_queried < TIMEOUT {
+                    // Not timed out, keep it
+                    self.txns.insert(txn_id, addr);
+                }
+            }
+        }
     }
 }
 
 impl RoutingTable {
-    fn read_nodes(&mut self, msg: &Msg<'_, '_>) -> anyhow::Result<()> {
+    fn handle_query(&mut self, msg: &Msg) {
+        debug!("Got query request: {:#?}", msg);
+    }
+
+    fn handle_response(&mut self, msg: &Msg) {
+        match msg.kind {
+            MsgKind::Response => {
+                if let Err(e) = self.read_nodes(msg) {
+                    warn!("{}", e);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn read_nodes(&mut self, msg: &Msg) -> anyhow::Result<()> {
         if let MsgKind::Response = msg.kind {
             let resp = msg.body.get_dict(b"r").context("Response dict expected")?;
 
@@ -258,6 +231,7 @@ impl RoutingTable {
 struct BufSocket {
     socket: UdpSocket,
     buf: Vec<u8>,
+    recv_buf: Box<[u8]>,
     parser: Parser,
 }
 
@@ -266,6 +240,7 @@ impl BufSocket {
         Self {
             socket,
             buf: Vec::new(),
+            recv_buf: vec![0; 2048].into_boxed_slice(),
             parser: Parser::new(),
         }
     }
@@ -275,7 +250,7 @@ impl BufSocket {
         msg.encode(&mut self.buf);
 
         trace!(
-            "Sending: {:#?}",
+            "Sending: {:?}",
             self.parser.parse::<Decoder>(&self.buf).unwrap()
         );
 
@@ -287,18 +262,26 @@ impl BufSocket {
         Ok(())
     }
 
-    async fn recv<'a, D>(&'a mut self) -> anyhow::Result<(D, SocketAddr)>
-    where
-        D: Decode<'a, 'a> + std::fmt::Debug,
-    {
-        self.buf.resize(1000, 0);
+    async fn recv_now<'a>(&'a mut self) -> anyhow::Result<Option<(Msg<'a, 'a>, SocketAddr)>> {
+        let (n, addr) = {
+            let f = self.socket.recv_from(&mut self.recv_buf).fuse();
+            let t = tokio::time::delay_for(Duration::from_millis(100)).fuse();
 
-        let (n, addr) = self.socket.recv_from(&mut self.buf).await?;
+            futures::pin_mut!(f);
+            futures::pin_mut!(t);
+
+            // Check the socket first. If socket is not ready, select
+            // should yield immediately from empty future
+            futures::select_biased! {
+                result = f => result?,
+                () = t => return Ok(None),
+            }
+        };
         trace!("Received: {} bytes", n);
 
-        let msg = self.parser.parse(&self.buf[..n])?;
+        let msg = self.parser.parse(&self.recv_buf[..n])?;
         trace!("message: {:?}", msg);
 
-        Ok((msg, addr))
+        Ok(Some((msg, addr)))
     }
 }

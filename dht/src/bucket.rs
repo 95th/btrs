@@ -14,9 +14,9 @@ impl Bucket {
         Self::default()
     }
 
-    pub fn get_contacts<'a>(&'a mut self, out: &mut Vec<&'a mut Contact>) {
+    pub fn get_contacts<'a>(&'a mut self, out: &mut Vec<&'a mut Contact>, count: usize) {
         for c in &mut self.live {
-            if out.len() >= out.capacity() {
+            if out.len() >= count {
                 break;
             }
             out.push(c);
