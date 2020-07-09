@@ -5,7 +5,6 @@ use crate::msg::{FindNode, Msg, MsgKind, TxnId};
 use crate::table::RoutingTable;
 use anyhow::Context as _;
 use ben::{Decoder, Encode, Parser};
-use futures::FutureExt;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
@@ -49,7 +48,7 @@ impl Server {
                 break;
             }
 
-            self.recv_response().await;
+            self.recv_response_timeout(Duration::from_millis(100)).await;
 
             // Self refresh after 15 mins
             const REFRESH_INTERVAL: Duration = Duration::from_secs(15 * 60);
@@ -72,7 +71,10 @@ impl Server {
         let own_id = &self.own_id.clone();
 
         loop {
-            self.find_node(own_id).await;
+            let sent = self.find_node(own_id).await;
+            if sent == 0 {
+                break;
+            }
             self.recv_response().await;
 
             let dist = self.table.min_dist(own_id);
@@ -139,7 +141,46 @@ impl Server {
     }
 
     async fn recv_response(&mut self) {
-        let (msg, _) = match self.socket.recv_now().await {
+        let (msg, _) = match self.socket.recv().await {
+            Ok(x) => x,
+            Err(e) => {
+                warn!("{}", e);
+                return;
+            }
+        };
+
+        if let MsgKind::Response = msg.kind {
+            let addr = match self.txns.remove(&msg.txn_id) {
+                Some(x) => x,
+                None => {
+                    warn!(
+                        "Message received (txn id: {:?}) from unexpected address",
+                        msg.txn_id
+                    );
+                    return;
+                }
+            };
+
+            if let Some(c) = self.table.find_contact(&addr) {
+                c.status = ContactStatus::ALIVE | ContactStatus::QUERIED;
+                c.clear_timeout();
+                c.last_updated = Instant::now();
+            }
+
+            self.table.handle_response(&msg);
+            return;
+        }
+
+        if let MsgKind::Error = msg.kind {
+            warn!("{:?}", msg);
+            return;
+        }
+
+        self.table.handle_query(&msg);
+    }
+
+    async fn recv_response_timeout(&mut self, timeout: Duration) {
+        let (msg, _) = match self.socket.recv_timeout(timeout).await {
             Ok(Some(x)) => x,
             Ok(None) => return,
             Err(e) => {
@@ -187,6 +228,8 @@ impl Server {
                 if Instant::now() - c.last_queried < TIMEOUT {
                     // Not timed out, keep it
                     self.txns.insert(txn_id, addr);
+                } else {
+                    c.timed_out();
                 }
             }
         }
@@ -262,26 +305,21 @@ impl BufSocket {
         Ok(())
     }
 
-    async fn recv_now<'a>(&'a mut self) -> anyhow::Result<Option<(Msg<'a, 'a>, SocketAddr)>> {
-        let (n, addr) = {
-            let f = self.socket.recv_from(&mut self.recv_buf).fuse();
-            let t = tokio::time::delay_for(Duration::from_millis(100)).fuse();
-
-            futures::pin_mut!(f);
-            futures::pin_mut!(t);
-
-            // Check the socket first. If socket is not ready, select
-            // should yield immediately from empty future
-            futures::select_biased! {
-                result = f => result?,
-                () = t => return Ok(None),
-            }
-        };
+    async fn recv<'a>(&'a mut self) -> anyhow::Result<(Msg<'a, 'a>, SocketAddr)> {
+        let (n, addr) = self.socket.recv_from(&mut self.recv_buf).await?;
         trace!("Received: {} bytes", n);
 
         let msg = self.parser.parse(&self.recv_buf[..n])?;
-        trace!("message: {:?}", msg);
+        Ok((msg, addr))
+    }
 
-        Ok(Some((msg, addr)))
+    async fn recv_timeout<'a>(
+        &'a mut self,
+        timeout: Duration,
+    ) -> anyhow::Result<Option<(Msg<'a, 'a>, SocketAddr)>> {
+        match tokio::time::timeout(timeout, self.recv()).await {
+            Ok(x) => x.map(Some),
+            Err(_) => Ok(None),
+        }
     }
 }

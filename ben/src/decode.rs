@@ -542,8 +542,13 @@ impl<'a, 'p> Dict<'a, 'p> {
 
     /// Returns the `Decoder` for the given key.
     pub fn get(&self, key: &[u8]) -> Option<Decoder<'a, 'p>> {
-        self.iter()
-            .find_map(|(k, v)| if k == key { Some(v) } else { None })
+        self.iter().find_map(|(k, v)| {
+            if k.as_bytes() == Some(key) {
+                Some(v)
+            } else {
+                None
+            }
+        })
     }
 
     /// Returns the `Dict` for the given key.
@@ -596,7 +601,7 @@ pub struct DictIter<'a, 'p> {
 }
 
 impl<'a, 'p> Iterator for DictIter<'a, 'p> {
-    type Item = (&'a [u8], Decoder<'a, 'p>);
+    type Item = (Decoder<'a, 'p>, Decoder<'a, 'p>);
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.pos >= self.total {
@@ -617,7 +622,7 @@ impl<'a, 'p> Iterator for DictIter<'a, 'p> {
         self.index += val.token.next as usize;
         self.pos += 1;
 
-        Some((key.as_bytes()?, val))
+        Some((key, val))
     }
 }
 
@@ -687,11 +692,11 @@ mod tests {
         let mut iter = dict.iter();
 
         let (k, v) = iter.next().unwrap();
-        assert_eq!(b"a", k);
+        assert_eq!(b"a", k.as_raw_bytes());
         assert_eq!(b"bc", v.as_raw_bytes());
 
         let (k, v) = iter.next().unwrap();
-        assert_eq!(b"def", k);
+        assert_eq!(b"def", k.as_raw_bytes());
         assert_eq!(b"ghij", v.as_raw_bytes());
 
         assert_eq!(None, iter.next());
@@ -705,7 +710,7 @@ mod tests {
         let mut iter = dict.iter();
 
         let (k, v) = iter.next().unwrap();
-        assert_eq!(b"a", k);
+        assert_eq!(b"a", k.as_raw_bytes());
         assert_eq!(b"le", v.as_raw_bytes());
 
         assert_eq!(None, iter.next());
@@ -726,7 +731,7 @@ mod tests {
         let mut iter = dict.as_dict().unwrap().iter();
 
         let (k, v) = iter.next().unwrap();
-        assert_eq!(b"a", k);
+        assert_eq!(b"a", k.as_raw_bytes());
         assert_eq!(b"le", v.as_raw_bytes());
 
         assert_eq!(None, iter.next());
