@@ -141,56 +141,23 @@ impl Server {
     }
 
     async fn recv_response(&mut self) {
-        let (msg, _) = match self.socket.recv().await {
-            Ok(x) => x,
-            Err(e) => {
-                warn!("{}", e);
-                return;
-            }
-        };
-
-        if let MsgKind::Response = msg.kind {
-            let addr = match self.txns.remove(&msg.txn_id) {
-                Some(x) => x,
-                None => {
-                    warn!(
-                        "Message received (txn id: {:?}) from unexpected address",
-                        msg.txn_id
-                    );
-                    return;
-                }
-            };
-
-            if let Some(c) = self.table.find_contact(&addr) {
-                c.status = ContactStatus::ALIVE | ContactStatus::QUERIED;
-                c.clear_timeout();
-                c.last_updated = Instant::now();
-            }
-
-            self.table.handle_response(&msg);
-            return;
+        match self.socket.recv().await {
+            Ok((msg, _addr)) => Self::handle_response(msg, &mut self.table, &mut self.txns),
+            Err(e) => warn!("{}", e),
         }
-
-        if let MsgKind::Error = msg.kind {
-            warn!("{:?}", msg);
-            return;
-        }
-
-        self.table.handle_query(&msg);
     }
 
     async fn recv_response_timeout(&mut self, timeout: Duration) {
-        let (msg, _) = match self.socket.recv_timeout(timeout).await {
-            Ok(Some(x)) => x,
-            Ok(None) => return,
-            Err(e) => {
-                warn!("{}", e);
-                return;
-            }
-        };
+        match self.socket.recv_timeout(timeout).await {
+            Ok(Some((msg, _addr))) => Self::handle_response(msg, &mut self.table, &mut self.txns),
+            Ok(None) => {}
+            Err(e) => warn!("{}", e),
+        }
+    }
 
+    fn handle_response(msg: Msg, table: &mut RoutingTable, txns: &mut HashMap<TxnId, SocketAddr>) {
         if let MsgKind::Response = msg.kind {
-            let addr = match self.txns.remove(&msg.txn_id) {
+            let addr = match txns.remove(&msg.txn_id) {
                 Some(x) => x,
                 None => {
                     warn!(
@@ -201,13 +168,13 @@ impl Server {
                 }
             };
 
-            if let Some(c) = self.table.find_contact(&addr) {
+            if let Some(c) = table.find_contact(&addr) {
                 c.status = ContactStatus::ALIVE | ContactStatus::QUERIED;
                 c.clear_timeout();
                 c.last_updated = Instant::now();
             }
 
-            self.table.handle_response(&msg);
+            table.handle_response(&msg);
             return;
         }
 
@@ -216,7 +183,7 @@ impl Server {
             return;
         }
 
-        self.table.handle_query(&msg);
+        table.handle_query(&msg);
     }
 
     fn check_stale_transactions(&mut self) {
