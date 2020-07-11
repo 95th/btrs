@@ -15,58 +15,60 @@ pub struct Server {
     table: RoutingTable,
     txn_id: TxnId,
     own_id: NodeId,
-    txns: HashMap<TxnId, SocketAddr>,
-    bootstrapping: bool,
-    bootstrap_nodes: Vec<SocketAddr>,
+    txns: Transactions,
+    router_nodes: Vec<SocketAddr>,
     next_refresh: Instant,
 }
 
 impl Server {
-    pub async fn new(port: u16, bootstrap_nodes: Vec<SocketAddr>) -> anyhow::Result<Server> {
+    pub async fn new(port: u16, router_nodes: Vec<SocketAddr>) -> anyhow::Result<Server> {
         let addr = SocketAddr::from(([0u8; 4], port));
         let socket = UdpSocket::bind(addr).await?;
         let id = NodeId::gen();
 
-        Ok(Server {
+        let mut server = Server {
             socket: BufSocket::new(socket),
             table: RoutingTable::new(id.clone()),
             txn_id: TxnId(0),
             own_id: id,
-            txns: HashMap::new(),
-            bootstrapping: true,
-            bootstrap_nodes,
+            txns: Transactions::new(),
+            router_nodes,
             next_refresh: Instant::now(),
-        })
+        };
+
+        server.bootstrap().await?;
+        Ok(server)
     }
 
     pub async fn run(mut self) {
         loop {
-            self.bootstrap().await;
+            if Instant::now() >= self.next_refresh {
+                // refresh the table
+                self.refresh().await;
 
+                // Self refresh every 15 mins
+                self.next_refresh = Instant::now() + Duration::from_secs(15 * 60);
+            }
+
+            // Check if any request from client such as Announce/Shutdown
             if self.check_client_request() {
                 // TODO: Save DHT state on disk
                 break;
             }
 
+            // Wait for socket response
             self.recv_response_timeout(Duration::from_millis(100)).await;
 
-            // Self refresh after 15 mins
-            const REFRESH_INTERVAL: Duration = Duration::from_secs(15 * 60);
-
-            if Instant::now() >= self.next_refresh {
-                self.bootstrapping = true;
-                self.next_refresh = Instant::now() + REFRESH_INTERVAL;
-            }
-
-            self.check_stale_transactions();
+            // Clear stale transactions
+            self.txns.prune(&mut self.table);
         }
     }
 
-    async fn bootstrap(&mut self) {
-        if !self.bootstrapping {
-            return;
-        }
+    async fn bootstrap(&mut self) -> anyhow::Result<()> {
+        todo!()
+    }
 
+    async fn refresh(&mut self) {
         let mut min_dist = NodeId::max();
         let own_id = &self.own_id.clone();
 
@@ -86,8 +88,6 @@ impl Server {
                 break;
             }
         }
-
-        self.bootstrapping = false;
     }
 
     async fn find_node(&mut self, target: &NodeId) -> usize {
@@ -98,7 +98,7 @@ impl Server {
         let mut sent = 0;
         if contacts.is_empty() {
             trace!("No contacts in routing table, use bootstrap nodes");
-            for node in &self.bootstrap_nodes {
+            for node in &self.router_nodes {
                 let m = FindNode {
                     id: &self.own_id,
                     target,
@@ -129,6 +129,7 @@ impl Server {
                 }
                 Err(e) => {
                     warn!("FIND_NODE to {} failed: {}", c.addr, e);
+                    c.timed_out();
                 }
             }
         }
@@ -142,20 +143,22 @@ impl Server {
 
     async fn recv_response(&mut self) {
         match self.socket.recv().await {
-            Ok((msg, _addr)) => Self::handle_response(msg, &mut self.table, &mut self.txns),
+            Ok((msg, _addr)) => self.table.handle_msg(msg, &mut self.txns),
             Err(e) => warn!("{}", e),
         }
     }
 
     async fn recv_response_timeout(&mut self, timeout: Duration) {
         match self.socket.recv_timeout(timeout).await {
-            Ok(Some((msg, _addr))) => Self::handle_response(msg, &mut self.table, &mut self.txns),
+            Ok(Some((msg, _addr))) => self.table.handle_msg(msg, &mut self.txns),
             Ok(None) => {}
             Err(e) => warn!("{}", e),
         }
     }
+}
 
-    fn handle_response(msg: Msg, table: &mut RoutingTable, txns: &mut HashMap<TxnId, SocketAddr>) {
+impl RoutingTable {
+    fn handle_msg(&mut self, msg: Msg, txns: &mut Transactions) {
         if let MsgKind::Response = msg.kind {
             let addr = match txns.remove(&msg.txn_id) {
                 Some(x) => x,
@@ -168,13 +171,13 @@ impl Server {
                 }
             };
 
-            if let Some(c) = table.find_contact(&addr) {
+            if let Some(c) = self.find_contact(&addr) {
                 c.status = ContactStatus::ALIVE | ContactStatus::QUERIED;
                 c.clear_timeout();
                 c.last_updated = Instant::now();
             }
 
-            table.handle_response(&msg);
+            self.handle_response(&msg);
             return;
         }
 
@@ -183,27 +186,9 @@ impl Server {
             return;
         }
 
-        table.handle_query(&msg);
+        self.handle_query(&msg);
     }
 
-    fn check_stale_transactions(&mut self) {
-        const TIMEOUT: Duration = Duration::from_secs(5);
-
-        let txns = std::mem::replace(&mut self.txns, HashMap::new());
-        for (txn_id, addr) in txns {
-            if let Some(c) = self.table.find_contact(&addr) {
-                if Instant::now() - c.last_queried < TIMEOUT {
-                    // Not timed out, keep it
-                    self.txns.insert(txn_id, addr);
-                } else {
-                    c.timed_out();
-                }
-            }
-        }
-    }
-}
-
-impl RoutingTable {
     fn handle_query(&mut self, msg: &Msg) {
         debug!("Got query request: {:#?}", msg);
     }
@@ -288,5 +273,48 @@ impl BufSocket {
             Ok(x) => x.map(Some),
             Err(_) => Ok(None),
         }
+    }
+}
+
+struct Transactions {
+    pending: HashMap<TxnId, SocketAddr>,
+    timeout: Duration,
+}
+
+impl Transactions {
+    fn new() -> Self {
+        Self::with_timeout(Duration::from_secs(5))
+    }
+
+    fn with_timeout(timeout: Duration) -> Self {
+        Self {
+            pending: HashMap::new(),
+            timeout,
+        }
+    }
+
+    fn insert(&mut self, txn_id: TxnId, addr: SocketAddr) {
+        self.pending.insert(txn_id, addr);
+    }
+
+    fn remove(&mut self, txn_id: &TxnId) -> Option<SocketAddr> {
+        self.pending.remove(txn_id)
+    }
+
+    /// Remove transactions that are timed out or not in Routing table
+    /// anymore.
+    fn prune(&mut self, table: &mut RoutingTable) {
+        let timeout = self.timeout;
+
+        self.pending.retain(|_, addr| {
+            if let Some(c) = table.find_contact(addr) {
+                if Instant::now() - c.last_queried < timeout {
+                    // Not timed out. Keep it.
+                    return true;
+                }
+                c.timed_out();
+            }
+            false
+        });
     }
 }
