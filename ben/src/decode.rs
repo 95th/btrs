@@ -124,9 +124,8 @@ impl<'a, 'p> Decoder<'a, 'p> {
     /// assert_eq!(b"l1:a2:bce", decoder.as_raw_bytes());
     /// ```
     pub fn as_raw_bytes(&self) -> &'a [u8] {
-        let buf = self.buf.get(self.token.range());
-        debug_assert!(buf.is_some());
-        buf.unwrap_or_default()
+        // Safety: Tokens are always in-bounds (ensured by parser)
+        unsafe { self.buf.get_unchecked(self.token.range()) }
     }
 
     /// Returns true if this decoder is a list.
@@ -195,6 +194,7 @@ impl<'a, 'p> Decoder<'a, 'p> {
     /// ```
     pub fn as_list(&self) -> Option<&List<'a, 'p>> {
         if self.is_list() {
+            // Safety: Objects with exact same layout
             let list = unsafe { std::mem::transmute(self) };
             Some(list)
         } else {
@@ -246,6 +246,7 @@ impl<'a, 'p> Decoder<'a, 'p> {
     /// ```
     pub fn as_dict(&self) -> Option<&Dict<'a, 'p>> {
         if self.is_dict() {
+            // Safety: Objects with exact same layout
             let dict = unsafe { std::mem::transmute(self) };
             Some(dict)
         } else {
@@ -398,16 +399,13 @@ impl<'a, 'p> List<'a, 'p> {
     /// assert_eq!(b"l1:a1:be", dict.as_raw_bytes());
     /// ```
     pub fn as_raw_bytes(&self) -> &'a [u8] {
-        let buf = self.buf.get(self.token.range());
-        debug_assert!(buf.is_some());
-        buf.unwrap_or_default()
+        // Safety: Tokens are always in-bounds (ensured by parser)
+        unsafe { self.buf.get_unchecked(self.token.range()) }
     }
 
     /// Returns the `Decoder` at the given index.
     pub fn get(&self, i: usize) -> Option<Decoder<'a, 'p>> {
-        let index = self.find_index(i)?;
-        let tokens = self.rest.get(index..)?;
-        Decoder::new(self.buf, tokens)
+        self.iter().nth(i)
     }
 
     /// Returns the `Dict` at the given index.
@@ -448,23 +446,6 @@ impl<'a, 'p> List<'a, 'p> {
     /// Returns true if the list is empty
     pub fn is_empty(&self) -> bool {
         self.len() == 0
-    }
-
-    /// Find the index of i'th element in the tokens array
-    fn find_index(&self, i: usize) -> Option<usize> {
-        if i >= self.len() {
-            return None;
-        }
-        let mut index = 0;
-        let mut item = 0;
-
-        while item < i {
-            debug_assert!(index < self.rest.len());
-            index += self.rest.get(index)?.next as usize;
-            item += 1;
-        }
-
-        Some(index)
     }
 }
 
@@ -535,15 +516,14 @@ impl<'a, 'p> Dict<'a, 'p> {
     /// assert_eq!(b"d1:a1:be", dict.as_raw_bytes());
     /// ```
     pub fn as_raw_bytes(&self) -> &'a [u8] {
-        let buf = self.buf.get(self.token.range());
-        debug_assert!(buf.is_some());
-        buf.unwrap_or_default()
+        // Safety: Tokens are always in-bounds (ensured by parser)
+        unsafe { self.buf.get_unchecked(self.token.range()) }
     }
 
     /// Returns the `Decoder` for the given key.
     pub fn get(&self, key: &[u8]) -> Option<Decoder<'a, 'p>> {
         self.iter().find_map(|(k, v)| {
-            if k.as_bytes() == Some(key) {
+            if k.as_raw_bytes() == key {
                 Some(v)
             } else {
                 None
