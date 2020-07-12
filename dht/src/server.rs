@@ -5,7 +5,7 @@ use crate::msg::{FindNode, Msg, MsgKind, TxnId};
 use crate::table::RoutingTable;
 use anyhow::Context as _;
 use ben::{Decoder, Encode, Parser};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 use tokio::net::UdpSocket;
@@ -57,7 +57,7 @@ impl Server {
             }
 
             // Wait for socket response
-            self.recv_response_timeout(Duration::from_millis(100)).await;
+            self.recv_response(Duration::from_millis(100)).await;
 
             // Clear stale transactions
             self.txns.prune(&mut self.table);
@@ -65,75 +65,77 @@ impl Server {
     }
 
     async fn bootstrap(&mut self) -> anyhow::Result<()> {
-        todo!()
+        let mut nodes = VecDeque::new();
+        for addr in &self.router_nodes {
+            nodes.push_back(*addr);
+        }
+
+        trace!("Start with {} router nodes", nodes.len());
+
+        let target = &self.own_id.clone();
+        let max_outstanding = 3;
+        let mut min_dist = NodeId::max();
+        let timeout = Instant::now() + Duration::from_secs(20);
+
+        loop {
+            while self.txns.len() < max_outstanding {
+                if let Some(node) = nodes.pop_front() {
+                    self.find_node(target, &node).await;
+                } else {
+                    break;
+                }
+            }
+
+            self.txns.prune(&mut self.table);
+
+            if self.txns.is_empty() || Instant::now() > timeout {
+                trace!("Done bootstrapping. Min dist: {:?}", min_dist);
+                self.next_refresh = Instant::now() + Duration::from_secs(15 * 60);
+                return Ok(());
+            }
+
+            if let Some((msg, _)) = self.socket.recv_timeout(Duration::from_millis(1)).await? {
+                self.table.handle_msg(msg, &mut self.txns);
+
+                let mut closest = Vec::with_capacity(Bucket::MAX_LEN);
+                self.table
+                    .find_closest(target, &mut closest, Bucket::MAX_LEN);
+
+                for c in closest {
+                    let dist = target ^ &c.id;
+                    if dist < min_dist {
+                        nodes.push_front(c.addr);
+                        min_dist = dist;
+                    }
+                }
+            }
+        }
     }
 
     async fn refresh(&mut self) {
-        let mut min_dist = NodeId::max();
-        let own_id = &self.own_id.clone();
-
-        loop {
-            let sent = self.find_node(own_id).await;
-            if sent == 0 {
-                break;
-            }
-            self.recv_response().await;
-
-            let dist = self.table.min_dist(own_id);
-            if dist < min_dist {
-                min_dist = dist;
-                trace!("Found closer distance: {:?}", min_dist);
-            } else {
-                trace!("Reached closest distance: {:?}", min_dist);
-                break;
-            }
+        if let Err(e) = self.bootstrap().await {
+            warn!("{}", e);
         }
     }
 
-    async fn find_node(&mut self, target: &NodeId) -> usize {
-        let mut contacts = vec![];
-        self.table
-            .find_closest(target, &mut contacts, Bucket::MAX_LEN);
+    async fn find_node(&mut self, target: &NodeId, addr: &SocketAddr) -> bool {
+        trace!("Send FIND_NODE request to {}", addr);
 
-        let mut sent = 0;
-        if contacts.is_empty() {
-            trace!("No contacts in routing table, use bootstrap nodes");
-            for node in &self.router_nodes {
-                let m = FindNode {
-                    id: &self.own_id,
-                    target,
-                    txn_id: self.txn_id.next(),
-                };
-                match self.socket.send(&m, node).await {
-                    Ok(_) => {
-                        sent += 1;
-                        self.txns.insert(m.txn_id, *node);
-                    }
-                    Err(e) => warn!("FIND_NODE to bootstrap node {} failed: {}", node, e),
-                }
+        let m = FindNode {
+            id: &self.own_id,
+            target,
+            txn_id: self.txn_id.next(),
+        };
+        match self.socket.send(&m, addr).await {
+            Ok(_) => {
+                self.txns.insert(m.txn_id, *addr);
+                true
+            }
+            Err(e) => {
+                warn!("FIND_NODE to {} failed: {}", addr, e);
+                false
             }
         }
-
-        for c in contacts {
-            let m = FindNode {
-                id: &self.own_id,
-                target,
-                txn_id: self.txn_id.next(),
-            };
-            match self.socket.send(&m, &c.addr).await {
-                Ok(_) => {
-                    c.status = ContactStatus::QUERIED;
-                    c.last_queried = Instant::now();
-                    self.txns.insert(m.txn_id, c.addr);
-                    sent += 1;
-                }
-                Err(e) => {
-                    warn!("FIND_NODE to {} failed: {}", c.addr, e);
-                    c.timed_out();
-                }
-            }
-        }
-        sent
     }
 
     fn check_client_request(&mut self) -> bool {
@@ -141,14 +143,7 @@ impl Server {
         false
     }
 
-    async fn recv_response(&mut self) {
-        match self.socket.recv().await {
-            Ok((msg, _addr)) => self.table.handle_msg(msg, &mut self.txns),
-            Err(e) => warn!("{}", e),
-        }
-    }
-
-    async fn recv_response_timeout(&mut self, timeout: Duration) {
+    async fn recv_response(&mut self, timeout: Duration) {
         match self.socket.recv_timeout(timeout).await {
             Ok(Some((msg, _addr))) => self.table.handle_msg(msg, &mut self.txns),
             Ok(None) => {}
@@ -160,8 +155,14 @@ impl Server {
 impl RoutingTable {
     fn handle_msg(&mut self, msg: Msg, txns: &mut Transactions) {
         if let MsgKind::Response = msg.kind {
-            let addr = match txns.remove(&msg.txn_id) {
-                Some(x) => x,
+            match txns.remove(&msg.txn_id) {
+                Some(addr) => {
+                    if let Some(c) = self.find_contact(&addr) {
+                        c.status = ContactStatus::ALIVE | ContactStatus::QUERIED;
+                        c.clear_timeout();
+                        c.last_updated = Instant::now();
+                    }
+                }
                 None => {
                     warn!(
                         "Message received (txn id: {:?}) from unexpected address",
@@ -170,12 +171,6 @@ impl RoutingTable {
                     return;
                 }
             };
-
-            if let Some(c) = self.find_contact(&addr) {
-                c.status = ContactStatus::ALIVE | ContactStatus::QUERIED;
-                c.clear_timeout();
-                c.last_updated = Instant::now();
-            }
 
             self.handle_response(&msg);
             return;
@@ -194,13 +189,8 @@ impl RoutingTable {
     }
 
     fn handle_response(&mut self, msg: &Msg) {
-        match msg.kind {
-            MsgKind::Response => {
-                if let Err(e) = self.read_nodes(msg) {
-                    warn!("{}", e);
-                }
-            }
-            _ => {}
+        if let Err(e) = self.read_nodes(msg) {
+            warn!("{}", e);
         }
     }
 
@@ -250,7 +240,7 @@ impl BufSocket {
         );
 
         let n = self.socket.send_to(&self.buf, addr).await?;
-        trace!("Sent: {} bytes", n);
+        trace!("Sent: {} bytes to {}", n, addr);
 
         ensure!(n == self.buf.len(), "Failed to send complete message");
 
@@ -259,7 +249,7 @@ impl BufSocket {
 
     async fn recv<'a>(&'a mut self) -> anyhow::Result<(Msg<'a, 'a>, SocketAddr)> {
         let (n, addr) = self.socket.recv_from(&mut self.recv_buf).await?;
-        trace!("Received: {} bytes", n);
+        trace!("Received: {} bytes from {}", n, addr);
 
         let msg = self.parser.parse(&self.recv_buf[..n])?;
         Ok((msg, addr))
@@ -283,7 +273,7 @@ struct Transactions {
 
 impl Transactions {
     fn new() -> Self {
-        Self::with_timeout(Duration::from_secs(5))
+        Self::with_timeout(Duration::from_secs(10))
     }
 
     fn with_timeout(timeout: Duration) -> Self {
@@ -301,20 +291,33 @@ impl Transactions {
         self.pending.remove(txn_id)
     }
 
+    fn len(&self) -> usize {
+        self.pending.len()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.pending.is_empty()
+    }
+
     /// Remove transactions that are timed out or not in Routing table
     /// anymore.
     fn prune(&mut self, table: &mut RoutingTable) {
         let timeout = self.timeout;
 
-        self.pending.retain(|_, addr| {
+        self.pending.retain(|txn_id, addr| {
             if let Some(c) = table.find_contact(addr) {
                 if Instant::now() - c.last_queried < timeout {
                     // Not timed out. Keep it.
-                    return true;
+                    true
+                } else {
+                    c.timed_out();
+                    trace!("Txn {:?} expired", txn_id);
+                    false
                 }
-                c.timed_out();
+            } else {
+                // Router nodes
+                true
             }
-            false
         });
     }
 }
