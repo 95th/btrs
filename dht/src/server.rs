@@ -87,6 +87,7 @@ impl Server {
             }
 
             self.txns.prune(&mut self.table);
+            trace!("Pending transactions: {}", self.txns.len());
 
             if self.txns.is_empty() || Instant::now() > timeout {
                 trace!("Done bootstrapping. Min dist: {:?}", min_dist);
@@ -94,7 +95,7 @@ impl Server {
                 return Ok(());
             }
 
-            let (msg, _) = match self.socket.recv_timeout(Duration::from_millis(1)).await {
+            let (msg, _) = match self.socket.recv_timeout(Duration::from_secs(1)).await {
                 Ok(Some(x)) => x,
                 Ok(None) => continue,
                 Err(e) => {
