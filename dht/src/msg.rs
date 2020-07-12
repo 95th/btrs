@@ -235,7 +235,7 @@ mod tests {
     fn request_ping() {
         let request = Ping {
             txn_id: TxnId(10),
-            id: &NodeId::of_byte(1),
+            id: &NodeId::all(1),
         };
 
         let encoded = request.encode_to_vec();
@@ -253,8 +253,8 @@ mod tests {
     fn request_find_node() {
         let request = FindNode {
             txn_id: TxnId(10),
-            id: &NodeId::of_byte(1),
-            target: &NodeId::of_byte(2),
+            id: &NodeId::all(1),
+            target: &NodeId::all(2),
         };
 
         let encoded = request.encode_to_vec();
@@ -272,8 +272,8 @@ mod tests {
     fn request_get_peers() {
         let request = GetPeers {
             txn_id: TxnId(10),
-            id: &NodeId::of_byte(1),
-            info_hash: &NodeId::of_byte(2),
+            id: &NodeId::all(1),
+            info_hash: &NodeId::all(2),
         };
 
         let encoded = request.encode_to_vec();
@@ -291,8 +291,8 @@ mod tests {
     fn request_announce_peer() {
         let request = AnnouncePeer {
             txn_id: TxnId(10),
-            id: &NodeId::of_byte(1),
-            info_hash: &NodeId::of_byte(2),
+            id: &NodeId::all(1),
+            info_hash: &NodeId::all(2),
             implied_port: false,
             port: 5000,
             token: &[0, 1, 2],
@@ -313,8 +313,8 @@ mod tests {
     fn request_announce_peer_implied_port() {
         let request = AnnouncePeer {
             txn_id: TxnId(10),
-            id: &NodeId::of_byte(1),
-            info_hash: &NodeId::of_byte(2),
+            id: &NodeId::all(1),
+            info_hash: &NodeId::all(2),
             implied_port: true,
             port: 5000,
             token: &[0, 1, 2],

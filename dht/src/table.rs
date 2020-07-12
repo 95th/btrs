@@ -270,7 +270,7 @@ mod tests {
 
     #[test]
     fn basic() {
-        let mut rt = RoutingTable::new(NodeId::of_byte(0));
+        let mut rt = RoutingTable::new(NodeId::all(0));
         assert_eq!(rt.len(), 0);
         assert_eq!(rt.len_extra(), 0);
         assert_eq!(rt.buckets.len(), 1);
@@ -280,7 +280,7 @@ mod tests {
         // Add one contact
         assert!(rt.add_contact(&ContactRef {
             addr,
-            id: &NodeId::of_byte(1),
+            id: &NodeId::all(1),
         }));
         assert_eq!(rt.len(), 1);
         assert_eq!(rt.len_extra(), 0);
@@ -289,7 +289,7 @@ mod tests {
         // Add the same contact again - Should add but size shouldn't change
         assert!(rt.add_contact(&ContactRef {
             addr,
-            id: &NodeId::of_byte(1),
+            id: &NodeId::all(1),
         }));
         assert_eq!(rt.len(), 1);
         assert_eq!(rt.len_extra(), 0);
@@ -299,7 +299,7 @@ mod tests {
         for i in 2..9 {
             assert!(rt.add_contact(&ContactRef {
                 addr,
-                id: &NodeId::of_byte(i),
+                id: &NodeId::all(i),
             }));
             assert_eq!(rt.len(), i as usize);
             assert_eq!(rt.len_extra(), 0);
@@ -309,7 +309,7 @@ mod tests {
         // Add 1 more contacts - splits the bucket
         assert!(rt.add_contact(&ContactRef {
             addr,
-            id: &NodeId::of_byte(9),
+            id: &NodeId::all(9),
         }));
         assert_eq!(rt.len(), 9);
         assert_eq!(rt.len_extra(), 0);
@@ -319,7 +319,7 @@ mod tests {
 
         // Add 6 more contacts - fill up bucket at index 4
         for i in 0..6 {
-            let mut n = NodeId::of_byte(9);
+            let mut n = NodeId::all(9);
             n.0[19] = i as u8;
             assert!(rt.add_contact(&ContactRef { addr, id: &n }));
             assert_eq!(rt.len(), 10 + i);
@@ -330,7 +330,7 @@ mod tests {
         assert_eq!(rt.buckets[5].live.len(), 7);
 
         // Add 1 more contacts - goes into bucket index 4 extras
-        let mut n = NodeId::of_byte(9);
+        let mut n = NodeId::all(9);
         n.0[19] = 6;
         assert!(rt.add_contact(&ContactRef { addr, id: &n }));
         assert_eq!(rt.len(), 15);
@@ -343,7 +343,7 @@ mod tests {
 
     #[test]
     fn test_closest() {
-        let mut table = RoutingTable::new(NodeId::of_byte(0));
+        let mut table = RoutingTable::new(NodeId::all(0));
         let addr = SocketAddr::from(([0u8; 4], 100));
 
         fn node(idx: usize) -> NodeId {
@@ -358,7 +358,7 @@ mod tests {
         }
 
         let closest = &mut Vec::with_capacity(20);
-        table.find_closest(&NodeId::of_byte(1), closest);
+        table.find_closest(&NodeId::all(1), closest);
 
         let mut closest_iter = closest.into_iter();
         for i in 0..20 {

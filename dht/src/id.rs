@@ -21,10 +21,10 @@ impl NodeId {
     }
 
     pub fn max() -> Self {
-        Self::of_byte(u8::max_value())
+        Self::all(u8::max_value())
     }
 
-    pub fn of_byte(b: u8) -> Self {
+    pub fn all(b: u8) -> Self {
         Self([b; 20])
     }
 
@@ -252,12 +252,12 @@ mod tests {
     fn decode_hex() {
         let h = b"3F3F3F3F3F3F3F3F3F3F3F3F3F3F3F3F3F3F3F3F";
         let n = NodeId::from_hex(h).unwrap();
-        assert_eq!(NodeId::of_byte(0x3F), n);
+        assert_eq!(NodeId::all(0x3F), n);
     }
 
     #[test]
     fn encode_hex() {
-        let n = NodeId::of_byte(0x3F);
+        let n = NodeId::all(0x3F);
         let mut buf = [0; 40];
         n.encode_hex(&mut buf).unwrap();
         assert_eq!(b"3F3F3F3F3F3F3F3F3F3F3F3F3F3F3F3F3F3F3F3F"[..], buf[..]);
@@ -265,20 +265,17 @@ mod tests {
 
     #[test]
     fn sort_order() {
-        let mut a = [NodeId::of_byte(0), NodeId::of_byte(3), NodeId::of_byte(1)];
+        let mut a = [NodeId::all(0), NodeId::all(3), NodeId::all(1)];
         a.sort();
-        assert_eq!(
-            [NodeId::of_byte(0), NodeId::of_byte(1), NodeId::of_byte(3)],
-            a
-        );
+        assert_eq!([NodeId::all(0), NodeId::all(1), NodeId::all(3)], a);
     }
 
     #[test]
     fn xor() {
-        let a = NodeId::of_byte(0b0000_0101);
-        let b = NodeId::of_byte(0b1100_0100);
+        let a = NodeId::all(0b0000_0101);
+        let b = NodeId::all(0b1100_0100);
         let c = &a ^ &b;
-        assert_eq!(NodeId::of_byte(0b1100_0001), c);
+        assert_eq!(NodeId::all(0b1100_0001), c);
     }
 
     #[test]
