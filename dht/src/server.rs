@@ -46,7 +46,7 @@ impl Server {
                 self.bootstrap().await;
 
                 // Self refresh every 15 mins
-                self.next_refresh = Instant::now() + Duration::from_secs(15);
+                self.next_refresh = Instant::now() + Duration::from_secs(15 * 60);
             }
 
             // Check if any request from client such as Announce/Shutdown
