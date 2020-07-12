@@ -1,5 +1,4 @@
 use crate::id::NodeId;
-use ben::encode::BytesExact;
 use ben::{Encode, Encoder};
 use std::net::SocketAddr;
 use std::time::Instant;
@@ -104,16 +103,12 @@ impl Encode for Contact {
         let len = if self.addr.is_ipv4() { 6 } else { 18 };
         let bytes = &mut enc.add_bytes_exact(20 + len);
         bytes.add(&self.id[..]);
-        encode_addr(bytes, &self.addr);
+        match &self.addr {
+            SocketAddr::V4(addr) => bytes.add(&addr.ip().octets()),
+            SocketAddr::V6(addr) => bytes.add(&addr.ip().octets()),
+        }
+        bytes.add(&self.addr.port().to_be_bytes());
     }
-}
-
-fn encode_addr(bytes: &mut BytesExact<'_>, addr: &SocketAddr) {
-    match addr {
-        SocketAddr::V4(addr) => bytes.add(&addr.ip().octets()),
-        SocketAddr::V6(addr) => bytes.add(&addr.ip().octets()),
-    }
-    bytes.add(&addr.port().to_be_bytes());
 }
 
 pub struct CompactNodes<'a> {
