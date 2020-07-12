@@ -94,19 +94,26 @@ impl Server {
                 return Ok(());
             }
 
-            if let Some((msg, _)) = self.socket.recv_timeout(Duration::from_millis(1)).await? {
-                self.table.handle_msg(msg, &mut self.txns);
+            let (msg, _) = match self.socket.recv_timeout(Duration::from_millis(1)).await {
+                Ok(Some(x)) => x,
+                Ok(None) => continue,
+                Err(e) => {
+                    warn!("{}", e);
+                    continue;
+                }
+            };
 
-                let mut closest = Vec::with_capacity(Bucket::MAX_LEN);
-                self.table
-                    .find_closest(target, &mut closest, Bucket::MAX_LEN);
+            self.table.handle_msg(msg, &mut self.txns);
 
-                for c in closest {
-                    let dist = target ^ &c.id;
-                    if dist < min_dist {
-                        nodes.push_front(c.addr);
-                        min_dist = dist;
-                    }
+            let mut closest = Vec::with_capacity(Bucket::MAX_LEN);
+            self.table
+                .find_closest(target, &mut closest, Bucket::MAX_LEN);
+
+            for c in closest {
+                let dist = target ^ &c.id;
+                if dist < min_dist {
+                    nodes.push_front(c.addr);
+                    min_dist = dist;
                 }
             }
         }
@@ -267,7 +274,7 @@ impl BufSocket {
 }
 
 struct Transactions {
-    pending: HashMap<TxnId, SocketAddr>,
+    pending: HashMap<TxnId, (SocketAddr, Instant)>,
     timeout: Duration,
 }
 
@@ -284,11 +291,11 @@ impl Transactions {
     }
 
     fn insert(&mut self, txn_id: TxnId, addr: SocketAddr) {
-        self.pending.insert(txn_id, addr);
+        self.pending.insert(txn_id, (addr, Instant::now()));
     }
 
     fn remove(&mut self, txn_id: &TxnId) -> Option<SocketAddr> {
-        self.pending.remove(txn_id)
+        self.pending.remove(txn_id).map(|(addr, _)| addr)
     }
 
     fn len(&self) -> usize {
@@ -304,20 +311,18 @@ impl Transactions {
     fn prune(&mut self, table: &mut RoutingTable) {
         let timeout = self.timeout;
 
-        self.pending.retain(|txn_id, addr| {
-            if let Some(c) = table.find_contact(addr) {
-                if Instant::now() - c.last_queried < timeout {
-                    // Not timed out. Keep it.
-                    true
-                } else {
-                    c.timed_out();
-                    trace!("Txn {:?} expired", txn_id);
-                    false
-                }
-            } else {
-                // Router nodes
-                true
+        self.pending.retain(|txn_id, (addr, queried)| {
+            if Instant::now() - *queried < timeout {
+                // Not timed out. Keep it.
+                return true;
             }
+
+            if let Some(c) = table.find_contact(addr) {
+                c.timed_out();
+            }
+
+            trace!("Txn {:?} expired", txn_id);
+            false
         });
     }
 }
