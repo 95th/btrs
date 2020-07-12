@@ -43,7 +43,13 @@ impl Server {
         loop {
             if Instant::now() >= self.next_refresh {
                 // refresh the table
-                self.bootstrap().await;
+                if self.table.is_empty() {
+                    let target = self.own_id.clone();
+                    self.refresh(&target).await;
+                } else if let Some(target) = self.table.pick_refresh_id() {
+                    trace!("Bucket refresh target: {:?}", target);
+                    self.refresh(&target).await;
+                }
 
                 // Self refresh every 15 mins
                 self.next_refresh = Instant::now() + Duration::from_secs(15 * 60);
@@ -63,9 +69,8 @@ impl Server {
         }
     }
 
-    async fn bootstrap(&mut self) {
+    async fn refresh(&mut self, target: &NodeId) {
         let mut nodes = VecDeque::new();
-        let target = &self.own_id.clone();
         let mut min_dist = NodeId::max();
 
         if !self.table.is_empty() {

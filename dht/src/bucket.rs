@@ -1,9 +1,11 @@
 use crate::contact::{Contact, ContactRef};
+use std::time::Instant;
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Bucket {
     pub live: Vec<Contact>,
     pub extra: Vec<Contact>,
+    pub last_updated: Instant,
 }
 
 impl Bucket {
@@ -11,7 +13,11 @@ impl Bucket {
     pub const MAX_LEN: usize = 8;
 
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            live: vec![],
+            extra: vec![],
+            last_updated: Instant::now(),
+        }
     }
 
     pub fn get_contacts<'a>(&'a self, out: &mut Vec<ContactRef<'a>>) {

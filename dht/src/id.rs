@@ -3,7 +3,7 @@ use data_encoding::HEXUPPER_PERMISSIVE as hex_decoder;
 use rand::distributions::uniform::{SampleBorrow, SampleUniform, UniformSampler};
 use rand::Rng;
 use std::fmt;
-use std::ops::BitXor;
+use std::ops::{BitAnd, BitXor, Deref, DerefMut};
 
 #[derive(Clone, Default, PartialEq, PartialOrd, Eq, Ord)]
 #[repr(transparent)]
@@ -11,7 +11,7 @@ pub struct NodeId(pub [u8; 20]);
 
 impl fmt::Debug for NodeId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}", self.0)
+        write!(f, "{:?}", &self[..])
     }
 }
 
@@ -29,36 +29,38 @@ impl NodeId {
     }
 
     pub fn gen() -> Self {
-        let mut n = Self::new();
-        rand::thread_rng().fill(&mut n.0[..]);
-        n
+        let mut id = Self::new();
+        rand::thread_rng().fill(&mut id[..]);
+        id
     }
 
-    pub fn gen_range(lo: &Self, hi: &Self) -> Self {
-        rand::thread_rng().gen_range(lo, hi)
+    pub fn gen_lz(leading_zeros: usize) -> Self {
+        let mask = Self::mask_lz(leading_zeros);
+        let gen = Self::gen();
+        gen & mask
     }
 
     pub fn from_hex(hex: &[u8]) -> anyhow::Result<Self> {
         let len = hex_decoder.decode_len(hex.len())?;
         ensure!(len == 20, "Invalid hex for node ID");
 
-        let mut n = Self::new();
-        if let Err(e) = hex_decoder.decode_mut(hex, &mut n.0) {
+        let mut id = Self::new();
+        if let Err(e) = hex_decoder.decode_mut(hex, &mut id[..]) {
             bail!("Unable to parse hex string: {:?}", e);
         }
 
-        Ok(n)
+        Ok(id)
     }
 
     pub fn is_zero(&self) -> bool {
-        self.0.iter().all(|b| *b == 0)
+        self.iter().all(|b| *b == 0)
     }
 
     pub fn encode_hex(&self, buf: &mut [u8]) -> anyhow::Result<()> {
-        let len = hex_decoder.encode_len(self.0.len());
+        let len = hex_decoder.encode_len(self.len());
         ensure!(len == buf.len(), "Invalid hex for node ID");
 
-        hex_decoder.encode_mut(&self.0, buf);
+        hex_decoder.encode_mut(&self[..], buf);
         Ok(())
     }
 
@@ -74,7 +76,7 @@ impl NodeId {
     /// ```
     pub fn lz(&self) -> usize {
         let mut n = 0;
-        for &c in self.0.iter() {
+        for &c in self.iter() {
             if c == 0 {
                 n += 8;
             } else {
@@ -103,8 +105,22 @@ impl NodeId {
         (self ^ other).lz()
     }
 
-    pub fn as_bytes(&self) -> &[u8; 20] {
-        &self.0
+    pub fn mask_lz(leading_zeros: usize) -> Self {
+        if leading_zeros >= 160 {
+            return Self::new();
+        }
+
+        let mut id = Self::max();
+        for i in 0..leading_zeros / 8 {
+            id[i] = 0;
+        }
+
+        if leading_zeros % 8 != 0 {
+            let idx = leading_zeros / 8;
+            id[idx] = 0xff >> leading_zeros % 8;
+        }
+
+        id
     }
 }
 
@@ -114,23 +130,58 @@ impl From<[u8; 20]> for NodeId {
     }
 }
 
+impl Deref for NodeId {
+    type Target = [u8; 20];
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for NodeId {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
 impl Encode for NodeId {
     fn encode<E: Encoder>(&self, enc: &mut E) {
-        enc.add_bytes(&self.0[..]);
+        enc.add_bytes(&self[..]);
     }
 }
 
-impl BitXor<&NodeId> for &NodeId {
-    type Output = NodeId;
+macro_rules! bit_ops {
+    ($from_ty:ty, $to_ty:ty) => {
+        impl BitAnd<$from_ty> for $to_ty {
+            type Output = NodeId;
 
-    fn bitxor(self, other: &NodeId) -> NodeId {
-        let mut n = NodeId::default();
-        n.0.iter_mut()
-            .zip(self.0.iter().zip(other.0.iter()))
-            .for_each(|(a, (b, c))| *a = b ^ c);
-        n
-    }
+            fn bitand(self, other: $from_ty) -> Self::Output {
+                let mut id = NodeId::new();
+                id.iter_mut()
+                    .zip(self.iter().zip(other.iter()))
+                    .for_each(|(a, (b, c))| *a = b & c);
+                id
+            }
+        }
+
+        impl BitXor<$from_ty> for $to_ty {
+            type Output = NodeId;
+
+            fn bitxor(self, other: $from_ty) -> NodeId {
+                let mut id = NodeId::new();
+                id.iter_mut()
+                    .zip(self.iter().zip(other.iter()))
+                    .for_each(|(a, (b, c))| *a = b ^ c);
+                id
+            }
+        }
+    };
 }
+
+bit_ops!(&NodeId, &NodeId);
+bit_ops!(&NodeId, NodeId);
+bit_ops!(NodeId, &NodeId);
+bit_ops!(NodeId, NodeId);
 
 impl SampleUniform for NodeId {
     type Sampler = UniformNodeId;
@@ -181,7 +232,7 @@ impl UniformSampler for UniformNodeId {
         let mut out = NodeId::new();
         let low_is_zero = self.low.is_zero();
         loop {
-            rng.fill(&mut out.0);
+            rng.fill(&mut out[..]);
             if self.inclusive {
                 if out <= self.high && (low_is_zero || out >= self.low) {
                     break out;
@@ -231,11 +282,30 @@ mod tests {
     }
 
     #[test]
-    fn test_gen_range() {
-        let a = NodeId::of_byte(0);
-        let b = NodeId::of_byte(5);
-        let c = NodeId::gen_range(&a, &b);
-        assert!(c >= a);
-        assert!(c < b);
+    fn test_gen_lz() {
+        let n = NodeId::gen_lz(5);
+        assert!(n.lz() > 5);
+    }
+
+    #[test]
+    fn test_mask_lz() {
+        let actual = NodeId::mask_lz(5);
+        let mut expected = NodeId::max();
+        expected[0] = 0b0000_0111;
+        assert_eq!(5, actual.lz());
+        assert_eq!(expected, actual);
+
+        let actual = NodeId::mask_lz(8);
+        let mut expected = NodeId::max();
+        expected[0] = 0;
+        assert_eq!(8, actual.lz());
+        assert_eq!(expected, actual);
+
+        let actual = NodeId::mask_lz(9);
+        let mut expected = NodeId::max();
+        expected[0] = 0;
+        expected[1] = 0b0111_1111;
+        assert_eq!(9, actual.lz());
+        assert_eq!(expected, actual);
     }
 }

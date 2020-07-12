@@ -3,6 +3,7 @@ use crate::contact::{Contact, ContactRef};
 use crate::id::NodeId;
 use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
+use std::time::{Duration, Instant};
 
 #[derive(Debug)]
 pub enum BucketResult {
@@ -27,6 +28,13 @@ impl RoutingTable {
             tokens: HashMap::new(),
             router_nodes: HashSet::new(),
         }
+    }
+
+    pub fn pick_refresh_id(&self) -> Option<NodeId> {
+        let timeout = Instant::now() - Duration::from_secs(15 * 60);
+        let bucket_no = self.buckets.iter().position(|b| b.last_updated < timeout)?;
+        trace!("Refresh bucket: {}", bucket_no);
+        Some(NodeId::gen_lz(bucket_no))
     }
 
     pub fn add_router_node(&mut self, router: SocketAddr) {
@@ -80,7 +88,7 @@ impl RoutingTable {
             i += 1;
         }
 
-        out.sort_unstable_by_key(|c| target ^ &c.id);
+        out.sort_unstable_by_key(|c| target ^ c.id);
     }
 
     pub fn len(&self) -> usize {
@@ -120,18 +128,20 @@ impl RoutingTable {
         let bucket_count = self.buckets.len();
         let can_split = { bucket_index + 1 == bucket_count && bucket_count < 159 };
 
-        let Bucket { live, extra } = &mut self.buckets[bucket_index];
+        let bucket = &mut self.buckets[bucket_index];
 
-        if let Some(c) = live.iter_mut().find(|c| c.id == *contact.id) {
+        if let Some(c) = bucket.live.iter_mut().find(|c| c.id == *contact.id) {
             if c.addr != contact.addr {
                 return BucketResult::Fail;
             } else {
+                bucket.last_updated = Instant::now();
                 c.clear_timeout();
                 return BucketResult::Success;
             }
         }
 
-        let maybe_extra = extra
+        let maybe_extra = bucket
+            .extra
             .iter_mut()
             .enumerate()
             .find(|(_, c)| c.id == *contact.id);
@@ -143,8 +153,9 @@ impl RoutingTable {
 
             c.clear_timeout();
 
-            if c.is_pinged() && live.len() < Bucket::MAX_LEN {
-                live.push(extra.remove(i));
+            if c.is_pinged() && bucket.live.len() < Bucket::MAX_LEN {
+                bucket.live.push(bucket.extra.remove(i));
+                bucket.last_updated = Instant::now();
                 return BucketResult::Success;
             }
 
@@ -158,10 +169,11 @@ impl RoutingTable {
             }
         }
 
-        let Bucket { live, extra } = &mut self.buckets[bucket_index];
+        let bucket = &mut self.buckets[bucket_index];
 
-        if live.len() < Bucket::MAX_LEN {
-            live.push(contact.as_owned());
+        if bucket.live.len() < Bucket::MAX_LEN {
+            bucket.live.push(contact.as_owned());
+            bucket.last_updated = Instant::now();
             return BucketResult::Success;
         }
 
@@ -169,15 +181,17 @@ impl RoutingTable {
             return BucketResult::RequireSplit;
         }
 
-        extra.push(contact.as_owned());
+        bucket.extra.push(contact.as_owned());
+        bucket.last_updated = Instant::now();
         BucketResult::Success
     }
 
     fn replace_node_impl(&mut self, contact: &ContactRef<'_>, bucket_index: usize) -> BucketResult {
-        let Bucket { live, extra } = &mut self.buckets[bucket_index];
-        debug_assert!(live.len() >= Bucket::MAX_LEN);
+        let bucket = &mut self.buckets[bucket_index];
+        debug_assert!(bucket.live.len() >= Bucket::MAX_LEN);
 
-        if replace_stale(live, contact) || replace_stale(extra, contact) {
+        if replace_stale(&mut bucket.live, contact) || replace_stale(&mut bucket.extra, contact) {
+            bucket.last_updated = Instant::now();
             BucketResult::Success
         } else {
             BucketResult::Fail
@@ -190,38 +204,38 @@ impl RoutingTable {
         }
 
         let last_bucket_index = self.buckets.len() - 1;
-        let Bucket { live, extra } = &mut self.buckets[last_bucket_index];
+        let bucket = &mut self.buckets[last_bucket_index];
 
-        debug_assert!(live.len() >= Bucket::MAX_LEN);
+        debug_assert!(bucket.live.len() >= Bucket::MAX_LEN);
 
         let mut new_bucket = Bucket::new();
 
         let mut i = 0;
-        while i < live.len() {
-            let bucket_index = live[i].id.xlz(&self.own_id);
+        while i < bucket.live.len() {
+            let bucket_index = bucket.live[i].id.xlz(&self.own_id);
             if bucket_index == last_bucket_index {
                 i += 1;
                 continue;
             }
 
-            new_bucket.live.push(live.remove(i));
+            new_bucket.live.push(bucket.live.remove(i));
         }
 
-        if live.len() > Bucket::MAX_LEN {
-            extra.extend(live.drain(Bucket::MAX_LEN..));
+        if bucket.live.len() > Bucket::MAX_LEN {
+            bucket.extra.extend(bucket.live.drain(Bucket::MAX_LEN..));
         }
 
         let mut i = 0;
-        while i < extra.len() {
-            let bucket_index = extra[i].id.xlz(&self.own_id);
+        while i < bucket.extra.len() {
+            let bucket_index = bucket.extra[i].id.xlz(&self.own_id);
             if bucket_index == last_bucket_index {
-                if live.len() >= Bucket::MAX_LEN {
+                if bucket.live.len() >= Bucket::MAX_LEN {
                     i += 1;
                     continue;
                 }
-                live.push(extra.remove(i));
+                bucket.live.push(bucket.extra.remove(i));
             } else {
-                let contact = extra.remove(i);
+                let contact = bucket.extra.remove(i);
                 if new_bucket.live.len() < Bucket::MAX_LEN {
                     new_bucket.live.push(contact);
                 } else {

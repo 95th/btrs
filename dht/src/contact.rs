@@ -103,7 +103,7 @@ impl Encode for Contact {
     fn encode<E: Encoder>(&self, enc: &mut E) {
         let len = if self.addr.is_ipv4() { 6 } else { 18 };
         let bytes = &mut enc.add_bytes_exact(20 + len);
-        bytes.add(self.id.as_bytes());
+        bytes.add(&self.id[..]);
         encode_addr(bytes, &self.addr);
     }
 }
