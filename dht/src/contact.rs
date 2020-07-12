@@ -4,10 +4,6 @@ use ben::{Encode, Encoder};
 use std::net::SocketAddr;
 use std::time::Instant;
 
-pub struct Peer {
-    pub addr: SocketAddr,
-}
-
 bitflags! {
     pub struct ContactStatus: u8 {
         const QUERIED       = 0b0000_0001;
@@ -57,6 +53,13 @@ impl Contact {
         }
     }
 
+    pub fn as_ref(&self) -> ContactRef<'_> {
+        ContactRef {
+            id: &self.id,
+            addr: self.addr,
+        }
+    }
+
     pub fn touch(&mut self) {
         self.last_updated = Instant::now();
     }
@@ -101,14 +104,6 @@ impl Encode for Contact {
         let len = if self.addr.is_ipv4() { 6 } else { 18 };
         let bytes = &mut enc.add_bytes_exact(20 + len);
         bytes.add(self.id.as_bytes());
-        encode_addr(bytes, &self.addr);
-    }
-}
-
-impl Encode for Peer {
-    fn encode<E: Encoder>(&self, enc: &mut E) {
-        let len = if self.addr.is_ipv4() { 6 } else { 18 };
-        let bytes = &mut enc.add_bytes_exact(len);
         encode_addr(bytes, &self.addr);
     }
 }

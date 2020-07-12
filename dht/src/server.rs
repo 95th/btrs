@@ -46,7 +46,7 @@ impl Server {
                 self.bootstrap().await;
 
                 // Self refresh every 15 mins
-                self.next_refresh = Instant::now() + Duration::from_secs(15 * 60);
+                self.next_refresh = Instant::now() + Duration::from_secs(15);
             }
 
             // Check if any request from client such as Announce/Shutdown
@@ -70,12 +70,11 @@ impl Server {
 
         if !self.table.is_empty() {
             let mut closest = Vec::with_capacity(Bucket::MAX_LEN);
-            self.table
-                .find_closest(target, &mut closest, Bucket::MAX_LEN);
+            self.table.find_closest(target, &mut closest);
 
             for c in closest {
                 nodes.push_front(c.addr);
-                let dist = target ^ &c.id;
+                let dist = target ^ c.id;
                 min_dist = min_dist.min(dist);
             }
         }
@@ -104,6 +103,11 @@ impl Server {
 
             if self.txns.is_empty() {
                 trace!("Done bootstrapping. Min dist: {:?}", min_dist);
+                debug!(
+                    "Table size:: live: {}, extra: {}",
+                    self.table.len(),
+                    self.table.len_extra()
+                );
                 break;
             }
 
@@ -119,12 +123,14 @@ impl Server {
             self.table.handle_msg(msg, &mut self.txns);
 
             let mut closest = Vec::with_capacity(Bucket::MAX_LEN);
-            self.table
-                .find_closest(target, &mut closest, Bucket::MAX_LEN);
+            self.table.find_closest(target, &mut closest);
 
+            let old_dist = min_dist.clone();
+
+            nodes.clear();
             for c in closest {
-                let dist = target ^ &c.id;
-                if dist < min_dist {
+                let dist = target ^ c.id;
+                if dist < old_dist {
                     nodes.push_front(c.addr);
                     min_dist = dist;
                 }

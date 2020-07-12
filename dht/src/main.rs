@@ -13,6 +13,6 @@ async fn main() -> anyhow::Result<()> {
         server.run().await;
         Ok(())
     };
-    dht::future::timeout(f, 60).await?;
+    dht::future::timeout(f, 600).await?;
     Ok(())
 }

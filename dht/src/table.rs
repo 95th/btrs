@@ -63,39 +63,21 @@ impl RoutingTable {
         }
     }
 
-    pub fn find_closest<'a>(
-        &'a mut self,
-        target: &NodeId,
-        out: &mut Vec<&'a mut Contact>,
-        count: usize,
-    ) {
+    pub fn find_closest<'a>(&'a self, target: &NodeId, out: &mut Vec<ContactRef<'a>>) {
         let bucket_no = self.find_bucket(target);
+        self.buckets[bucket_no].get_contacts(out);
 
-        // Safety: We're just getting mutable references to contacts in the different buckets.
-        // We're not adding or removing any bucket to the buckets vector itself. The mutable
-        // borrow of each bucket is exclusive.
-        unsafe {
-            let len = self.buckets.len();
-            let ptr = self.buckets.as_mut_ptr();
+        let len = self.buckets.len();
+        let mut i = 1;
 
-            let bucket = &mut *ptr.add(bucket_no);
-            bucket.get_contacts(out, count);
-
-            let mut i = 1;
-
-            while out.len() < count && (i <= bucket_no || bucket_no + i < len) {
-                if i <= bucket_no {
-                    let bucket = &mut *ptr.add(bucket_no - i);
-                    bucket.get_contacts(out, count);
-                }
-
-                if bucket_no + i < len {
-                    let bucket = &mut *ptr.add(bucket_no + i);
-                    bucket.get_contacts(out, count);
-                }
-
-                i += 1;
+        while out.len() < out.capacity() && (i <= bucket_no || bucket_no + i < len) {
+            if i <= bucket_no {
+                self.buckets[bucket_no - i].get_contacts(out);
             }
+            if bucket_no + i < len {
+                self.buckets[bucket_no + i].get_contacts(out);
+            }
+            i += 1;
         }
 
         out.sort_unstable_by_key(|c| target ^ &c.id);
@@ -361,12 +343,12 @@ mod tests {
             assert!(added, "Adding contact failed at {}", i);
         }
 
-        let closest = &mut vec![];
-        table.find_closest(&NodeId::of_byte(1), closest, 20);
+        let closest = &mut Vec::with_capacity(20);
+        table.find_closest(&NodeId::of_byte(1), closest);
 
         let mut closest_iter = closest.into_iter();
         for i in 0..20 {
-            assert_eq!(closest_iter.next().unwrap().id, node(i));
+            assert_eq!(closest_iter.next().unwrap().id, &node(i));
         }
 
         assert!(closest_iter.next().is_none());

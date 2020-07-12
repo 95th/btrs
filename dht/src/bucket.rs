@@ -1,4 +1,4 @@
-use crate::contact::Contact;
+use crate::contact::{Contact, ContactRef};
 
 #[derive(Debug, Default)]
 pub struct Bucket {
@@ -14,13 +14,13 @@ impl Bucket {
         Self::default()
     }
 
-    pub fn get_contacts<'a>(&'a mut self, out: &mut Vec<&'a mut Contact>, count: usize) {
-        for c in &mut self.live {
-            if out.len() >= count {
+    pub fn get_contacts<'a>(&'a self, out: &mut Vec<ContactRef<'a>>) {
+        for c in &self.live {
+            if out.len() >= out.capacity() {
                 break;
             }
             if !c.failed() {
-                out.push(c);
+                out.push(c.as_ref());
             }
         }
     }
