@@ -70,7 +70,7 @@ impl NodeId {
     /// ```
     /// # use dht::id::NodeId;
     ///
-    /// let id = NodeId::of_byte(0b0010_0010);
+    /// let id = NodeId::all(0b0010_0010);
     ///
     /// assert_eq!(2, id.lz());
     /// ```
@@ -93,8 +93,8 @@ impl NodeId {
     /// ```
     /// # use dht::id::NodeId;
     ///
-    /// let id1 = &NodeId::of_byte(0b0000_0101);
-    /// let id2 = &NodeId::of_byte(0b0010_0010);
+    /// let id1 = &NodeId::all(0b0000_0101);
+    /// let id2 = &NodeId::all(0b0010_0010);
     ///
     /// let n1 = id1.xlz(id2);
     /// let n2 = (id1 ^ id2).lz();
@@ -281,7 +281,7 @@ mod tests {
     #[test]
     fn test_gen_lz() {
         let n = NodeId::gen_lz(5);
-        assert!(n.lz() > 5);
+        assert!(n.lz() >= 5);
     }
 
     #[test]

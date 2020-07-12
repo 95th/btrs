@@ -90,7 +90,7 @@ impl Server {
             }
         }
 
-        trace!("Start with {} nodes", nodes.len());
+        debug!("Start refresh with {} nodes", nodes.len());
 
         let max_outstanding = 3;
 
@@ -104,7 +104,7 @@ impl Server {
             }
 
             self.txns.prune(&mut self.table);
-            trace!("Pending transactions: {}", self.txns.len());
+            debug!("Pending requests: {}", self.txns.len());
 
             if self.txns.is_empty() {
                 trace!("Done bootstrapping. Min dist: {:?}", min_dist);
@@ -144,7 +144,7 @@ impl Server {
     }
 
     async fn find_node(&mut self, target: &NodeId, addr: &SocketAddr) -> bool {
-        trace!("Send FIND_NODE request to {}", addr);
+        debug!("Send FIND_NODE request to {}", addr);
 
         let m = FindNode {
             id: &self.own_id,
