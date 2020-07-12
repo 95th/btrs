@@ -26,7 +26,7 @@ impl Server {
         let socket = UdpSocket::bind(addr).await?;
         let id = NodeId::gen();
 
-        let mut server = Server {
+        let server = Server {
             socket: BufSocket::new(socket),
             table: RoutingTable::new(id.clone()),
             txn_id: TxnId(0),
@@ -36,7 +36,6 @@ impl Server {
             next_refresh: Instant::now(),
         };
 
-        server.bootstrap().await?;
         Ok(server)
     }
 
@@ -44,7 +43,7 @@ impl Server {
         loop {
             if Instant::now() >= self.next_refresh {
                 // refresh the table
-                self.refresh().await;
+                self.bootstrap().await;
 
                 // Self refresh every 15 mins
                 self.next_refresh = Instant::now() + Duration::from_secs(15 * 60);
@@ -64,18 +63,32 @@ impl Server {
         }
     }
 
-    async fn bootstrap(&mut self) -> anyhow::Result<()> {
+    async fn bootstrap(&mut self) {
         let mut nodes = VecDeque::new();
-        for addr in &self.router_nodes {
-            nodes.push_back(*addr);
+        let target = &self.own_id.clone();
+        let mut min_dist = NodeId::max();
+
+        if !self.table.is_empty() {
+            let mut closest = Vec::with_capacity(Bucket::MAX_LEN);
+            self.table
+                .find_closest(target, &mut closest, Bucket::MAX_LEN);
+
+            for c in closest {
+                nodes.push_front(c.addr);
+                let dist = target ^ &c.id;
+                min_dist = min_dist.min(dist);
+            }
         }
 
-        trace!("Start with {} router nodes", nodes.len());
+        if nodes.len() < 3 {
+            for addr in &self.router_nodes {
+                nodes.push_back(*addr);
+            }
+        }
 
-        let target = &self.own_id.clone();
+        trace!("Start with {} nodes", nodes.len());
+
         let max_outstanding = 3;
-        let mut min_dist = NodeId::max();
-        let timeout = Instant::now() + Duration::from_secs(20);
 
         loop {
             while self.txns.len() < max_outstanding {
@@ -89,10 +102,9 @@ impl Server {
             self.txns.prune(&mut self.table);
             trace!("Pending transactions: {}", self.txns.len());
 
-            if self.txns.is_empty() || Instant::now() > timeout {
+            if self.txns.is_empty() {
                 trace!("Done bootstrapping. Min dist: {:?}", min_dist);
-                self.next_refresh = Instant::now() + Duration::from_secs(15 * 60);
-                return Ok(());
+                break;
             }
 
             let (msg, _) = match self.socket.recv_timeout(Duration::from_secs(1)).await {
@@ -117,12 +129,6 @@ impl Server {
                     min_dist = dist;
                 }
             }
-        }
-    }
-
-    async fn refresh(&mut self) {
-        if let Err(e) = self.bootstrap().await {
-            warn!("{}", e);
         }
     }
 
@@ -281,7 +287,7 @@ struct Transactions {
 
 impl Transactions {
     fn new() -> Self {
-        Self::with_timeout(Duration::from_secs(10))
+        Self::with_timeout(Duration::from_secs(5))
     }
 
     fn with_timeout(timeout: Duration) -> Self {

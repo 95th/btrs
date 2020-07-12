@@ -110,7 +110,7 @@ impl RoutingTable {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.len() == 0
+        self.buckets.iter().all(|b| b.live.is_empty())
     }
 
     pub fn find_contact_by_id(&mut self, id: &NodeId) -> Option<&mut Contact> {
@@ -122,15 +122,6 @@ impl RoutingTable {
         self.buckets
             .iter_mut()
             .find_map(|b| b.live.iter_mut().find(|c| c.addr == *addr))
-    }
-
-    pub fn min_dist(&self, target: &NodeId) -> NodeId {
-        self.buckets
-            .iter()
-            .flat_map(|b| b.live.iter())
-            .map(|c| &c.id ^ target)
-            .min()
-            .unwrap_or_else(|| target.clone())
     }
 
     fn add_contact_impl(&mut self, contact: &ContactRef<'_>) -> BucketResult {

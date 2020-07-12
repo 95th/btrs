@@ -19,7 +19,9 @@ impl Bucket {
             if out.len() >= count {
                 break;
             }
-            out.push(c);
+            if !c.failed() {
+                out.push(c);
+            }
         }
     }
 }
