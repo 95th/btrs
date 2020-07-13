@@ -17,112 +17,6 @@ pub trait Encode {
     }
 }
 
-impl<T: Encode> Encode for &T {
-    fn encode<E: Encoder>(&self, enc: &mut E) {
-        (&**self).encode(enc);
-    }
-}
-
-impl<T: Encode> Encode for Box<T> {
-    fn encode<E: Encoder>(&self, enc: &mut E) {
-        (&**self).encode(enc);
-    }
-}
-
-impl<T: Encode> Encode for Vec<T> {
-    fn encode<E: Encoder>(&self, enc: &mut E) {
-        let mut list = enc.add_list();
-        for t in self {
-            list.add(t);
-        }
-        list.finish();
-    }
-}
-
-impl<T: Encode> Encode for [T] {
-    fn encode<E: Encoder>(&self, enc: &mut E) {
-        let mut list = enc.add_list();
-        for t in self {
-            list.add(t);
-        }
-        list.finish();
-    }
-}
-
-impl Encode for &[u8] {
-    fn encode<E: Encoder>(&self, enc: &mut E) {
-        enc.add_bytes(self);
-    }
-}
-
-impl Encode for &str {
-    fn encode<E: Encoder>(&self, enc: &mut E) {
-        enc.add_str(self);
-    }
-}
-
-impl Encode for String {
-    fn encode<E: Encoder>(&self, enc: &mut E) {
-        enc.add_str(self);
-    }
-}
-
-impl Encode for i64 {
-    fn encode<E: Encoder>(&self, enc: &mut E) {
-        enc.add_int(*self);
-    }
-}
-
-macro_rules! impl_arr {
-    ( $($len: expr),+ ) => {
-        $(
-            impl Encode for [u8; $len] {
-                fn encode<E: Encoder>(&self, enc: &mut E) {
-                    enc.add_bytes(&self[..]);
-                }
-            }
-        )+
-    };
-}
-
-impl_arr![
-    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25,
-    26, 27, 28, 29, 30, 31, 32, 64, 128, 256, 512, 1024
-];
-
-/// Add bytes lazily to given encoder.
-///
-/// # Panic
-/// Drop will panic if the expected number of bytes
-/// is not equal to actually added bytes.
-pub struct BytesExact<'a> {
-    buf: &'a mut Vec<u8>,
-    expected: usize,
-    written: usize,
-}
-
-impl BytesExact<'_> {
-    /// Add given byte slice.
-    pub fn add(&mut self, buf: &[u8]) {
-        self.written += buf.len();
-        self.buf.extend(buf);
-    }
-
-    pub fn finish(self) {}
-}
-
-impl Drop for BytesExact<'_> {
-    fn drop(&mut self) {
-        assert_eq!(self.expected, self.written);
-    }
-}
-
-mod sealed {
-    pub trait Sealed {}
-
-    impl Sealed for Vec<u8> {}
-}
-
 /// Bencode Encoder trait.
 pub trait Encoder: sealed::Sealed {
     /// Encode an integer value.
@@ -150,53 +44,36 @@ pub trait Encoder: sealed::Sealed {
     fn add_ordered_dict(&mut self) -> OrderedDict<'_, '_>;
 }
 
-impl Encoder for Vec<u8> {
-    #[inline]
-    fn add_int(&mut self, value: i64) {
-        self.push(b'i');
-        let mut buf = Buffer::new();
-        self.extend(buf.format(value).as_bytes());
-        self.push(b'e');
+mod sealed {
+    pub trait Sealed {}
+
+    impl Sealed for Vec<u8> {}
+}
+
+/// Add bytes lazily to given encoder.
+///
+/// # Panic
+/// Drop will panic if the expected number of bytes
+/// is not equal to actually added bytes.
+pub struct BytesExact<'a> {
+    buf: &'a mut Vec<u8>,
+    expected: usize,
+    written: usize,
+}
+
+impl BytesExact<'_> {
+    /// Add given byte slice.
+    pub fn add(&mut self, buf: &[u8]) {
+        self.written += buf.len();
+        self.buf.extend(buf);
     }
 
-    #[inline]
-    fn add_bytes(&mut self, value: &[u8]) {
-        let mut buf = Buffer::new();
-        self.extend(buf.format(value.len()).as_bytes());
-        self.push(b':');
-        self.extend(value);
-    }
+    pub fn finish(self) {}
+}
 
-    #[inline]
-    fn add_bytes_exact(&mut self, len: usize) -> BytesExact<'_> {
-        let mut buf = Buffer::new();
-        self.extend(buf.format(len).as_bytes());
-        self.push(b':');
-        BytesExact {
-            buf: self,
-            expected: len,
-            written: 0,
-        }
-    }
-
-    #[inline]
-    fn add_str(&mut self, value: &str) {
-        self.add_bytes(value.as_bytes());
-    }
-
-    #[inline]
-    fn add_list(&mut self) -> List<'_> {
-        List::new(self)
-    }
-
-    #[inline]
-    fn add_dict(&mut self) -> Dict<'_> {
-        Dict::new(self)
-    }
-
-    #[inline]
-    fn add_ordered_dict(&mut self) -> OrderedDict<'_, '_> {
-        OrderedDict::new(self)
+impl Drop for BytesExact<'_> {
+    fn drop(&mut self) {
+        assert_eq!(self.expected, self.written);
     }
 }
 
@@ -398,6 +275,129 @@ impl Drop for OrderedDict<'_, '_> {
         self.buf.push(b'e');
     }
 }
+
+impl Encoder for Vec<u8> {
+    #[inline]
+    fn add_int(&mut self, value: i64) {
+        self.push(b'i');
+        let mut buf = Buffer::new();
+        self.extend(buf.format(value).as_bytes());
+        self.push(b'e');
+    }
+
+    #[inline]
+    fn add_bytes(&mut self, value: &[u8]) {
+        let mut buf = Buffer::new();
+        self.extend(buf.format(value.len()).as_bytes());
+        self.push(b':');
+        self.extend(value);
+    }
+
+    #[inline]
+    fn add_bytes_exact(&mut self, len: usize) -> BytesExact<'_> {
+        let mut buf = Buffer::new();
+        self.extend(buf.format(len).as_bytes());
+        self.push(b':');
+        BytesExact {
+            buf: self,
+            expected: len,
+            written: 0,
+        }
+    }
+
+    #[inline]
+    fn add_str(&mut self, value: &str) {
+        self.add_bytes(value.as_bytes());
+    }
+
+    #[inline]
+    fn add_list(&mut self) -> List<'_> {
+        List::new(self)
+    }
+
+    #[inline]
+    fn add_dict(&mut self) -> Dict<'_> {
+        Dict::new(self)
+    }
+
+    #[inline]
+    fn add_ordered_dict(&mut self) -> OrderedDict<'_, '_> {
+        OrderedDict::new(self)
+    }
+}
+
+impl<T: Encode> Encode for &T {
+    fn encode<E: Encoder>(&self, enc: &mut E) {
+        (&**self).encode(enc);
+    }
+}
+
+impl<T: Encode> Encode for Box<T> {
+    fn encode<E: Encoder>(&self, enc: &mut E) {
+        (&**self).encode(enc);
+    }
+}
+
+impl<T: Encode> Encode for Vec<T> {
+    fn encode<E: Encoder>(&self, enc: &mut E) {
+        let mut list = enc.add_list();
+        for t in self {
+            list.add(t);
+        }
+        list.finish();
+    }
+}
+
+impl<T: Encode> Encode for [T] {
+    fn encode<E: Encoder>(&self, enc: &mut E) {
+        let mut list = enc.add_list();
+        for t in self {
+            list.add(t);
+        }
+        list.finish();
+    }
+}
+
+impl Encode for &[u8] {
+    fn encode<E: Encoder>(&self, enc: &mut E) {
+        enc.add_bytes(self);
+    }
+}
+
+impl Encode for &str {
+    fn encode<E: Encoder>(&self, enc: &mut E) {
+        enc.add_str(self);
+    }
+}
+
+impl Encode for String {
+    fn encode<E: Encoder>(&self, enc: &mut E) {
+        enc.add_str(self);
+    }
+}
+
+impl Encode for i64 {
+    fn encode<E: Encoder>(&self, enc: &mut E) {
+        enc.add_int(*self);
+    }
+}
+
+macro_rules! impl_arr {
+    ( $($len: expr),+ ) => {
+        $(
+            impl Encode for [u8; $len] {
+                fn encode<E: Encoder>(&self, enc: &mut E) {
+                    enc.add_bytes(&self[..]);
+                }
+            }
+        )+
+    };
+}
+
+impl_arr![
+    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25,
+    26, 27, 28, 29, 30, 31, 32, 64, 128, 256, 512, 1024
+];
 
 #[cfg(test)]
 mod tests {
