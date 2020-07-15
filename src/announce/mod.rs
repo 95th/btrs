@@ -95,7 +95,7 @@ impl<'a> AnnounceRequest<'a> {
             url,
             resolved_addr,
             info_hash: info_hash.clone(),
-            peer_id: peer_id.clone(),
+            peer_id: *peer_id,
             port,
             downloaded: 0,
             left: 0,

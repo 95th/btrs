@@ -15,7 +15,7 @@ impl<'a, 'p> Decode<'a, 'p> for Decoder<'a, 'p> {
 
 impl<'a, 'p> Decode<'a, 'p> for List<'a, 'p> {
     fn decode(decoder: Decoder<'a, 'p>) -> Result<Self> {
-        match decoder.to_list() {
+        match decoder.into_list() {
             Some(dict) => Ok(dict),
             None => Err(Error::TypeMismatch("Not a list")),
         }
@@ -24,7 +24,7 @@ impl<'a, 'p> Decode<'a, 'p> for List<'a, 'p> {
 
 impl<'a, 'p> Decode<'a, 'p> for Dict<'a, 'p> {
     fn decode(decoder: Decoder<'a, 'p>) -> Result<Self> {
-        match decoder.to_dict() {
+        match decoder.into_dict() {
             Some(dict) => Ok(dict),
             None => Err(Error::TypeMismatch("Not a dictionary")),
         }
@@ -160,11 +160,11 @@ impl<'a, 'p> Decoder<'a, 'p> {
     /// let bytes = b"l1:a2:bce";
     /// let parser = &mut Parser::new();
     /// let decoder = parser.parse::<Decoder>(bytes).unwrap();
-    /// let list = decoder.to_list().unwrap();
+    /// let list = decoder.into_list().unwrap();
     /// assert_eq!(b"a", list.get_bytes(0).unwrap());
     /// assert_eq!(b"bc", list.get_bytes(1).unwrap());
     /// ```
-    pub fn to_list(self) -> Option<List<'a, 'p>> {
+    pub fn into_list(self) -> Option<List<'a, 'p>> {
         if self.is_list() {
             Some(List {
                 buf: self.buf,
@@ -195,7 +195,7 @@ impl<'a, 'p> Decoder<'a, 'p> {
     pub fn as_list(&self) -> Option<&List<'a, 'p>> {
         if self.is_list() {
             // Safety: Objects with exact same layout
-            let list = unsafe { std::mem::transmute(self) };
+            let list = unsafe { &*(self as *const Decoder as *const List) };
             Some(list)
         } else {
             None
@@ -214,10 +214,10 @@ impl<'a, 'p> Decoder<'a, 'p> {
     /// let bytes = b"d1:a2:bce";
     /// let parser = &mut Parser::new();
     /// let decoder = parser.parse::<Decoder>(bytes).unwrap();
-    /// let dict = decoder.to_dict().unwrap();
+    /// let dict = decoder.into_dict().unwrap();
     /// assert_eq!(b"bc", dict.get_bytes(b"a").unwrap());
     /// ```
-    pub fn to_dict(self) -> Option<Dict<'a, 'p>> {
+    pub fn into_dict(self) -> Option<Dict<'a, 'p>> {
         if self.is_dict() {
             Some(Dict {
                 buf: self.buf,
@@ -247,7 +247,7 @@ impl<'a, 'p> Decoder<'a, 'p> {
     pub fn as_dict(&self) -> Option<&Dict<'a, 'p>> {
         if self.is_dict() {
             // Safety: Objects with exact same layout
-            let dict = unsafe { std::mem::transmute(self) };
+            let dict = unsafe { &*(self as *const Decoder as *const Dict) };
             Some(dict)
         } else {
             None
@@ -349,9 +349,10 @@ impl<'a, 'p> Decoder<'a, 'p> {
     /// ```
     pub fn as_ascii_str(&self) -> Option<&'a str> {
         let s = self.as_str()?;
-        if s.chars().all(|c| {
+        let is_ascii = |c: char| {
             c.is_ascii_alphanumeric() || c.is_ascii_punctuation() || c.is_ascii_whitespace()
-        }) {
+        };
+        if s.chars().all(is_ascii) {
             Some(s)
         } else {
             None
@@ -395,7 +396,7 @@ impl<'a, 'p> List<'a, 'p> {
     ///
     /// let bytes = b"l1:a1:be";
     /// let parser = &mut Parser::new();
-    /// let dict = parser.parse::<Decoder>(bytes).unwrap().to_list().unwrap();
+    /// let dict = parser.parse::<Decoder>(bytes).unwrap().into_list().unwrap();
     /// assert_eq!(b"l1:a1:be", dict.as_raw_bytes());
     /// ```
     pub fn as_raw_bytes(&self) -> &'a [u8] {
@@ -410,12 +411,12 @@ impl<'a, 'p> List<'a, 'p> {
 
     /// Returns the `Dict` at the given index.
     pub fn get_dict(&self, i: usize) -> Option<Dict<'a, 'p>> {
-        self.get(i)?.to_dict()
+        self.get(i)?.into_dict()
     }
 
     /// Returns the `List` at the given index.
     pub fn get_list(&self, i: usize) -> Option<List<'a, 'p>> {
-        self.get(i)?.to_list()
+        self.get(i)?.into_list()
     }
 
     /// Returns the byte slice at the given index.
@@ -512,7 +513,7 @@ impl<'a, 'p> Dict<'a, 'p> {
     ///
     /// let bytes = b"d1:a1:be";
     /// let parser = &mut Parser::new();
-    /// let dict = parser.parse::<Decoder>(bytes).unwrap().to_dict().unwrap();
+    /// let dict = parser.parse::<Decoder>(bytes).unwrap().into_dict().unwrap();
     /// assert_eq!(b"d1:a1:be", dict.as_raw_bytes());
     /// ```
     pub fn as_raw_bytes(&self) -> &'a [u8] {
@@ -533,12 +534,12 @@ impl<'a, 'p> Dict<'a, 'p> {
 
     /// Returns the `Dict` for the given key.
     pub fn get_dict(&self, key: &[u8]) -> Option<Dict<'a, 'p>> {
-        self.get(key)?.to_dict()
+        self.get(key)?.into_dict()
     }
 
     /// Returns the `List` for the given key.
     pub fn get_list(&self, key: &[u8]) -> Option<List<'a, 'p>> {
-        self.get(key)?.to_list()
+        self.get(key)?.into_list()
     }
 
     /// Returns the byte slice for the given key.
@@ -784,7 +785,7 @@ mod tests {
 
     #[test]
     fn decode_debug_bytes() {
-        let s = "3:\x01\x01\x01".as_bytes();
+        let s = b"3:\x01\x01\x01";
         let parser = &mut Parser::new();
         let n = parser.parse::<Decoder>(s).unwrap();
         assert!(n.as_bytes().is_some());
@@ -794,7 +795,7 @@ mod tests {
 
     #[test]
     fn decode_debug_str() {
-        let s = "3:abc".as_bytes();
+        let s = b"3:abc";
         let parser = &mut Parser::new();
         let n = parser.parse::<Decoder>(s).unwrap();
         assert!(n.as_bytes().is_some());

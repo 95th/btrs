@@ -149,7 +149,7 @@ impl Server {
         let m = FindNode {
             id: &self.own_id,
             target,
-            txn_id: self.txn_id.next(),
+            txn_id: self.txn_id.next_id(),
         };
         match self.socket.send(&m, addr).await {
             Ok(_) => {
@@ -272,7 +272,7 @@ impl BufSocket {
         Ok(())
     }
 
-    async fn recv<'a>(&'a mut self) -> anyhow::Result<(Msg<'a, 'a>, SocketAddr)> {
+    async fn recv(&mut self) -> anyhow::Result<(Msg<'_, '_>, SocketAddr)> {
         let (n, addr) = self.socket.recv_from(&mut self.recv_buf).await?;
         trace!("Received: {} bytes from {}", n, addr);
 
@@ -280,10 +280,10 @@ impl BufSocket {
         Ok((msg, addr))
     }
 
-    async fn recv_timeout<'a>(
-        &'a mut self,
+    async fn recv_timeout(
+        &mut self,
         timeout: Duration,
-    ) -> anyhow::Result<Option<(Msg<'a, 'a>, SocketAddr)>> {
+    ) -> anyhow::Result<Option<(Msg<'_, '_>, SocketAddr)>> {
         match tokio::time::timeout(timeout, self.recv()).await {
             Ok(x) => x.map(Some),
             Err(_) => Ok(None),

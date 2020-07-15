@@ -7,7 +7,7 @@ use std::convert::TryInto;
 pub struct TxnId(pub u16);
 
 impl TxnId {
-    pub fn next(&mut self) -> Self {
+    pub fn next_id(&mut self) -> Self {
         let out = *self;
         self.0 = self.0.wrapping_add(1);
         out
@@ -51,7 +51,7 @@ impl<'a, 'p> Decode<'a, 'p> for Msg<'a, 'p> {
     fn decode(decoder: Decoder<'a, 'p>) -> ben::Result<Self> {
         use ben::Error::Other;
 
-        let dict = check!(decoder.to_dict(), "Not a dict");
+        let dict = check!(decoder.into_dict(), "Not a dict");
         let y = check!(dict.get_bytes(b"y"), "Message type is required");
 
         let kind = match y {

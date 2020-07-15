@@ -8,16 +8,22 @@ pub struct Bucket {
     pub last_updated: Instant,
 }
 
-impl Bucket {
-    // The 'K' constant in Kademlia algorithm
-    pub const MAX_LEN: usize = 8;
-
-    pub fn new() -> Self {
+impl Default for Bucket {
+    fn default() -> Self {
         Self {
             live: vec![],
             extra: vec![],
             last_updated: Instant::now(),
         }
+    }
+}
+
+impl Bucket {
+    // The 'K' constant in Kademlia algorithm
+    pub const MAX_LEN: usize = 8;
+
+    pub fn new() -> Self {
+        Self::default()
     }
 
     pub fn get_contacts<'a>(&'a self, out: &mut Vec<ContactRef<'a>>) {

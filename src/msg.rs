@@ -147,27 +147,27 @@ impl Message {
             5 => Bitfield { len: len - 1 },
             6 => {
                 ensure!(len == 13, "Invalid Request");
-                Request {
-                    index: reader.read_u32().await?,
-                    begin: reader.read_u32().await?,
-                    len: reader.read_u32().await?,
-                }
+                let index = reader.read_u32().await?;
+                let begin = reader.read_u32().await?;
+                let len = reader.read_u32().await?;
+                Request { index, begin, len }
             }
             7 => {
                 ensure!(len > 9, "Invalid Piece");
+                let index = reader.read_u32().await?;
+                let begin = reader.read_u32().await?;
                 Piece {
-                    index: reader.read_u32().await?,
-                    begin: reader.read_u32().await?,
+                    index,
+                    begin,
                     len: len - 9,
                 }
             }
             8 => {
                 ensure!(len == 13, "Invalid Cancel");
-                Cancel {
-                    index: reader.read_u32().await?,
-                    begin: reader.read_u32().await?,
-                    len: reader.read_u32().await?,
-                }
+                let index = reader.read_u32().await?;
+                let begin = reader.read_u32().await?;
+                let len = reader.read_u32().await?;
+                Cancel { index, begin, len }
             }
             20 => Extended { len: len - 1 },
             id => Unknown { id, len: len - 1 },

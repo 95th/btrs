@@ -117,7 +117,7 @@ impl NodeId {
 
         if leading_zeros % 8 != 0 {
             let idx = leading_zeros / 8;
-            id[idx] = 0xff >> leading_zeros % 8;
+            id[idx] = 0xff >> (leading_zeros % 8);
         }
 
         id

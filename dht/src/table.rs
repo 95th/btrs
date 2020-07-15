@@ -357,8 +357,8 @@ mod tests {
             assert!(added, "Adding contact failed at {}", i);
         }
 
-        let closest = &mut Vec::with_capacity(20);
-        table.find_closest(&NodeId::all(1), closest);
+        let mut closest = Vec::with_capacity(20);
+        table.find_closest(&NodeId::all(1), &mut closest);
 
         let mut closest_iter = closest.into_iter();
         for i in 0..20 {
