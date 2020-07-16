@@ -181,9 +181,13 @@ impl RoutingTable {
             return BucketResult::RequireSplit;
         }
 
-        bucket.extra.push(contact.as_owned());
-        bucket.last_updated = Instant::now();
-        BucketResult::Success
+        if bucket.extra.len() < Bucket::MAX_LEN * 2 {
+            bucket.extra.push(contact.as_owned());
+            bucket.last_updated = Instant::now();
+            BucketResult::Success
+        } else {
+            BucketResult::Fail
+        }
     }
 
     fn replace_node_impl(&mut self, contact: &ContactRef<'_>, bucket_index: usize) -> BucketResult {
