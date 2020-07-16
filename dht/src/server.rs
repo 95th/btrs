@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 use tokio::net::UdpSocket;
 
 pub struct Server {
-    socket: BufSocket,
+    rpc: RpcMgr,
     table: RoutingTable,
     txn_id: TxnId,
     own_id: NodeId,
@@ -27,8 +27,8 @@ impl Server {
         let id = NodeId::gen();
 
         let server = Server {
-            socket: BufSocket::new(socket),
-            table: RoutingTable::new(id.clone()),
+            rpc: RpcMgr::new(socket),
+            table: RoutingTable::new(id),
             txn_id: TxnId(0),
             own_id: id,
             txns: Transactions::new(),
@@ -44,7 +44,7 @@ impl Server {
             if Instant::now() >= self.next_refresh {
                 // refresh the table
                 if self.table.is_empty() {
-                    let target = self.own_id.clone();
+                    let target = self.own_id;
                     self.refresh(&target).await;
                 } else if let Some(target) = self.table.pick_refresh_id() {
                     trace!("Bucket refresh target: {:?}", target);
@@ -116,7 +116,7 @@ impl Server {
                 break;
             }
 
-            let (msg, _) = match self.socket.recv_timeout(Duration::from_secs(1)).await {
+            let (msg, _) = match self.rpc.recv_timeout(Duration::from_secs(1)).await {
                 Ok(Some(x)) => x,
                 Ok(None) => continue,
                 Err(e) => {
@@ -130,7 +130,7 @@ impl Server {
             let mut closest = Vec::with_capacity(Bucket::MAX_LEN);
             self.table.find_closest(target, &mut closest);
 
-            let old_dist = min_dist.clone();
+            let old_dist = min_dist;
 
             nodes.clear();
             for c in closest {
@@ -151,7 +151,7 @@ impl Server {
             target,
             txn_id: self.txn_id.next_id(),
         };
-        match self.socket.send(&m, addr).await {
+        match self.rpc.send(&m, addr).await {
             Ok(_) => {
                 self.txns.insert(m.txn_id, *addr);
                 true
@@ -169,7 +169,7 @@ impl Server {
     }
 
     async fn recv_response(&mut self, timeout: Duration) {
-        match self.socket.recv_timeout(timeout).await {
+        match self.rpc.recv_timeout(timeout).await {
             Ok(Some((msg, _addr))) => self.table.handle_msg(msg, &mut self.txns),
             Ok(None) => {}
             Err(e) => warn!("{}", e),
@@ -238,14 +238,14 @@ impl RoutingTable {
     }
 }
 
-struct BufSocket {
+struct RpcMgr {
     socket: UdpSocket,
     buf: Vec<u8>,
     recv_buf: Box<[u8]>,
     parser: Parser,
 }
 
-impl BufSocket {
+impl RpcMgr {
     fn new(socket: UdpSocket) -> Self {
         Self {
             socket,

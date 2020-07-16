@@ -5,7 +5,7 @@ use rand::Rng;
 use std::fmt;
 use std::ops::{BitAnd, BitXor, Deref, DerefMut};
 
-#[derive(Clone, Default, PartialEq, PartialOrd, Eq, Ord)]
+#[derive(Copy, Clone, Default, PartialEq, PartialOrd, Eq, Ord)]
 #[repr(transparent)]
 pub struct NodeId(pub [u8; 20]);
 
@@ -206,8 +206,8 @@ impl UniformSampler for UniformNodeId {
         assert!(low < high);
 
         UniformNodeId {
-            low: low.clone(),
-            high: high.clone(),
+            low: *low,
+            high: *high,
             inclusive: false,
         }
     }
@@ -222,8 +222,8 @@ impl UniformSampler for UniformNodeId {
         assert!(low <= high);
 
         UniformNodeId {
-            low: low.clone(),
-            high: high.clone(),
+            low: *low,
+            high: *high,
             inclusive: true,
         }
     }
@@ -274,7 +274,7 @@ mod tests {
     fn xor() {
         let a = NodeId::all(0b0000_0101);
         let b = NodeId::all(0b1100_0100);
-        let c = &a ^ &b;
+        let c = a ^ b;
         assert_eq!(NodeId::all(0b1100_0001), c);
     }
 

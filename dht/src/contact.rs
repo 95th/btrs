@@ -24,7 +24,7 @@ pub struct ContactRef<'a> {
 
 impl ContactRef<'_> {
     pub fn as_owned(&self) -> Contact {
-        Contact::new(self.id.clone(), self.addr)
+        Contact::new(*self.id, self.addr)
     }
 }
 
