@@ -1,7 +1,7 @@
 use crate::bucket::Bucket;
 use crate::contact::{CompactNodes, CompactNodesV6, ContactStatus};
 use crate::id::NodeId;
-use crate::msg::{FindNode, Msg, MsgKind, TxnId};
+use crate::msg::{AnnouncePeer, FindNode, Msg, MsgKind, TxnId};
 use crate::table::RoutingTable;
 use anyhow::Context as _;
 use ben::{Decoder, Encode, Parser};
@@ -9,6 +9,7 @@ use std::collections::{HashMap, VecDeque};
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 use tokio::net::UdpSocket;
+use tokio::sync::mpsc::{self, Receiver, Sender};
 
 pub struct Server {
     rpc: RpcMgr,
@@ -18,6 +19,19 @@ pub struct Server {
     txns: Transactions,
     router_nodes: Vec<SocketAddr>,
     next_refresh: Instant,
+    client_rx: Receiver<ClientRequest>,
+    client_tx: Sender<ClientRequest>,
+}
+
+#[derive(Clone)]
+pub struct Client {
+    pub tx: Sender<ClientRequest>,
+}
+
+#[derive(Debug)]
+pub enum ClientRequest {
+    Announce(NodeId),
+    Shutdown,
 }
 
 impl Server {
@@ -25,6 +39,7 @@ impl Server {
         let addr = SocketAddr::from(([0u8; 4], port));
         let socket = UdpSocket::bind(addr).await?;
         let id = NodeId::gen();
+        let (client_tx, client_rx) = mpsc::channel(100);
 
         let server = Server {
             rpc: RpcMgr::new(socket),
@@ -34,9 +49,17 @@ impl Server {
             txns: Transactions::new(),
             router_nodes,
             next_refresh: Instant::now(),
+            client_tx,
+            client_rx,
         };
 
         Ok(server)
+    }
+
+    pub fn new_client(&self) -> Client {
+        Client {
+            tx: self.client_tx.clone(),
+        }
     }
 
     pub async fn run(mut self) {
@@ -56,7 +79,8 @@ impl Server {
             }
 
             // Check if any request from client such as Announce/Shutdown
-            if self.check_client_request() {
+            if self.check_client_request().await {
+                debug!("Shutdown received from client");
                 // TODO: Save DHT state on disk
                 break;
             }
@@ -75,7 +99,8 @@ impl Server {
 
         if !self.table.is_empty() {
             let mut closest = Vec::with_capacity(Bucket::MAX_LEN);
-            self.table.find_closest(target, &mut closest);
+            self.table
+                .find_closest(target, &mut closest, Bucket::MAX_LEN);
 
             for c in closest {
                 nodes.push_front(c.addr);
@@ -128,7 +153,8 @@ impl Server {
             self.table.handle_msg(msg, &mut self.txns);
 
             let mut closest = Vec::with_capacity(Bucket::MAX_LEN);
-            self.table.find_closest(target, &mut closest);
+            self.table
+                .find_closest(target, &mut closest, Bucket::MAX_LEN);
 
             let old_dist = min_dist;
 
@@ -163,9 +189,47 @@ impl Server {
         }
     }
 
-    fn check_client_request(&mut self) -> bool {
-        // TODO
+    async fn check_client_request(&mut self) -> bool {
+        let info_hash = match self.client_rx.try_recv() {
+            Ok(ClientRequest::Announce(infohash)) => infohash,
+            Ok(ClientRequest::Shutdown) => return true,
+            Err(_) => return false,
+        };
+
+        let mut closest = Vec::with_capacity(Bucket::MAX_LEN);
+        self.table
+            .find_closest(&info_hash, &mut closest, Bucket::MAX_LEN);
+
+        let closest: Vec<_> = closest.into_iter().map(|c| c.addr).collect();
+
+        for c in closest {
+            self.announce_peer(&info_hash, &c).await;
+        }
+
         false
+    }
+
+    async fn announce_peer(&mut self, info_hash: &NodeId, addr: &SocketAddr) -> bool {
+        debug!("Send FIND_NODE request to {}", addr);
+
+        let m = AnnouncePeer {
+            id: &self.own_id,
+            info_hash,
+            txn_id: self.txn_id.next_id(),
+            implied_port: true,
+            port: 0,
+            token: b"abc",
+        };
+        match self.rpc.send(&m, addr).await {
+            Ok(_) => {
+                self.txns.insert(m.txn_id, *addr);
+                true
+            }
+            Err(e) => {
+                warn!("FIND_NODE to {} failed: {}", addr, e);
+                false
+            }
+        }
     }
 
     async fn recv_response(&mut self, timeout: Duration) {

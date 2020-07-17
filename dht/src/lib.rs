@@ -16,7 +16,7 @@ mod server;
 pub mod table;
 
 use id::NodeId;
-pub use server::Server;
+pub use server::{Client, ClientRequest, Server};
 use table::RoutingTable;
 
 pub struct Dht {

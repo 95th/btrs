@@ -71,14 +71,19 @@ impl RoutingTable {
         }
     }
 
-    pub fn find_closest<'a>(&'a self, target: &NodeId, out: &mut Vec<ContactRef<'a>>) {
+    pub fn find_closest<'a>(
+        &'a self,
+        target: &NodeId,
+        out: &mut Vec<ContactRef<'a>>,
+        count: usize,
+    ) {
         let bucket_no = self.find_bucket(target);
         self.buckets[bucket_no].get_contacts(out);
 
         let len = self.buckets.len();
         let mut i = 1;
 
-        while out.len() < out.capacity() && (i <= bucket_no || bucket_no + i < len) {
+        while out.len() < count && (i <= bucket_no || bucket_no + i < len) {
             if i <= bucket_no {
                 self.buckets[bucket_no - i].get_contacts(out);
             }
@@ -89,6 +94,7 @@ impl RoutingTable {
         }
 
         out.sort_unstable_by_key(|c| target ^ c.id);
+        out.truncate(count);
     }
 
     pub fn len(&self) -> usize {
@@ -362,7 +368,7 @@ mod tests {
         }
 
         let mut closest = Vec::with_capacity(20);
-        table.find_closest(&NodeId::all(1), &mut closest);
+        table.find_closest(&NodeId::all(1), &mut closest, 20);
 
         let mut closest_iter = closest.into_iter();
         for i in 0..20 {

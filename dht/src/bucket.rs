@@ -27,13 +27,9 @@ impl Bucket {
     }
 
     pub fn get_contacts<'a>(&'a self, out: &mut Vec<ContactRef<'a>>) {
-        for c in &self.live {
-            if out.len() >= out.capacity() {
-                break;
-            }
-            if !c.failed() {
-                out.push(c.as_ref());
-            }
-        }
+        self.live
+            .iter()
+            .filter(|c| !c.failed())
+            .for_each(|c| out.push(c.as_ref()));
     }
 }
