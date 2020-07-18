@@ -26,21 +26,21 @@ pub async fn announce(req: AnnounceRequest<'_>) -> crate::Result<AnnounceRespons
     let mut parser = Parser::new();
     let value = parser.parse::<Dict>(&data)?;
     let interval = value
-        .get(b"interval")
+        .get("interval")
         .and_then(|v| v.as_int())
         .and_then(|n| n.try_into().ok())
         .unwrap_or(0);
 
-    let peers = match value.get(b"peers") {
+    let peers = match value.get("peers") {
         Some(peers) if peers.is_list() => {
             let mut v = hashset![];
             for peer in peers.as_list().unwrap().iter() {
                 let peer = peer.as_dict().context("Peer not a dict")?;
                 let ip = peer
-                    .get_str(b"ip")
+                    .get_str("ip")
                     .context("IP not present")
                     .and_then(|v| v.parse().context("Invalid IP/DNS name"))?;
-                let port = peer.get_int(b"port").context("Port not present")?;
+                let port = peer.get_int("port").context("Port not present")?;
                 v.insert(Peer::new(ip, port as u16));
             }
             v
@@ -55,7 +55,7 @@ pub async fn announce(req: AnnounceRequest<'_>) -> crate::Result<AnnounceRespons
 
     debug!("Found {} peers (v4): {:?}", peers.len(), peers);
 
-    let peers6 = value.get_bytes(b"peers6").unwrap_or_default();
+    let peers6 = value.get_bytes("peers6").unwrap_or_default();
     ensure!(peers6.len() % 18 == 0, "Invalid peer len");
 
     let peers6: HashSet<_> = peers6.chunks_exact(18).map(Peer::v6).collect();

@@ -294,21 +294,21 @@ impl RoutingTable {
 
     fn read_nodes(&mut self, msg: &Msg) -> anyhow::Result<()> {
         if let MsgKind::Response = msg.kind {
-            let resp = msg.body.get_dict(b"r").context("Response dict expected")?;
+            let resp = msg.body.get_dict("r").context("Response dict expected")?;
 
-            let nodes = resp.get_bytes(b"nodes").context("nodes required")?;
+            let nodes = resp.get_bytes("nodes").context("nodes required")?;
             for c in CompactNodes::new(nodes)? {
                 self.add_contact(&c);
             }
 
-            if let Some(nodes6) = resp.get_bytes(b"nodes6") {
+            if let Some(nodes6) = resp.get_bytes("nodes6") {
                 for c in CompactNodesV6::new(nodes6)? {
                     self.add_contact(&c);
                 }
             }
 
             if let Some(id) = msg.id {
-                if let Some(token) = resp.get_bytes(b"token") {
+                if let Some(token) = resp.get_bytes("token") {
                     self.tokens.insert(*id, token.to_vec());
                 }
             }

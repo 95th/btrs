@@ -522,9 +522,9 @@ impl<'a, 'p> Dict<'a, 'p> {
     }
 
     /// Returns the `Decoder` for the given key.
-    pub fn get(&self, key: &[u8]) -> Option<Decoder<'a, 'p>> {
+    pub fn get(&self, key: &str) -> Option<Decoder<'a, 'p>> {
         self.iter().find_map(|(k, v)| {
-            if k.as_raw_bytes() == key {
+            if k.as_raw_bytes() == key.as_bytes() {
                 Some(v)
             } else {
                 None
@@ -533,32 +533,32 @@ impl<'a, 'p> Dict<'a, 'p> {
     }
 
     /// Returns the `Dict` for the given key.
-    pub fn get_dict(&self, key: &[u8]) -> Option<Dict<'a, 'p>> {
+    pub fn get_dict(&self, key: &str) -> Option<Dict<'a, 'p>> {
         self.get(key)?.into_dict()
     }
 
     /// Returns the `List` for the given key.
-    pub fn get_list(&self, key: &[u8]) -> Option<List<'a, 'p>> {
+    pub fn get_list(&self, key: &str) -> Option<List<'a, 'p>> {
         self.get(key)?.into_list()
     }
 
     /// Returns the byte slice for the given key.
-    pub fn get_bytes(&self, key: &[u8]) -> Option<&'a [u8]> {
+    pub fn get_bytes(&self, key: &str) -> Option<&'a [u8]> {
         self.get(key)?.as_bytes()
     }
 
     /// Returns the string slice for the given key.
-    pub fn get_str(&self, key: &[u8]) -> Option<&'a str> {
+    pub fn get_str(&self, key: &str) -> Option<&'a str> {
         self.get(key)?.as_str()
     }
 
     /// Returns the printable ASCII string slice for the given key.
-    pub fn get_ascii_str(&self, key: &[u8]) -> Option<&'a str> {
+    pub fn get_ascii_str(&self, key: &str) -> Option<&'a str> {
         self.get(key)?.as_ascii_str()
     }
 
     /// Returns the `i64` for the given key.
-    pub fn get_int(&self, key: &[u8]) -> Option<i64> {
+    pub fn get_int(&self, key: &str) -> Option<i64> {
         self.get(key)?.as_int()
     }
 
@@ -754,7 +754,7 @@ mod tests {
         let s = b"d1:ai1e1:bi2ee";
         let parser = &mut Parser::new();
         let dict = parser.parse::<Dict>(s).unwrap();
-        let b = dict.get(b"b").unwrap();
+        let b = dict.get("b").unwrap();
         assert_eq!(2, b.as_int().unwrap());
     }
 
@@ -763,8 +763,8 @@ mod tests {
         let s = b"d1:ai1e1:bi2ee";
         let parser = &mut Parser::new();
         let dict = parser.parse::<Dict>(s).unwrap();
-        assert!(dict.get_dict(b"b").is_none());
-        assert!(dict.get_list(b"b").is_none());
+        assert!(dict.get_dict("b").is_none());
+        assert!(dict.get_list("b").is_none());
     }
 
     #[test]

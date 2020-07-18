@@ -292,9 +292,9 @@ impl<'a, 'p> ExtendedMessage<'a, 'p> {
     pub fn metadata(&self) -> Option<Metadata> {
         trace!("metadata: {:#?}", self.value);
         let dict = self.value.as_dict()?;
-        let m = dict.get_dict(b"m")?;
-        let id = m.get_int(b"ut_metadata")? as u8;
-        let len = dict.get_int(b"metadata_size")? as usize;
+        let m = dict.get_dict("m")?;
+        let id = m.get_int("ut_metadata")? as u8;
+        let len = dict.get_int("metadata_size")? as usize;
         Some(Metadata { id, len })
     }
 
@@ -302,10 +302,10 @@ impl<'a, 'p> ExtendedMessage<'a, 'p> {
         trace!("data: {:#?}", self.value);
         let dict = self.value.as_dict().context("Not a dict")?;
 
-        let msg_type = dict.get_int(b"msg_type").context("`msg_type` not found")?;
+        let msg_type = dict.get_int("msg_type").context("`msg_type` not found")?;
         ensure!(msg_type == msg_type::DATA, "Not a DATA message");
 
-        let piece = dict.get_int(b"piece").context("`piece` not found")?;
+        let piece = dict.get_int("piece").context("`piece` not found")?;
         ensure!(piece == expected_piece, "Incorrect piece");
 
         if self.rest.len() > METADATA_PIECE_LEN {

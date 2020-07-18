@@ -52,11 +52,11 @@ impl<'a, 'p> Decode<'a, 'p> for Msg<'a, 'p> {
         use ben::Error::Other;
 
         let dict = check!(decoder.into_dict(), "Not a dict");
-        let y = check!(dict.get_bytes(b"y"), "Message type is required");
+        let y = check!(dict.get_bytes("y"), "Message type is required");
 
         let kind = match y {
             b"q" => {
-                let q = check!(dict.get_bytes(b"q"), "Query type is required");
+                let q = check!(dict.get_bytes("q"), "Query type is required");
                 match q {
                     b"ping" => MsgKind::Ping,
                     b"find_node" => MsgKind::FindNode,
@@ -75,7 +75,7 @@ impl<'a, 'p> Decode<'a, 'p> for Msg<'a, 'p> {
                 return Err(Other("Unexpected Message type"));
             }
         };
-        let txn_id = check!(dict.get_bytes(b"t"), "Transaction ID is required");
+        let txn_id = check!(dict.get_bytes("t"), "Transaction ID is required");
         let txn_id = check!(txn_id.try_into().ok(), "Transaction ID must be 2 bytes");
         let id = get_id(kind, &dict);
 
@@ -91,11 +91,11 @@ impl<'a, 'p> Decode<'a, 'p> for Msg<'a, 'p> {
 fn get_id<'a>(kind: MsgKind, dict: &Dict<'a, '_>) -> Option<&'a NodeId> {
     use MsgKind::*;
     let inner = match kind {
-        Response => dict.get_dict(b"r")?,
-        Ping | FindNode | GetPeers | AnnouncePeer => dict.get_dict(b"a")?,
+        Response => dict.get_dict("r")?,
+        Ping | FindNode | GetPeers | AnnouncePeer => dict.get_dict("a")?,
         Error => return None,
     };
-    let id = inner.get_bytes(b"id")?;
+    let id = inner.get_bytes("id")?;
     if id.len() == 20 {
         let ptr = id.as_ptr() as *const NodeId;
         unsafe { Some(&*ptr) }

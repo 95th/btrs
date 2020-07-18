@@ -75,10 +75,10 @@ impl MagnetUri {
     fn read_info(&self, data: &[u8]) -> Option<TorrentInfo> {
         let mut parser = Parser::new();
         let info_dict = parser.parse::<Dict>(&data).ok()?;
-        let length = info_dict.get_int(b"length")? as usize;
-        let name = info_dict.get_str(b"name").unwrap_or_default().to_string();
-        let piece_len = info_dict.get_int(b"piece length")? as usize;
-        let piece_hashes = info_dict.get_bytes(b"pieces")?.to_vec();
+        let length = info_dict.get_int("length")? as usize;
+        let name = info_dict.get_str("name").unwrap_or_default().to_string();
+        let piece_len = info_dict.get_int("piece length")? as usize;
+        let piece_hashes = info_dict.get_bytes("pieces")?.to_vec();
         Some(TorrentInfo {
             piece_len,
             length,

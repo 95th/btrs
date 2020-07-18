@@ -54,26 +54,23 @@ impl TorrentFile {
     pub fn parse(bytes: impl AsRef<[u8]>) -> crate::Result<TorrentFile> {
         let mut parser = Parser::new();
         let dict = parser.parse::<Dict>(bytes.as_ref())?;
-        let announce = dict.get_str(b"announce").context("`announce` not found")?;
-        let info_bytes = dict
-            .get(b"info")
-            .context("`info` not found")?
-            .as_raw_bytes();
+        let announce = dict.get_str("announce").context("`announce` not found")?;
+        let info_bytes = dict.get("info").context("`info` not found")?.as_raw_bytes();
         let info_hash = Sha1::from(info_bytes).digest().bytes().into();
 
-        let info_dict = dict.get_dict(b"info").context("`info` dict not found")?;
-        let length = info_dict.get_int(b"length").context("`length` not found")?;
-        let name = info_dict.get_str(b"name").unwrap_or_default();
+        let info_dict = dict.get_dict("info").context("`info` dict not found")?;
+        let length = info_dict.get_int("length").context("`length` not found")?;
+        let name = info_dict.get_str("name").unwrap_or_default();
         let piece_len = info_dict
-            .get_int(b"piece length")
+            .get_int("piece length")
             .context("`piece length` not found")?;
         let pieces = info_dict
-            .get(b"pieces")
+            .get("pieces")
             .context("`pieces` not found")?
             .as_raw_bytes();
 
         let mut tracker_urls = hashset![announce.to_owned()];
-        if let Some(list) = dict.get_list(b"announce-list") {
+        if let Some(list) = dict.get_list("announce-list") {
             for v in list.iter() {
                 for v in v.as_list().context("`announce-list` is not a list")?.iter() {
                     tracker_urls.insert(
