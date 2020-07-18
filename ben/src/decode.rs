@@ -215,7 +215,7 @@ impl<'a, 'p> Decoder<'a, 'p> {
     /// let parser = &mut Parser::new();
     /// let decoder = parser.parse::<Decoder>(bytes).unwrap();
     /// let dict = decoder.into_dict().unwrap();
-    /// assert_eq!(b"bc", dict.get_bytes(b"a").unwrap());
+    /// assert_eq!(b"bc", dict.get_bytes("a").unwrap());
     /// ```
     pub fn into_dict(self) -> Option<Dict<'a, 'p>> {
         if self.is_dict() {
@@ -242,7 +242,7 @@ impl<'a, 'p> Decoder<'a, 'p> {
     /// let parser = &mut Parser::new();
     /// let decoder = parser.parse::<Decoder>(bytes).unwrap();
     /// let dict = decoder.as_dict().unwrap();
-    /// assert_eq!(b"bc", dict.get_bytes(b"a").unwrap());
+    /// assert_eq!(b"bc", dict.get_bytes("a").unwrap());
     /// ```
     pub fn as_dict(&self) -> Option<&Dict<'a, 'p>> {
         if self.is_dict() {
