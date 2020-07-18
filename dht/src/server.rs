@@ -196,47 +196,38 @@ impl Server {
             Err(_) => return false,
         };
 
+        self.announce(&info_hash).await;
+        false
+    }
+
+    async fn announce(&mut self, info_hash: &NodeId) {
         let mut closest = Vec::with_capacity(Bucket::MAX_LEN);
         self.table
             .find_closest(&info_hash, &mut closest, Bucket::MAX_LEN);
 
-        let closest: Vec<_> = closest.into_iter().map(|c| (c.addr, *c.id)).collect();
-
         for c in closest {
-            self.announce(&info_hash, &c.0, &c.1).await;
-        }
+            debug!("Send ANNOUNCE_PEER request to {}", c.addr);
 
-        false
-    }
+            let token = match self.table.tokens.get(&c.id) {
+                Some(t) => t,
+                None => {
+                    debug!("Token not found for {:?}", c.id);
+                    continue;
+                }
+            };
 
-    async fn announce(&mut self, info_hash: &NodeId, addr: &SocketAddr, id: &NodeId) -> bool {
-        debug!("Send ANNOUNCE_PEER request to {}", addr);
+            let m = AnnouncePeer {
+                id: &self.own_id,
+                info_hash,
+                txn_id: self.txn_id.next_id(),
+                implied_port: true,
+                port: 0,
+                token,
+            };
 
-        let token = match self.table.tokens.get(id) {
-            Some(t) => t,
-            None => {
-                debug!("Token not found for {:?}", id);
-                return false;
-            }
-        };
-
-        let m = AnnouncePeer {
-            id: &self.own_id,
-            info_hash,
-            txn_id: self.txn_id.next_id(),
-            implied_port: true,
-            port: 0,
-            token,
-        };
-
-        match self.rpc.send(&m, addr).await {
-            Ok(_) => {
-                self.txns.insert(m.txn_id, *addr);
-                true
-            }
-            Err(e) => {
-                warn!("ANNOUNCE_PEER to {} failed: {}", addr, e);
-                false
+            match self.rpc.send(&m, &c.addr).await {
+                Ok(_) => self.txns.insert(m.txn_id, c.addr),
+                Err(e) => warn!("ANNOUNCE_PEER to {} failed: {}", c.addr, e),
             }
         }
     }
