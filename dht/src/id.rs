@@ -5,7 +5,7 @@ use rand::Rng;
 use std::fmt;
 use std::ops::{BitAnd, BitXor, Deref, DerefMut};
 
-#[derive(Copy, Clone, Default, PartialEq, PartialOrd, Eq, Ord)]
+#[derive(Copy, Clone, Default, PartialEq, PartialOrd, Eq, Ord, Hash)]
 #[repr(transparent)]
 pub struct NodeId(pub [u8; 20]);
 

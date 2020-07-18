@@ -200,17 +200,25 @@ impl Server {
         self.table
             .find_closest(&info_hash, &mut closest, Bucket::MAX_LEN);
 
-        let closest: Vec<_> = closest.into_iter().map(|c| c.addr).collect();
+        let closest: Vec<_> = closest.into_iter().map(|c| (c.addr, *c.id)).collect();
 
         for c in closest {
-            self.announce_peer(&info_hash, &c).await;
+            self.announce(&info_hash, &c.0, &c.1).await;
         }
 
         false
     }
 
-    async fn announce_peer(&mut self, info_hash: &NodeId, addr: &SocketAddr) -> bool {
-        debug!("Send FIND_NODE request to {}", addr);
+    async fn announce(&mut self, info_hash: &NodeId, addr: &SocketAddr, id: &NodeId) -> bool {
+        debug!("Send ANNOUNCE_PEER request to {}", addr);
+
+        let token = match self.table.tokens.get(id) {
+            Some(t) => t,
+            None => {
+                debug!("Token not found for {:?}", id);
+                return false;
+            }
+        };
 
         let m = AnnouncePeer {
             id: &self.own_id,
@@ -218,15 +226,16 @@ impl Server {
             txn_id: self.txn_id.next_id(),
             implied_port: true,
             port: 0,
-            token: b"abc",
+            token,
         };
+
         match self.rpc.send(&m, addr).await {
             Ok(_) => {
                 self.txns.insert(m.txn_id, *addr);
                 true
             }
             Err(e) => {
-                warn!("FIND_NODE to {} failed: {}", addr, e);
+                warn!("ANNOUNCE_PEER to {} failed: {}", addr, e);
                 false
             }
         }
@@ -295,6 +304,12 @@ impl RoutingTable {
             if let Some(nodes6) = resp.get_bytes(b"nodes6") {
                 for c in CompactNodesV6::new(nodes6)? {
                     self.add_contact(&c);
+                }
+            }
+
+            if let Some(id) = msg.id {
+                if let Some(token) = resp.get_bytes(b"token") {
+                    self.tokens.insert(*id, token.to_vec());
                 }
             }
         }
