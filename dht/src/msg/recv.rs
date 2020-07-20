@@ -89,7 +89,7 @@ impl<'a, 'p> Decode<'a, 'p> for Msg<'a, 'p> {
                 })
             }
             b"e" => {
-                let list = check!(dict.get_list("r"), "Response args are required");
+                let list = check!(dict.get_list("r"), "Error list is required");
                 Msg::Error(ErrorResponse { txn_id, list })
             }
             other => {
