@@ -1,11 +1,10 @@
 use crate::bucket::Bucket;
-use crate::contact::{CompactNodes, CompactNodesV6, ContactStatus};
+use crate::contact::{CompactNodes, CompactNodesV6, ContactRef, ContactStatus};
 use crate::id::NodeId;
 use crate::msg::recv::{Msg, Query, Response};
-use crate::msg::send::{AnnouncePeer, FindNode};
+use crate::msg::send::{AnnouncePeer, FindNode, GetPeers};
 use crate::msg::TxnId;
 use crate::table::RoutingTable;
-use anyhow::Context as _;
 use ben::{Decoder, Encode, Parser};
 use std::collections::{HashMap, VecDeque};
 use std::net::SocketAddr;
@@ -287,20 +286,31 @@ impl RoutingTable {
     }
 
     fn read_nodes(&mut self, response: &Response) -> anyhow::Result<()> {
-        let nodes = response.body.get_bytes("nodes").context("nodes required")?;
-        for c in CompactNodes::new(nodes)? {
-            self.add_contact(&c);
+        self.read_nodes_with(response, |c| {})
+    }
+
+    fn read_nodes_with<F>(&mut self, response: &Response, mut f: F) -> anyhow::Result<()>
+    where
+        F: FnMut(&ContactRef),
+    {
+        if let Some(nodes) = response.body.get_bytes("nodes") {
+            for c in CompactNodes::new(nodes)? {
+                self.add_contact(&c);
+                f(&c);
+            }
         }
 
         if let Some(nodes6) = response.body.get_bytes("nodes6") {
             for c in CompactNodesV6::new(nodes6)? {
                 self.add_contact(&c);
+                f(&c);
             }
         }
 
         if let Some(token) = response.body.get_bytes("token") {
             self.tokens.insert(*response.id, token.to_vec());
         }
+
         Ok(())
     }
 }
@@ -429,5 +439,148 @@ impl Transactions {
             trace!("Txn {:?} expired", txn_id);
             false
         });
+    }
+}
+
+pub struct TraversalNode {
+    id: NodeId,
+    addr: SocketAddr,
+    sent: Instant,
+    status: Status,
+}
+
+impl TraversalNode {
+    fn new(c: &ContactRef) -> Self {
+        Self {
+            id: *c.id,
+            addr: c.addr,
+            sent: Instant::now(),
+            status: Status::INITIAL,
+        }
+    }
+}
+
+bitflags! {
+    pub struct Status: u8 {
+        const INITIAL   = 0x01;
+        const ALIVE     = 0x02;
+        const FAILED    = 0x04;
+        const NO_ID     = 0x08;
+        const QUERIED   = 0x10;
+    }
+}
+
+pub struct GetPeersTraversal {
+    info_hash: NodeId,
+    own_id: NodeId,
+    nodes: Vec<TraversalNode>,
+    peers: Vec<SocketAddr>,
+    branch_factor: u8,
+}
+
+impl GetPeersTraversal {
+    async fn start(&mut self, table: &mut RoutingTable, rpc: &mut RpcMgr) {
+        let mut closest = Vec::with_capacity(Bucket::MAX_LEN);
+        table.find_closest(&self.info_hash, &mut closest, Bucket::MAX_LEN);
+        for c in closest {
+            self.nodes.push(TraversalNode::new(&c));
+        }
+
+        if self.nodes.len() < 3 {
+            for node in &table.router_nodes {
+                self.nodes.push(TraversalNode {
+                    id: NodeId::gen(),
+                    addr: *node,
+                    sent: Instant::now(),
+                    status: Status::INITIAL | Status::NO_ID,
+                });
+            }
+        }
+
+        self.invoke(rpc).await;
+    }
+
+    fn timeout(&mut self, id: &NodeId) -> bool {
+        if let Some(node) = self.nodes.iter_mut().find(|node| &node.id == id) {
+            node.status.insert(Status::FAILED);
+            true
+        } else {
+            false
+        }
+    }
+
+    fn handle_reply(&mut self, response: &Response, table: &mut RoutingTable) -> bool {
+        if let Some(i) = self.nodes.iter().position(|node| &node.id == response.id) {
+            let node = &mut self.nodes[i];
+            node.status.insert(Status::ALIVE);
+        } else {
+            return false;
+        }
+
+        let result = table.read_nodes_with(response, |c| {
+            if !self.nodes.iter().any(|n| &n.id == c.id) {
+                self.nodes.push(TraversalNode::new(c));
+            }
+        });
+
+        let target = &self.info_hash;
+        self.nodes.sort_by_key(|n| n.id ^ target);
+
+        self.nodes.truncate(100);
+        if let Err(e) = result {
+            warn!("{}", e);
+        }
+
+        true
+    }
+
+    async fn invoke(&mut self, rpc: &mut RpcMgr) -> bool {
+        let mut outstanding = 0;
+        let mut alive = 0;
+
+        for n in &mut self.nodes {
+            if alive == Bucket::MAX_LEN {
+                break;
+            }
+
+            if outstanding == self.branch_factor {
+                break;
+            }
+
+            if n.status.contains(Status::ALIVE) {
+                alive += 1;
+                continue;
+            }
+
+            if n.status.contains(Status::QUERIED) {
+                if !n.status.contains(Status::FAILED) {
+                    outstanding += 1;
+                }
+                continue;
+            };
+
+            let msg = GetPeers {
+                info_hash: &self.info_hash,
+                id: &self.own_id,
+                txn_id: TxnId(0),
+            };
+
+            match rpc.send(&msg, &n.addr).await {
+                Ok(_) => {
+                    n.status.insert(Status::QUERIED);
+                    outstanding += 1;
+                }
+                Err(e) => {
+                    warn!("{}", e);
+                    n.status.insert(Status::FAILED);
+                }
+            }
+        }
+
+        outstanding == 0 && alive == Bucket::MAX_LEN
+    }
+
+    fn get_peers(self) -> Vec<SocketAddr> {
+        self.peers
     }
 }
