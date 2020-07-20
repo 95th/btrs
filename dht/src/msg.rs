@@ -20,22 +20,40 @@ impl Encode for TxnId {
     }
 }
 
+#[derive(Debug)]
+pub struct Query<'a, 'p> {
+    pub txn_id: TxnId,
+    pub body: Dict<'a, 'p>,
+    pub id: &'a NodeId,
+    pub kind: QueryKind,
+}
+
+#[derive(Debug)]
+pub struct Response<'a, 'p> {
+    pub txn_id: TxnId,
+    pub body: Dict<'a, 'p>,
+    pub id: &'a NodeId,
+}
+
+#[derive(Debug)]
+pub struct ErrorResponse<'a, 'p> {
+    pub txn_id: TxnId,
+    pub body: Dict<'a, 'p>,
+}
+
+#[derive(Debug)]
+pub enum Msg<'a, 'p> {
+    Query(Query<'a, 'p>),
+    Response(Response<'a, 'p>),
+    Error(ErrorResponse<'a, 'p>),
+}
+
 #[derive(Debug, Clone, Copy, PartialOrd, PartialEq)]
-pub enum MsgKind {
+pub enum QueryKind {
     Ping,
     FindNode,
     GetPeers,
     AnnouncePeer,
-    Response,
-    Error,
-}
-
-#[derive(Debug)]
-pub struct Msg<'a, 'p> {
-    pub kind: MsgKind,
-    pub txn_id: TxnId,
-    pub id: Option<&'a NodeId>,
-    pub body: Dict<'a, 'p>,
 }
 
 macro_rules! check {
@@ -53,55 +71,57 @@ impl<'a, 'p> Decode<'a, 'p> for Msg<'a, 'p> {
 
         let dict = check!(decoder.into_dict(), "Not a dict");
         let y = check!(dict.get_bytes("y"), "Message type is required");
+        let txn_id = check!(dict.get_bytes("t"), "Transaction ID is required");
+        let txn_id = check!(txn_id.try_into().ok(), "Transaction ID must be 2 bytes");
+        let txn_id = TxnId(u16::from_be_bytes(txn_id));
 
-        let kind = match y {
+        let msg = match y {
             b"q" => {
                 let q = check!(dict.get_bytes("q"), "Query type is required");
-                match q {
-                    b"ping" => MsgKind::Ping,
-                    b"find_node" => MsgKind::FindNode,
-                    b"get_peers" => MsgKind::GetPeers,
-                    b"announce_peer" => MsgKind::AnnouncePeer,
+                let query_kind = match q {
+                    b"ping" => QueryKind::Ping,
+                    b"find_node" => QueryKind::FindNode,
+                    b"get_peers" => QueryKind::GetPeers,
+                    b"announce_peer" => QueryKind::AnnouncePeer,
                     other => {
                         trace!("Unexpected Query type: {:?}", other);
                         return Err(Other("Unexpected Query type"));
                     }
-                }
+                };
+                let a = check!(dict.get_dict("a"), "Query args are required");
+                Msg::Query(Query {
+                    kind: query_kind,
+                    id: extract_id(&a)?,
+                    txn_id,
+                    body: dict,
+                })
             }
-            b"r" => MsgKind::Response,
-            b"e" => MsgKind::Error,
+            b"r" => {
+                let r = check!(dict.get_dict("r"), "Response args are required");
+                Msg::Response(Response {
+                    id: extract_id(&r)?,
+                    txn_id,
+                    body: dict,
+                })
+            }
+            b"e" => Msg::Error(ErrorResponse { txn_id, body: dict }),
             other => {
                 trace!("Unexpected Message type: {:?}", other);
                 return Err(Other("Unexpected Message type"));
             }
         };
-        let txn_id = check!(dict.get_bytes("t"), "Transaction ID is required");
-        let txn_id = check!(txn_id.try_into().ok(), "Transaction ID must be 2 bytes");
-        let id = get_id(kind, &dict);
 
-        Ok(Self {
-            kind,
-            txn_id: TxnId(u16::from_be_bytes(txn_id)),
-            id,
-            body: dict,
-        })
+        Ok(msg)
     }
 }
 
-fn get_id<'a>(kind: MsgKind, dict: &Dict<'a, '_>) -> Option<&'a NodeId> {
-    use MsgKind::*;
-    let inner = match kind {
-        Response => dict.get_dict("r")?,
-        Ping | FindNode | GetPeers | AnnouncePeer => dict.get_dict("a")?,
-        Error => return None,
-    };
-    let id = inner.get_bytes("id")?;
+fn extract_id<'a>(dict: &Dict<'a, '_>) -> ben::Result<&'a NodeId> {
+    let id = check!(dict.get_bytes("id"), "ID is required");
     if id.len() == 20 {
         let ptr = id.as_ptr() as *const NodeId;
-        unsafe { Some(&*ptr) }
+        unsafe { Ok(&*ptr) }
     } else {
-        debug!("Unexpected ID length: {}", id.len());
-        None
+        Err(ben::Error::Other("ID must be 20 bytes long"))
     }
 }
 
@@ -336,7 +356,18 @@ mod tests {
         let expected: &[u8] = b"d1:ad2:id20:\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01e1:q4:ping1:t2:\x00\n1:y1:qe";
         let mut parser = Parser::new();
         let msg = parser.parse::<Msg>(expected).unwrap();
-        assert!(matches!(msg.kind, MsgKind::Ping));
+
+        match msg {
+            Msg::Query(query) => {
+                assert_eq!(query.kind, QueryKind::Ping);
+                assert_eq!(query.id, &NodeId::all(1));
+                assert_eq!(query.txn_id, TxnId(10));
+                assert_eq!(expected, query.body.as_raw_bytes());
+            }
+            _ => {
+                panic!("Incorrect msg type");
+            }
+        }
     }
 
     fn ascii_escape(buf: &[u8]) -> String {

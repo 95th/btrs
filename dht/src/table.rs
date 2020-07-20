@@ -109,15 +109,9 @@ impl RoutingTable {
         self.buckets.iter().all(|b| b.live.is_empty())
     }
 
-    pub fn find_contact_by_id(&mut self, id: &NodeId) -> Option<&mut Contact> {
+    pub fn find_contact(&mut self, id: &NodeId) -> Option<&mut Contact> {
         let idx = self.find_bucket(id);
         self.buckets[idx].live.iter_mut().find(|c| c.id == *id)
-    }
-
-    pub fn find_contact(&mut self, addr: &SocketAddr) -> Option<&mut Contact> {
-        self.buckets
-            .iter_mut()
-            .find_map(|b| b.live.iter_mut().find(|c| c.addr == *addr))
     }
 
     fn add_contact_impl(&mut self, contact: &ContactRef<'_>) -> BucketResult {

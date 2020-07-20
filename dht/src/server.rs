@@ -1,7 +1,7 @@
 use crate::bucket::Bucket;
 use crate::contact::{CompactNodes, CompactNodesV6, ContactStatus};
 use crate::id::NodeId;
-use crate::msg::{AnnouncePeer, FindNode, Msg, MsgKind, TxnId};
+use crate::msg::{AnnouncePeer, FindNode, Msg, Query, Response, TxnId};
 use crate::table::RoutingTable;
 use anyhow::Context as _;
 use ben::{Decoder, Encode, Parser};
@@ -96,6 +96,7 @@ impl Server {
     async fn refresh(&mut self, target: &NodeId) {
         let mut nodes = VecDeque::new();
         let mut min_dist = NodeId::max();
+        let zero_id = NodeId::new();
 
         if !self.table.is_empty() {
             let mut closest = Vec::with_capacity(Bucket::MAX_LEN);
@@ -103,7 +104,7 @@ impl Server {
                 .find_closest(target, &mut closest, Bucket::MAX_LEN);
 
             for c in closest {
-                nodes.push_front(c.addr);
+                nodes.push_front((*c.id, c.addr));
                 let dist = target ^ c.id;
                 min_dist = min_dist.min(dist);
             }
@@ -111,7 +112,7 @@ impl Server {
 
         if nodes.len() < 3 {
             for addr in &self.router_nodes {
-                nodes.push_back(*addr);
+                nodes.push_back((zero_id, *addr));
             }
         }
 
@@ -121,8 +122,8 @@ impl Server {
 
         loop {
             while self.txns.len() < max_outstanding {
-                if let Some(node) = nodes.pop_front() {
-                    self.find_node(target, &node).await;
+                if let Some((id, addr)) = nodes.pop_front() {
+                    self.find_node(target, &id, &addr).await;
                 } else {
                     break;
                 }
@@ -162,14 +163,14 @@ impl Server {
             for c in closest {
                 let dist = target ^ c.id;
                 if dist < old_dist {
-                    nodes.push_front(c.addr);
+                    nodes.push_front((*c.id, c.addr));
                     min_dist = dist;
                 }
             }
         }
     }
 
-    async fn find_node(&mut self, target: &NodeId, addr: &SocketAddr) -> bool {
+    async fn find_node(&mut self, target: &NodeId, id: &NodeId, addr: &SocketAddr) -> bool {
         debug!("Send FIND_NODE request to {}", addr);
 
         let m = FindNode {
@@ -179,7 +180,7 @@ impl Server {
         };
         match self.rpc.send(&m, addr).await {
             Ok(_) => {
-                self.txns.insert(m.txn_id, *addr);
+                self.txns.insert(m.txn_id, id, addr);
                 true
             }
             Err(e) => {
@@ -226,7 +227,7 @@ impl Server {
             };
 
             match self.rpc.send(&m, &c.addr).await {
-                Ok(_) => self.txns.insert(m.txn_id, c.addr),
+                Ok(_) => self.txns.insert(m.txn_id, c.id, &c.addr),
                 Err(e) => warn!("ANNOUNCE_PEER to {} failed: {}", c.addr, e),
             }
         }
@@ -243,66 +244,61 @@ impl Server {
 
 impl RoutingTable {
     fn handle_msg(&mut self, msg: Msg, txns: &mut Transactions) {
-        if let MsgKind::Response = msg.kind {
-            match txns.remove(&msg.txn_id) {
-                Some(addr) => {
-                    if let Some(c) = self.find_contact(&addr) {
-                        c.status = ContactStatus::ALIVE | ContactStatus::QUERIED;
-                        c.clear_timeout();
-                        c.last_updated = Instant::now();
+        match msg {
+            Msg::Response(resp) => {
+                match txns.remove(&resp.txn_id) {
+                    Some(request) => {
+                        if request.has_id {
+                            if let Some(c) = self.find_contact(&request.id) {
+                                c.status = ContactStatus::ALIVE | ContactStatus::QUERIED;
+                                c.clear_timeout();
+                                c.last_updated = Instant::now();
+                            }
+                        }
                     }
-                }
-                None => {
-                    warn!(
-                        "Message received (txn id: {:?}) from unexpected address",
-                        msg.txn_id
-                    );
-                    return;
-                }
-            };
+                    None => {
+                        warn!(
+                            "Message received (txn id: {:?}) from unexpected address",
+                            resp.txn_id
+                        );
+                        return;
+                    }
+                };
 
-            self.handle_response(&msg);
-            return;
+                self.handle_response(&resp);
+            }
+            Msg::Error(err) => {
+                warn!("{:?} failed: {:?}", err.txn_id, err.body);
+            }
+            Msg::Query(query) => self.handle_query(&query),
         }
-
-        if let MsgKind::Error = msg.kind {
-            warn!("{:?}", msg);
-            return;
-        }
-
-        self.handle_query(&msg);
     }
 
-    fn handle_query(&mut self, msg: &Msg) {
+    fn handle_query(&mut self, msg: &Query) {
         debug!("Got query request: {:#?}", msg);
     }
 
-    fn handle_response(&mut self, msg: &Msg) {
+    fn handle_response(&mut self, msg: &Response) {
         if let Err(e) = self.read_nodes(msg) {
             warn!("{}", e);
         }
     }
 
-    fn read_nodes(&mut self, msg: &Msg) -> anyhow::Result<()> {
-        if let MsgKind::Response = msg.kind {
-            let resp = msg.body.get_dict("r").context("Response dict expected")?;
+    fn read_nodes(&mut self, msg: &Response) -> anyhow::Result<()> {
+        let resp = msg.body.get_dict("r").unwrap();
+        let nodes = resp.get_bytes("nodes").context("nodes required")?;
+        for c in CompactNodes::new(nodes)? {
+            self.add_contact(&c);
+        }
 
-            let nodes = resp.get_bytes("nodes").context("nodes required")?;
-            for c in CompactNodes::new(nodes)? {
+        if let Some(nodes6) = resp.get_bytes("nodes6") {
+            for c in CompactNodesV6::new(nodes6)? {
                 self.add_contact(&c);
             }
+        }
 
-            if let Some(nodes6) = resp.get_bytes("nodes6") {
-                for c in CompactNodesV6::new(nodes6)? {
-                    self.add_contact(&c);
-                }
-            }
-
-            if let Some(id) = msg.id {
-                if let Some(token) = resp.get_bytes("token") {
-                    self.tokens.insert(*id, token.to_vec());
-                }
-            }
+        if let Some(token) = resp.get_bytes("token") {
+            self.tokens.insert(*msg.id, token.to_vec());
         }
         Ok(())
     }
@@ -361,8 +357,26 @@ impl RpcMgr {
     }
 }
 
+pub struct Request {
+    id: NodeId,
+    _addr: SocketAddr,
+    sent: Instant,
+    has_id: bool,
+}
+
+impl Request {
+    fn new(id: &NodeId, addr: &SocketAddr) -> Self {
+        Self {
+            id: if id.is_zero() { NodeId::gen() } else { *id },
+            _addr: *addr,
+            sent: Instant::now(),
+            has_id: !id.is_zero(),
+        }
+    }
+}
+
 struct Transactions {
-    pending: HashMap<TxnId, (SocketAddr, Instant)>,
+    pending: HashMap<TxnId, Request>,
     timeout: Duration,
 }
 
@@ -378,12 +392,12 @@ impl Transactions {
         }
     }
 
-    fn insert(&mut self, txn_id: TxnId, addr: SocketAddr) {
-        self.pending.insert(txn_id, (addr, Instant::now()));
+    fn insert(&mut self, txn_id: TxnId, id: &NodeId, addr: &SocketAddr) {
+        self.pending.insert(txn_id, Request::new(id, addr));
     }
 
-    fn remove(&mut self, txn_id: &TxnId) -> Option<SocketAddr> {
-        self.pending.remove(txn_id).map(|(addr, _)| addr)
+    fn remove(&mut self, txn_id: &TxnId) -> Option<Request> {
+        self.pending.remove(txn_id)
     }
 
     fn len(&self) -> usize {
@@ -399,14 +413,16 @@ impl Transactions {
     fn prune(&mut self, table: &mut RoutingTable) {
         let timeout = self.timeout;
 
-        self.pending.retain(|txn_id, (addr, queried)| {
-            if Instant::now() - *queried < timeout {
+        self.pending.retain(|txn_id, request| {
+            if Instant::now() - request.sent < timeout {
                 // Not timed out. Keep it.
                 return true;
             }
 
-            if let Some(c) = table.find_contact(addr) {
-                c.timed_out();
+            if request.has_id {
+                if let Some(c) = table.find_contact(&request.id) {
+                    c.timed_out();
+                }
             }
 
             trace!("Txn {:?} expired", txn_id);
