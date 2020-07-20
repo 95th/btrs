@@ -128,7 +128,7 @@ mod tests {
                 assert_eq!(query.kind, QueryKind::Ping);
                 assert_eq!(query.id, &NodeId::all(1));
                 assert_eq!(query.txn_id, TxnId(10));
-                assert_eq!(expected, query.args.as_raw_bytes());
+                assert_eq!(b"d2:id20:\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01e", query.args.as_raw_bytes());
             }
             _ => {
                 panic!("Incorrect msg type");
