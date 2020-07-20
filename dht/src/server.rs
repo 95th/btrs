@@ -1,7 +1,9 @@
 use crate::bucket::Bucket;
 use crate::contact::{CompactNodes, CompactNodesV6, ContactStatus};
 use crate::id::NodeId;
-use crate::msg::{AnnouncePeer, FindNode, Msg, Query, Response, TxnId};
+use crate::msg::recv::{Msg, Query, Response};
+use crate::msg::send::{AnnouncePeer, FindNode};
+use crate::msg::TxnId;
 use crate::table::RoutingTable;
 use anyhow::Context as _;
 use ben::{Decoder, Encode, Parser};
@@ -268,37 +270,36 @@ impl RoutingTable {
                 self.handle_response(&resp);
             }
             Msg::Error(err) => {
-                warn!("{:?} failed: {:?}", err.txn_id, err.body);
+                warn!("{:?} failed: {:#?}", err.txn_id, err.list);
             }
             Msg::Query(query) => self.handle_query(&query),
         }
     }
 
-    fn handle_query(&mut self, msg: &Query) {
-        debug!("Got query request: {:#?}", msg);
+    fn handle_query(&mut self, query: &Query) {
+        debug!("Got query request: {:#?}", query);
     }
 
-    fn handle_response(&mut self, msg: &Response) {
-        if let Err(e) = self.read_nodes(msg) {
+    fn handle_response(&mut self, response: &Response) {
+        if let Err(e) = self.read_nodes(response) {
             warn!("{}", e);
         }
     }
 
-    fn read_nodes(&mut self, msg: &Response) -> anyhow::Result<()> {
-        let resp = msg.body.get_dict("r").unwrap();
-        let nodes = resp.get_bytes("nodes").context("nodes required")?;
+    fn read_nodes(&mut self, response: &Response) -> anyhow::Result<()> {
+        let nodes = response.body.get_bytes("nodes").context("nodes required")?;
         for c in CompactNodes::new(nodes)? {
             self.add_contact(&c);
         }
 
-        if let Some(nodes6) = resp.get_bytes("nodes6") {
+        if let Some(nodes6) = response.body.get_bytes("nodes6") {
             for c in CompactNodesV6::new(nodes6)? {
                 self.add_contact(&c);
             }
         }
 
-        if let Some(token) = resp.get_bytes("token") {
-            self.tokens.insert(*msg.id, token.to_vec());
+        if let Some(token) = response.body.get_bytes("token") {
+            self.tokens.insert(*response.id, token.to_vec());
         }
         Ok(())
     }
