@@ -2,7 +2,7 @@ use crate::id::NodeId;
 use crate::msg::recv::Msg;
 use crate::msg::TxnId;
 use crate::table::RoutingTable;
-use ben::{Decoder, Encode, Parser};
+use ben::{Encode, Parser};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
@@ -35,16 +35,10 @@ impl RpcMgr {
         self.buf.clear();
         msg.encode(&mut self.buf);
 
-        trace!(
-            "Sending: {:?}",
-            self.parser.parse::<Decoder>(&self.buf).unwrap()
-        );
-
         let n = self.socket.send_to(&self.buf, addr).await?;
         trace!("Sent: {} bytes to {}", n, addr);
 
         ensure!(n == self.buf.len(), "Failed to send complete message");
-
         Ok(())
     }
 
@@ -53,6 +47,7 @@ impl RpcMgr {
         trace!("Received: {} bytes from {}", n, addr);
 
         let msg = self.parser.parse(&self.recv_buf[..n])?;
+        trace!("{:#?}", msg);
         Ok((msg, addr))
     }
 

@@ -6,12 +6,14 @@ use crate::server::traversal::{Status, TraversalNode};
 use crate::server::{PeerSender, RpcMgr, Transactions};
 use crate::table::RoutingTable;
 use ben::Decoder;
+use std::collections::HashMap;
 use std::net::SocketAddr;
 
 pub struct GetPeersTraversal {
-    info_hash: NodeId,
-    own_id: NodeId,
-    nodes: Vec<TraversalNode>,
+    pub info_hash: NodeId,
+    pub own_id: NodeId,
+    pub nodes: Vec<TraversalNode>,
+    pub tokens: HashMap<SocketAddr, Vec<u8>>,
     peers: Vec<SocketAddr>,
     txns: Transactions,
     tx: PeerSender,
@@ -25,6 +27,7 @@ impl GetPeersTraversal {
             own_id: *own_id,
             nodes: vec![],
             peers: vec![],
+            tokens: HashMap::new(),
             txns: Transactions::new(),
             tx,
             branch_factor: 3,
@@ -90,6 +93,10 @@ impl GetPeersTraversal {
                 self.nodes.push(TraversalNode::new(c));
             }
         });
+
+        if let Some(token) = resp.body.get_bytes("token") {
+            self.tokens.insert(*addr, token.to_vec());
+        }
 
         fn decode_peer(d: Decoder) -> Option<SocketAddr> {
             if let Some(b) = d.as_bytes() {
