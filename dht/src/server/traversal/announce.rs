@@ -43,6 +43,10 @@ impl AnnounceTraversal {
 
         let mut announce_count = 0;
         for n in &self.inner.nodes {
+            if announce_count == Bucket::MAX_LEN {
+                break;
+            }
+
             if !n.status.contains(Status::ALIVE) {
                 continue;
             }
@@ -51,10 +55,6 @@ impl AnnounceTraversal {
                 Some(t) => t,
                 None => continue,
             };
-
-            if announce_count == Bucket::MAX_LEN {
-                break;
-            }
 
             let msg = AnnouncePeer {
                 id: &self.inner.own_id,
