@@ -6,7 +6,7 @@ use crate::msg::send::{AnnouncePeer, FindNode, GetPeers};
 use crate::msg::TxnId;
 use crate::table::RoutingTable;
 use ben::{Decoder, Encode, Parser};
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 use tokio::net::UdpSocket;
@@ -20,7 +20,6 @@ pub struct Server {
     table: RoutingTable,
     own_id: NodeId,
     txns: Transactions,
-    router_nodes: Vec<SocketAddr>,
     next_refresh: Instant,
     client_rx: Receiver<ClientRequest>,
     client_tx: Sender<ClientRequest>,
@@ -47,10 +46,9 @@ impl Server {
 
         let server = Server {
             rpc: RpcMgr::new(socket),
-            table: RoutingTable::new(id),
+            table: RoutingTable::new(id, router_nodes),
             own_id: id,
             txns: Transactions::new(),
-            router_nodes,
             next_refresh: Instant::now(),
             client_tx,
             client_rx,
@@ -75,7 +73,7 @@ impl Server {
                     self.refresh(&target).await;
                 } else if let Some(target) = self.table.pick_refresh_id() {
                     trace!("Bucket refresh target: {:?}", target);
-                    self.refresh(&target).await;
+                    self.submit_refresh(&target).await;
                 }
 
                 // Self refresh every 15 mins
@@ -114,56 +112,29 @@ impl Server {
         }
     }
 
+    async fn submit_refresh(&mut self, target: &NodeId) {
+        let mut t = Box::new(BootstrapTraversal::new(target, &self.own_id));
+        t.start(&mut self.table, &mut self.rpc).await;
+        self.running.push(Traversal::Bootstrap(t));
+    }
+
     async fn refresh(&mut self, target: &NodeId) {
-        let mut nodes = VecDeque::new();
-        let mut min_dist = NodeId::max();
-        let zero_id = NodeId::new();
-
-        if !self.table.is_empty() {
-            let mut closest = Vec::with_capacity(Bucket::MAX_LEN);
-            self.table
-                .find_closest(target, &mut closest, Bucket::MAX_LEN);
-
-            for c in closest {
-                nodes.push_front((*c.id, c.addr));
-                let dist = target ^ c.id;
-                min_dist = min_dist.min(dist);
-            }
-        }
-
-        if nodes.len() < 3 {
-            for addr in &self.router_nodes {
-                nodes.push_back((zero_id, *addr));
-            }
-        }
-
-        debug!("Start refresh with {} nodes", nodes.len());
-
-        let max_outstanding = 3;
+        let mut t = Box::new(BootstrapTraversal::new(target, &self.own_id));
+        t.start(&mut self.table, &mut self.rpc).await;
 
         loop {
-            while self.txns.len() < max_outstanding {
-                if let Some((id, addr)) = nodes.pop_front() {
-                    self.find_node(target, &id, &addr).await;
-                } else {
-                    break;
-                }
-            }
-
-            self.txns.prune(&mut self.table);
-            debug!("Pending requests: {}", self.txns.len());
-
-            if self.txns.is_empty() {
-                trace!("Done bootstrapping. Min dist: {:?}", min_dist);
-                debug!(
-                    "Table size:: live: {}, extra: {}",
-                    self.table.len(),
-                    self.table.len_extra()
-                );
+            trace!("Invoke traversal");
+            if t.invoke(&mut self.rpc).await {
+                trace!("Done traversal");
+                t.done();
                 break;
             }
 
-            let (msg, _) = match self.rpc.recv_timeout(Duration::from_secs(1)).await {
+            trace!("Prune traversal");
+            t.prune(&mut self.table);
+
+            trace!("Check response");
+            let (msg, addr) = match self.rpc.recv_timeout(Duration::from_secs(1)).await {
                 Ok(Some(x)) => x,
                 Ok(None) => continue,
                 Err(e) => {
@@ -172,49 +143,23 @@ impl Server {
                 }
             };
 
-            self.table.handle_msg(msg, &mut self.txns);
-
-            let mut closest = Vec::with_capacity(Bucket::MAX_LEN);
-            self.table
-                .find_closest(target, &mut closest, Bucket::MAX_LEN);
-
-            let old_dist = min_dist;
-
-            nodes.clear();
-            for c in closest {
-                let dist = target ^ c.id;
-                if dist < old_dist {
-                    nodes.push_front((*c.id, c.addr));
-                    min_dist = dist;
-                }
+            if let Msg::Response(resp) = msg {
+                trace!("Handle reply");
+                t.handle_reply(&resp, &addr, &mut self.table);
             }
         }
+
+        debug!(
+            "Table size:: live: {}, extra: {}",
+            self.table.len(),
+            self.table.len_extra()
+        );
     }
 
     pub async fn get_peers(&mut self, info_hash: &NodeId, tx: PeerSender) {
-        let mut gp = Box::new(GetPeersTraversal::new(info_hash, &self.own_id, tx));
-        gp.start(&mut self.table, &mut self.rpc).await;
-        self.running.push(Traversal::GetPeers(gp));
-    }
-
-    async fn find_node(&mut self, target: &NodeId, id: &NodeId, addr: &SocketAddr) -> bool {
-        debug!("Send FIND_NODE request to {}", addr);
-
-        let m = FindNode {
-            id: &self.own_id,
-            target,
-            txn_id: self.rpc.next_id(),
-        };
-        match self.rpc.send(&m, addr).await {
-            Ok(_) => {
-                self.txns.insert(m.txn_id, id);
-                true
-            }
-            Err(e) => {
-                warn!("FIND_NODE to {} failed: {}", addr, e);
-                false
-            }
-        }
+        let mut t = Box::new(GetPeersTraversal::new(info_hash, &self.own_id, tx));
+        t.start(&mut self.table, &mut self.rpc).await;
+        self.running.push(Traversal::GetPeers(t));
     }
 
     async fn check_client_request(&mut self) -> bool {
@@ -261,7 +206,7 @@ impl Server {
     }
 
     async fn recv_response(&mut self, timeout: Duration) {
-        let (msg, _addr) = match self.rpc.recv_timeout(timeout).await {
+        let (msg, addr) = match self.rpc.recv_timeout(timeout).await {
             Ok(Some(x)) => x,
             Ok(None) => return,
             Err(e) => {
@@ -273,7 +218,7 @@ impl Server {
         match msg {
             Msg::Response(resp) => {
                 for t in &mut self.running {
-                    if t.handle_reply(&resp, &mut self.table) {
+                    if t.handle_reply(&resp, &addr, &mut self.table) {
                         break;
                     }
                 }
@@ -455,14 +400,6 @@ impl Transactions {
         self.pending.remove(txn_id)
     }
 
-    fn len(&self) -> usize {
-        self.pending.len()
-    }
-
-    fn is_empty(&self) -> bool {
-        self.pending.is_empty()
-    }
-
     /// Remove transactions that are timed out or not in Routing table
     /// anymore.
     fn prune(&mut self, table: &mut RoutingTable) {
@@ -525,30 +462,40 @@ bitflags! {
 
 pub enum Traversal {
     GetPeers(Box<GetPeersTraversal>),
+    Bootstrap(Box<BootstrapTraversal>),
 }
 
 impl Traversal {
     fn prune(&mut self, table: &mut RoutingTable) {
         match self {
-            Self::GetPeers(gp) => gp.prune(table),
+            Self::GetPeers(t) => t.prune(table),
+            Self::Bootstrap(t) => t.prune(table),
         }
     }
 
-    fn handle_reply(&mut self, resp: &Response, table: &mut RoutingTable) -> bool {
+    fn handle_reply(
+        &mut self,
+        resp: &Response,
+        addr: &SocketAddr,
+        table: &mut RoutingTable,
+    ) -> bool {
         match self {
-            Self::GetPeers(gp) => gp.handle_reply(resp, table),
+            Self::GetPeers(t) => t.handle_reply(resp, addr, table),
+            Self::Bootstrap(t) => t.handle_reply(resp, addr, table),
         }
     }
 
     async fn invoke(&mut self, rpc: &mut RpcMgr) -> bool {
         match self {
-            Self::GetPeers(gp) => gp.invoke(rpc).await,
+            Self::GetPeers(t) => t.invoke(rpc).await,
+            Self::Bootstrap(t) => t.invoke(rpc).await,
         }
     }
 
     fn done(self) {
         match self {
-            Self::GetPeers(gp) => gp.done(),
+            Self::GetPeers(t) => t.done(),
+            Self::Bootstrap(t) => t.done(),
         }
     }
 }
@@ -575,9 +522,7 @@ impl GetPeersTraversal {
             branch_factor: 3,
         }
     }
-}
 
-impl GetPeersTraversal {
     async fn start(&mut self, table: &mut RoutingTable, rpc: &mut RpcMgr) {
         let mut closest = Vec::with_capacity(Bucket::MAX_LEN);
         table.find_closest(&self.info_hash, &mut closest, Bucket::MAX_LEN);
@@ -607,7 +552,12 @@ impl GetPeersTraversal {
         })
     }
 
-    fn handle_reply(&mut self, resp: &Response, table: &mut RoutingTable) -> bool {
+    fn handle_reply(
+        &mut self,
+        resp: &Response,
+        addr: &SocketAddr,
+        table: &mut RoutingTable,
+    ) -> bool {
         if let Some(req) = self.txns.remove(&resp.txn_id) {
             if req.has_id {
                 table.heard_from(&req.id);
@@ -616,7 +566,7 @@ impl GetPeersTraversal {
             return false;
         }
 
-        if let Some(node) = self.nodes.iter_mut().find(|node| &node.id == resp.id) {
+        if let Some(node) = self.nodes.iter_mut().find(|node| &node.addr == addr) {
             node.status.insert(Status::ALIVE);
         } else {
             debug_assert!(false, "Shouldn't be here");
@@ -692,5 +642,143 @@ impl GetPeersTraversal {
             Ok(_) => debug!("Replied to GET_PEERS client request"),
             Err(_) => warn!("Reply to GET_PEERS client request failed"),
         }
+    }
+}
+
+pub struct BootstrapTraversal {
+    target: NodeId,
+    own_id: NodeId,
+    nodes: Vec<TraversalNode>,
+    txns: Transactions,
+    branch_factor: u8,
+}
+
+impl BootstrapTraversal {
+    pub fn new(target: &NodeId, own_id: &NodeId) -> Self {
+        Self {
+            target: *target,
+            own_id: *own_id,
+            nodes: vec![],
+            txns: Transactions::new(),
+            branch_factor: 3,
+        }
+    }
+
+    async fn start(&mut self, table: &mut RoutingTable, rpc: &mut RpcMgr) {
+        let mut closest = Vec::with_capacity(Bucket::MAX_LEN);
+        table.find_closest(&self.target, &mut closest, Bucket::MAX_LEN);
+        for c in closest {
+            self.nodes.push(TraversalNode::new(&c));
+        }
+
+        if self.nodes.len() < 3 {
+            for node in &table.router_nodes {
+                self.nodes.push(TraversalNode {
+                    id: NodeId::gen(),
+                    addr: *node,
+                    status: Status::INITIAL | Status::NO_ID,
+                });
+            }
+        }
+
+        self.invoke(rpc).await;
+    }
+
+    fn prune(&mut self, table: &mut RoutingTable) {
+        let nodes = &mut self.nodes;
+        self.txns.prune_with(table, |id| {
+            if let Some(node) = nodes.iter_mut().find(|node| &node.id == id) {
+                node.status.insert(Status::FAILED);
+            }
+        })
+    }
+
+    fn handle_reply(
+        &mut self,
+        resp: &Response,
+        addr: &SocketAddr,
+        table: &mut RoutingTable,
+    ) -> bool {
+        if let Some(req) = self.txns.remove(&resp.txn_id) {
+            if req.has_id {
+                table.heard_from(&req.id);
+            }
+        } else {
+            return false;
+        }
+
+        if let Some(node) = self.nodes.iter_mut().find(|node| &node.addr == addr) {
+            node.status.insert(Status::ALIVE);
+        } else {
+            debug_assert!(false, "Shouldn't be here");
+            return false;
+        }
+
+        let result = table.read_nodes_with(resp, |c| {
+            if !self.nodes.iter().any(|n| &n.id == c.id) {
+                self.nodes.push(TraversalNode::new(c));
+            }
+        });
+
+        if let Err(e) = result {
+            warn!("{}", e);
+        }
+
+        let target = &self.target;
+        self.nodes.sort_by_key(|n| n.id ^ target);
+        self.nodes.truncate(100);
+
+        true
+    }
+
+    async fn invoke(&mut self, rpc: &mut RpcMgr) -> bool {
+        let mut outstanding = 0;
+        let mut alive = 0;
+
+        for n in &mut self.nodes {
+            if alive == Bucket::MAX_LEN {
+                break;
+            }
+
+            if outstanding == self.branch_factor {
+                break;
+            }
+
+            if n.status.contains(Status::ALIVE) {
+                alive += 1;
+                continue;
+            }
+
+            if n.status.contains(Status::QUERIED) {
+                if !n.status.contains(Status::FAILED) {
+                    outstanding += 1;
+                }
+                continue;
+            };
+
+            let msg = FindNode {
+                target: &self.target,
+                id: &self.own_id,
+                txn_id: rpc.next_id(),
+            };
+
+            match rpc.send(&msg, &n.addr).await {
+                Ok(_) => {
+                    n.status.insert(Status::QUERIED);
+                    self.txns.insert(msg.txn_id, &n.id);
+                    outstanding += 1;
+                }
+                Err(e) => {
+                    warn!("{}", e);
+                    n.status.insert(Status::FAILED);
+                }
+            }
+        }
+
+        outstanding == 0 && alive == Bucket::MAX_LEN
+    }
+
+    fn done(self) {
+        debug!("Done bootstrapping");
     }
 }
