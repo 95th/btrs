@@ -1,8 +1,6 @@
-use crate::bucket::Bucket;
-use crate::contact::{CompactNodes, CompactNodesV6, ContactRef, ContactStatus};
+use crate::contact::{CompactNodes, CompactNodesV6, ContactRef};
 use crate::id::NodeId;
-use crate::msg::recv::{Msg, Query, Response};
-use crate::msg::send::AnnouncePeer;
+use crate::msg::recv::{ErrorResponse, Msg, Query, Response};
 use crate::server::rpc::{RpcMgr, Transactions};
 use crate::server::traversal::{BootstrapTraversal, GetPeersTraversal, Traversal};
 use crate::table::RoutingTable;
@@ -21,7 +19,6 @@ pub struct Server {
     rpc: RpcMgr,
     table: RoutingTable,
     own_id: NodeId,
-    txns: Transactions,
     next_refresh: Instant,
     client_rx: Receiver<ClientRequest>,
     client_tx: Sender<ClientRequest>,
@@ -50,7 +47,6 @@ impl Server {
             rpc: RpcMgr::new(socket),
             table: RoutingTable::new(id, router_nodes),
             own_id: id,
-            txns: Transactions::new(),
             next_refresh: Instant::now(),
             client_tx,
             client_rx,
@@ -94,9 +90,6 @@ impl Server {
 
             // Housekeep running requests
             self.check_running().await;
-
-            // Clear stale transactions
-            self.txns.prune(&mut self.table);
         }
     }
 
@@ -170,38 +163,6 @@ impl Server {
         }
     }
 
-    pub async fn announce(&mut self, info_hash: &NodeId) {
-        let mut closest = Vec::with_capacity(Bucket::MAX_LEN);
-        self.table
-            .find_closest(&info_hash, &mut closest, Bucket::MAX_LEN);
-
-        for c in closest {
-            debug!("Send ANNOUNCE_PEER request to {}", c.addr);
-
-            let token = match self.table.tokens.get(&c.id) {
-                Some(t) => t,
-                None => {
-                    debug!("Token not found for {:?}", c.id);
-                    continue;
-                }
-            };
-
-            let m = AnnouncePeer {
-                id: &self.own_id,
-                info_hash,
-                txn_id: self.rpc.next_id(),
-                implied_port: true,
-                port: 0,
-                token,
-            };
-
-            match self.rpc.send(&m, &c.addr).await {
-                Ok(_) => self.txns.insert(m.txn_id, c.id),
-                Err(e) => warn!("ANNOUNCE_PEER to {} failed: {}", c.addr, e),
-            }
-        }
-    }
-
     async fn recv_response(&mut self, timeout: Duration) {
         let (msg, addr) = match self.rpc.recv_timeout(timeout).await {
             Ok(Some(x)) => x,
@@ -220,55 +181,19 @@ impl Server {
                     }
                 }
             }
-            _ => self.table.handle_msg(msg, &mut self.txns),
+            Msg::Query(query) => self.table.handle_query(&query),
+            Msg::Error(err) => self.table.handle_error(&err),
         }
     }
 }
 
 impl RoutingTable {
-    fn handle_msg(&mut self, msg: Msg, txns: &mut Transactions) {
-        match msg {
-            Msg::Response(resp) => {
-                match txns.remove(&resp.txn_id) {
-                    Some(request) => {
-                        if request.has_id {
-                            if let Some(c) = self.find_contact(&request.id) {
-                                c.status = ContactStatus::ALIVE | ContactStatus::QUERIED;
-                                c.clear_timeout();
-                                c.last_updated = Instant::now();
-                            }
-                        }
-                    }
-                    None => {
-                        warn!(
-                            "Message received (txn id: {:?}) from unexpected address",
-                            resp.txn_id
-                        );
-                        return;
-                    }
-                };
-
-                self.handle_response(&resp);
-            }
-            Msg::Error(err) => {
-                warn!("{:?} failed: {:#?}", err.txn_id, err.list);
-            }
-            Msg::Query(query) => self.handle_query(&query),
-        }
-    }
-
     fn handle_query(&mut self, query: &Query) {
         debug!("Got query request: {:#?}", query);
     }
 
-    fn handle_response(&mut self, response: &Response) {
-        if let Err(e) = self.read_nodes(response) {
-            warn!("{}", e);
-        }
-    }
-
-    fn read_nodes(&mut self, response: &Response) -> anyhow::Result<()> {
-        self.read_nodes_with(response, |_| {})
+    fn handle_error(&mut self, err: &ErrorResponse) {
+        debug!("Got query request: {:#?}", err);
     }
 
     fn read_nodes_with<F>(&mut self, response: &Response, mut f: F) -> anyhow::Result<()>

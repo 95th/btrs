@@ -110,12 +110,6 @@ impl Transactions {
 
     /// Remove transactions that are timed out or not in Routing table
     /// anymore.
-    pub fn prune(&mut self, table: &mut RoutingTable) {
-        self.prune_with(table, |_| {});
-    }
-
-    /// Remove transactions that are timed out or not in Routing table
-    /// anymore.
     pub fn prune_with<F>(&mut self, table: &mut RoutingTable, mut f: F)
     where
         F: FnMut(&NodeId),
