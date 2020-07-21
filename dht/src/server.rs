@@ -15,7 +15,6 @@ use tokio::sync::mpsc::{self, Receiver, Sender};
 pub struct Server {
     rpc: RpcMgr,
     table: RoutingTable,
-    txn_id: TxnId,
     own_id: NodeId,
     txns: Transactions,
     router_nodes: Vec<SocketAddr>,
@@ -31,7 +30,7 @@ pub struct Client {
 
 #[derive(Debug)]
 pub enum ClientRequest {
-    Announce(NodeId),
+    GetPeers(NodeId),
     Shutdown,
 }
 
@@ -45,7 +44,6 @@ impl Server {
         let server = Server {
             rpc: RpcMgr::new(socket),
             table: RoutingTable::new(id),
-            txn_id: TxnId(0),
             own_id: id,
             txns: Transactions::new(),
             router_nodes,
@@ -171,17 +169,48 @@ impl Server {
         }
     }
 
+    pub async fn get_peers(&mut self, info_hash: &NodeId) -> Vec<SocketAddr> {
+        let mut gp = GetPeersTraversal {
+            own_id: self.own_id,
+            nodes: vec![],
+            peers: vec![],
+            branch_factor: 3,
+            info_hash: *info_hash,
+        };
+
+        gp.start(&mut self.table, &mut self.rpc, &mut self.txns)
+            .await;
+
+        loop {
+            if let Ok(Some((msg, _addr))) = self.rpc.recv_timeout(Duration::from_secs(1)).await {
+                if let Msg::Response(resp) = msg {
+                    gp.handle_reply(&resp, &mut self.table);
+                }
+            }
+
+            self.txns.prune_with(&mut self.table, |id| {
+                gp.timeout(id);
+            });
+
+            if gp.invoke(&mut self.rpc, &mut self.txns).await {
+                break;
+            }
+        }
+
+        gp.get_peers()
+    }
+
     async fn find_node(&mut self, target: &NodeId, id: &NodeId, addr: &SocketAddr) -> bool {
         debug!("Send FIND_NODE request to {}", addr);
 
         let m = FindNode {
             id: &self.own_id,
             target,
-            txn_id: self.txn_id.next_id(),
+            txn_id: self.txns.next_id(),
         };
         match self.rpc.send(&m, addr).await {
             Ok(_) => {
-                self.txns.insert(m.txn_id, id, addr);
+                self.txns.insert(m.txn_id, id);
                 true
             }
             Err(e) => {
@@ -193,16 +222,17 @@ impl Server {
 
     async fn check_client_request(&mut self) -> bool {
         let info_hash = match self.client_rx.try_recv() {
-            Ok(ClientRequest::Announce(infohash)) => infohash,
+            Ok(ClientRequest::GetPeers(infohash)) => infohash,
             Ok(ClientRequest::Shutdown) => return true,
             Err(_) => return false,
         };
 
-        self.announce(&info_hash).await;
+        let peers = self.get_peers(&info_hash).await;
+        debug!("Found {} peers", peers.len());
         false
     }
 
-    async fn announce(&mut self, info_hash: &NodeId) {
+    pub async fn announce(&mut self, info_hash: &NodeId) {
         let mut closest = Vec::with_capacity(Bucket::MAX_LEN);
         self.table
             .find_closest(&info_hash, &mut closest, Bucket::MAX_LEN);
@@ -221,14 +251,14 @@ impl Server {
             let m = AnnouncePeer {
                 id: &self.own_id,
                 info_hash,
-                txn_id: self.txn_id.next_id(),
+                txn_id: self.txns.next_id(),
                 implied_port: true,
                 port: 0,
                 token,
             };
 
             match self.rpc.send(&m, &c.addr).await {
-                Ok(_) => self.txns.insert(m.txn_id, c.id, &c.addr),
+                Ok(_) => self.txns.insert(m.txn_id, c.id),
                 Err(e) => warn!("ANNOUNCE_PEER to {} failed: {}", c.addr, e),
             }
         }
@@ -286,7 +316,7 @@ impl RoutingTable {
     }
 
     fn read_nodes(&mut self, response: &Response) -> anyhow::Result<()> {
-        self.read_nodes_with(response, |c| {})
+        self.read_nodes_with(response, |_| {})
     }
 
     fn read_nodes_with<F>(&mut self, response: &Response, mut f: F) -> anyhow::Result<()>
@@ -370,16 +400,14 @@ impl RpcMgr {
 
 pub struct Request {
     id: NodeId,
-    _addr: SocketAddr,
     sent: Instant,
     has_id: bool,
 }
 
 impl Request {
-    fn new(id: &NodeId, addr: &SocketAddr) -> Self {
+    fn new(id: &NodeId) -> Self {
         Self {
             id: if id.is_zero() { NodeId::gen() } else { *id },
-            _addr: *addr,
             sent: Instant::now(),
             has_id: !id.is_zero(),
         }
@@ -387,6 +415,7 @@ impl Request {
 }
 
 struct Transactions {
+    txn_id: TxnId,
     pending: HashMap<TxnId, Request>,
     timeout: Duration,
 }
@@ -396,15 +425,23 @@ impl Transactions {
         Self::with_timeout(Duration::from_secs(5))
     }
 
+    pub fn next_id(&mut self) -> TxnId {
+        let out = self.txn_id;
+        let id = &mut self.txn_id.0;
+        *id = id.wrapping_add(1);
+        out
+    }
+
     fn with_timeout(timeout: Duration) -> Self {
         Self {
+            txn_id: TxnId(0),
             pending: HashMap::new(),
             timeout,
         }
     }
 
-    fn insert(&mut self, txn_id: TxnId, id: &NodeId, addr: &SocketAddr) {
-        self.pending.insert(txn_id, Request::new(id, addr));
+    fn insert(&mut self, txn_id: TxnId, id: &NodeId) {
+        self.pending.insert(txn_id, Request::new(id));
     }
 
     fn remove(&mut self, txn_id: &TxnId) -> Option<Request> {
@@ -422,6 +459,15 @@ impl Transactions {
     /// Remove transactions that are timed out or not in Routing table
     /// anymore.
     fn prune(&mut self, table: &mut RoutingTable) {
+        self.prune_with(table, |_| {});
+    }
+
+    /// Remove transactions that are timed out or not in Routing table
+    /// anymore.
+    fn prune_with<F>(&mut self, table: &mut RoutingTable, mut f: F)
+    where
+        F: FnMut(&NodeId),
+    {
         let timeout = self.timeout;
 
         self.pending.retain(|txn_id, request| {
@@ -436,6 +482,8 @@ impl Transactions {
                 }
             }
 
+            f(&request.id);
+
             trace!("Txn {:?} expired", txn_id);
             false
         });
@@ -445,7 +493,6 @@ impl Transactions {
 pub struct TraversalNode {
     id: NodeId,
     addr: SocketAddr,
-    sent: Instant,
     status: Status,
 }
 
@@ -454,7 +501,6 @@ impl TraversalNode {
         Self {
             id: *c.id,
             addr: c.addr,
-            sent: Instant::now(),
             status: Status::INITIAL,
         }
     }
@@ -479,7 +525,7 @@ pub struct GetPeersTraversal {
 }
 
 impl GetPeersTraversal {
-    async fn start(&mut self, table: &mut RoutingTable, rpc: &mut RpcMgr) {
+    async fn start(&mut self, table: &mut RoutingTable, rpc: &mut RpcMgr, txns: &mut Transactions) {
         let mut closest = Vec::with_capacity(Bucket::MAX_LEN);
         table.find_closest(&self.info_hash, &mut closest, Bucket::MAX_LEN);
         for c in closest {
@@ -491,13 +537,12 @@ impl GetPeersTraversal {
                 self.nodes.push(TraversalNode {
                     id: NodeId::gen(),
                     addr: *node,
-                    sent: Instant::now(),
                     status: Status::INITIAL | Status::NO_ID,
                 });
             }
         }
 
-        self.invoke(rpc).await;
+        self.invoke(rpc, txns).await;
     }
 
     fn timeout(&mut self, id: &NodeId) -> bool {
@@ -534,7 +579,7 @@ impl GetPeersTraversal {
         true
     }
 
-    async fn invoke(&mut self, rpc: &mut RpcMgr) -> bool {
+    async fn invoke(&mut self, rpc: &mut RpcMgr, txns: &mut Transactions) -> bool {
         let mut outstanding = 0;
         let mut alive = 0;
 
@@ -562,12 +607,13 @@ impl GetPeersTraversal {
             let msg = GetPeers {
                 info_hash: &self.info_hash,
                 id: &self.own_id,
-                txn_id: TxnId(0),
+                txn_id: txns.next_id(),
             };
 
             match rpc.send(&msg, &n.addr).await {
                 Ok(_) => {
                     n.status.insert(Status::QUERIED);
+                    txns.insert(msg.txn_id, &n.id);
                     outstanding += 1;
                 }
                 Err(e) => {

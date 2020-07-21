@@ -17,7 +17,7 @@ async fn main() -> anyhow::Result<()> {
     let info_hash = NodeId::from_hex(b"d04480dfa670f72f591439b51a9f82dcc58711b5").unwrap();
     client
         .tx
-        .send(ClientRequest::Announce(info_hash))
+        .send(ClientRequest::GetPeers(info_hash))
         .await
         .unwrap();
 
