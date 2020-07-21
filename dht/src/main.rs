@@ -1,6 +1,7 @@
 use dht::id::NodeId;
 use dht::{ClientRequest, Server};
 use std::time::Duration;
+use tokio::sync::oneshot;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -15,11 +16,17 @@ async fn main() -> anyhow::Result<()> {
     tokio::spawn(server.run());
 
     let info_hash = NodeId::from_hex(b"d04480dfa670f72f591439b51a9f82dcc58711b5").unwrap();
+    let (tx, rx) = oneshot::channel();
     client
         .tx
-        .send(ClientRequest::GetPeers(info_hash))
+        .send(ClientRequest::GetPeers(info_hash, tx))
         .await
         .unwrap();
+
+    match rx.await {
+        Ok(peers) => println!("Found {} peers", peers.len()),
+        Err(e) => println!("Error in receiving peers: {}", e),
+    }
 
     tokio::time::delay_for(Duration::from_secs(10000)).await;
     Ok(())

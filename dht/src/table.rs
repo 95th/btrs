@@ -1,5 +1,5 @@
 use crate::bucket::Bucket;
-use crate::contact::{Contact, ContactRef};
+use crate::contact::{Contact, ContactRef, ContactStatus};
 use crate::id::NodeId;
 use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
@@ -112,6 +112,18 @@ impl RoutingTable {
     pub fn find_contact(&mut self, id: &NodeId) -> Option<&mut Contact> {
         let idx = self.find_bucket(id);
         self.buckets[idx].live.iter_mut().find(|c| c.id == *id)
+    }
+
+    pub fn heard_from(&mut self, id: &NodeId) {
+        let idx = self.find_bucket(id);
+        let bucket = &mut self.buckets[idx];
+
+        if let Some(c) = bucket.live.iter_mut().find(|c| c.id == *id) {
+            c.status = ContactStatus::ALIVE | ContactStatus::QUERIED;
+            c.clear_timeout();
+            c.last_updated = Instant::now();
+            bucket.last_updated = Instant::now();
+        }
     }
 
     fn add_contact_impl(&mut self, contact: &ContactRef<'_>) -> BucketResult {
