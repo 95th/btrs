@@ -16,15 +16,15 @@ impl fmt::Debug for NodeId {
 }
 
 impl NodeId {
-    pub fn new() -> Self {
-        Self::default()
+    pub const fn new() -> Self {
+        Self::all(0)
     }
 
-    pub fn max() -> Self {
+    pub const fn max() -> Self {
         Self::all(u8::max_value())
     }
 
-    pub fn all(b: u8) -> Self {
+    pub const fn all(b: u8) -> Self {
         Self([b; 20])
     }
 

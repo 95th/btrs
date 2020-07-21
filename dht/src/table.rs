@@ -1,5 +1,5 @@
 use crate::bucket::Bucket;
-use crate::contact::{Contact, ContactRef};
+use crate::contact::{Contact, ContactRef, ContactStatus};
 use crate::id::NodeId;
 use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
@@ -21,12 +21,12 @@ pub struct RoutingTable {
 }
 
 impl RoutingTable {
-    pub fn new(own_id: NodeId) -> Self {
+    pub fn new(own_id: NodeId, router_nodes: Vec<SocketAddr>) -> Self {
         Self {
             own_id,
             buckets: vec![Bucket::new()],
             tokens: HashMap::new(),
-            router_nodes: HashSet::new(),
+            router_nodes: router_nodes.into_iter().collect(),
         }
     }
 
@@ -112,6 +112,18 @@ impl RoutingTable {
     pub fn find_contact(&mut self, id: &NodeId) -> Option<&mut Contact> {
         let idx = self.find_bucket(id);
         self.buckets[idx].live.iter_mut().find(|c| c.id == *id)
+    }
+
+    pub fn heard_from(&mut self, id: &NodeId) {
+        let idx = self.find_bucket(id);
+        let bucket = &mut self.buckets[idx];
+
+        if let Some(c) = bucket.live.iter_mut().find(|c| c.id == *id) {
+            c.status = ContactStatus::ALIVE | ContactStatus::QUERIED;
+            c.clear_timeout();
+            c.last_updated = Instant::now();
+            bucket.last_updated = Instant::now();
+        }
     }
 
     fn add_contact_impl(&mut self, contact: &ContactRef<'_>) -> BucketResult {
@@ -274,7 +286,7 @@ mod tests {
 
     #[test]
     fn basic() {
-        let mut rt = RoutingTable::new(NodeId::all(0));
+        let mut rt = RoutingTable::new(NodeId::all(0), vec![]);
         assert_eq!(rt.len(), 0);
         assert_eq!(rt.len_extra(), 0);
         assert_eq!(rt.buckets.len(), 1);
@@ -347,7 +359,7 @@ mod tests {
 
     #[test]
     fn test_closest() {
-        let mut table = RoutingTable::new(NodeId::all(0));
+        let mut table = RoutingTable::new(NodeId::all(0), vec![]);
         let addr = SocketAddr::from(([0u8; 4], 100));
 
         fn node(idx: usize) -> NodeId {
