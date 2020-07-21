@@ -578,6 +578,30 @@ impl GetPeersTraversal {
             }
         });
 
+        fn decode_peer(d: Decoder) -> Option<SocketAddr> {
+            if let Some(b) = d.as_bytes() {
+                if b.len() == 6 {
+                    unsafe {
+                        let ip = *(b.as_ptr() as *const [u8; 4]);
+                        let port = *(b.as_ptr().add(4) as *const [u8; 2]);
+                        let port = u16::from_be_bytes(port);
+                        return Some((ip, port).into());
+                    }
+                } else {
+                    warn!("Incorrect Peer length. Expected: 6, Actual: {}", b.len());
+                }
+            } else {
+                warn!("Unexpected Peer format: {:?}", d);
+            }
+
+            None
+        }
+
+        if let Some(peers) = resp.body.get_list("values") {
+            let peers = peers.into_iter().flat_map(decode_peer);
+            self.peers.extend(peers);
+        }
+
         if let Err(e) = result {
             warn!("{}", e);
         }

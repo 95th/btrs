@@ -374,6 +374,15 @@ impl fmt::Debug for List<'_, '_> {
     }
 }
 
+impl<'a, 'p> IntoIterator for List<'a, 'p> {
+    type Item = Decoder<'a, 'p>;
+    type IntoIter = ListIter<'a, 'p>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
 impl<'a, 'p> List<'a, 'p> {
     /// Gets an iterator over the entries of the list
     pub fn iter(&self) -> ListIter<'a, 'p> {
@@ -488,6 +497,15 @@ pub struct Dict<'a, 'p> {
 impl fmt::Debug for Dict<'_, '_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_map().entries(self.iter()).finish()
+    }
+}
+
+impl<'a, 'p> IntoIterator for Dict<'a, 'p> {
+    type Item = (Decoder<'a, 'p>, Decoder<'a, 'p>);
+    type IntoIter = DictIter<'a, 'p>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
     }
 }
 
