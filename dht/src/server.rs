@@ -88,7 +88,7 @@ impl Server {
             }
 
             // Wait for socket response
-            self.recv_response(Duration::from_millis(100)).await;
+            self.recv_response(Duration::from_secs(1)).await;
 
             // Housekeep running requests
             self.check_running().await;
@@ -123,17 +123,13 @@ impl Server {
         t.start(&mut self.table, &mut self.rpc).await;
 
         loop {
-            trace!("Invoke traversal");
             if t.invoke(&mut self.rpc).await {
-                trace!("Done traversal");
                 t.done();
                 break;
             }
 
-            trace!("Prune traversal");
             t.prune(&mut self.table);
 
-            trace!("Check response");
             let (msg, addr) = match self.rpc.recv_timeout(Duration::from_secs(1)).await {
                 Ok(Some(x)) => x,
                 Ok(None) => continue,
@@ -144,7 +140,6 @@ impl Server {
             };
 
             if let Msg::Response(resp) = msg {
-                trace!("Handle reply");
                 t.handle_reply(&resp, &addr, &mut self.table);
             }
         }
@@ -524,6 +519,7 @@ impl GetPeersTraversal {
     }
 
     async fn start(&mut self, table: &mut RoutingTable, rpc: &mut RpcMgr) {
+        trace!("Start GET_PEERS traversal");
         let mut closest = Vec::with_capacity(Bucket::MAX_LEN);
         table.find_closest(&self.info_hash, &mut closest, Bucket::MAX_LEN);
         for c in closest {
@@ -544,6 +540,7 @@ impl GetPeersTraversal {
     }
 
     fn prune(&mut self, table: &mut RoutingTable) {
+        trace!("Prune GET_PEERS traversal");
         let nodes = &mut self.nodes;
         self.txns.prune_with(table, |id| {
             if let Some(node) = nodes.iter_mut().find(|node| &node.id == id) {
@@ -573,6 +570,8 @@ impl GetPeersTraversal {
             return false;
         }
 
+        trace!("Handle GET_PEERS traversal response");
+
         let result = table.read_nodes_with(resp, |c| {
             if !self.nodes.iter().any(|n| &n.id == c.id) {
                 self.nodes.push(TraversalNode::new(c));
@@ -591,6 +590,7 @@ impl GetPeersTraversal {
     }
 
     async fn invoke(&mut self, rpc: &mut RpcMgr) -> bool {
+        trace!("Invoke GET_PEERS traversal");
         let mut outstanding = 0;
         let mut alive = 0;
 
@@ -665,6 +665,7 @@ impl BootstrapTraversal {
     }
 
     async fn start(&mut self, table: &mut RoutingTable, rpc: &mut RpcMgr) {
+        trace!("Start BOOTSTRAP traversal");
         let mut closest = Vec::with_capacity(Bucket::MAX_LEN);
         table.find_closest(&self.target, &mut closest, Bucket::MAX_LEN);
         for c in closest {
@@ -685,6 +686,7 @@ impl BootstrapTraversal {
     }
 
     fn prune(&mut self, table: &mut RoutingTable) {
+        trace!("Prune BOOTSTRAP traversal");
         let nodes = &mut self.nodes;
         self.txns.prune_with(table, |id| {
             if let Some(node) = nodes.iter_mut().find(|node| &node.id == id) {
@@ -714,6 +716,8 @@ impl BootstrapTraversal {
             return false;
         }
 
+        trace!("Handle BOOTSTRAP traversal response");
+
         let result = table.read_nodes_with(resp, |c| {
             if !self.nodes.iter().any(|n| &n.id == c.id) {
                 self.nodes.push(TraversalNode::new(c));
@@ -732,6 +736,7 @@ impl BootstrapTraversal {
     }
 
     async fn invoke(&mut self, rpc: &mut RpcMgr) -> bool {
+        trace!("Invoke BOOTSTRAP traversal");
         let mut outstanding = 0;
         let mut alive = 0;
 
