@@ -2,7 +2,9 @@ use crate::contact::{CompactNodes, CompactNodesV6, ContactRef};
 use crate::id::NodeId;
 use crate::msg::recv::{ErrorResponse, Msg, Query, Response};
 use crate::server::rpc::{RpcMgr, Transactions};
-use crate::server::traversal::{BootstrapTraversal, GetPeersTraversal, Traversal};
+use crate::server::traversal::{
+    AnnounceTraversal, BootstrapTraversal, GetPeersTraversal, Traversal,
+};
 use crate::table::RoutingTable;
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
@@ -32,6 +34,7 @@ pub struct Client {
 
 #[derive(Debug)]
 pub enum ClientRequest {
+    Announce(NodeId, PeerSender),
     GetPeers(NodeId, PeerSender),
     Shutdown,
 }
@@ -152,10 +155,20 @@ impl Server {
         self.running.push(Traversal::GetPeers(t));
     }
 
+    pub async fn announce(&mut self, info_hash: &NodeId, tx: PeerSender) {
+        let mut t = Box::new(AnnounceTraversal::new(info_hash, &self.own_id, tx));
+        t.start(&mut self.table, &mut self.rpc).await;
+        self.running.push(Traversal::Announce(t));
+    }
+
     async fn check_client_request(&mut self) -> bool {
         match self.client_rx.try_recv() {
             Ok(ClientRequest::GetPeers(info_hash, tx)) => {
                 self.get_peers(&info_hash, tx).await;
+                false
+            }
+            Ok(ClientRequest::Announce(info_hash, tx)) => {
+                self.announce(&info_hash, tx).await;
                 false
             }
             Ok(ClientRequest::Shutdown) => true,
@@ -212,10 +225,6 @@ impl RoutingTable {
                 self.add_contact(&c);
                 f(&c);
             }
-        }
-
-        if let Some(token) = response.body.get_bytes("token") {
-            self.tokens.insert(*response.id, token.to_vec());
         }
 
         Ok(())

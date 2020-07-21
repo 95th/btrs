@@ -5,9 +5,11 @@ use crate::server::RpcMgr;
 use crate::table::RoutingTable;
 use std::net::SocketAddr;
 
+mod announce;
 mod bootstrap;
 mod get_peers;
 
+pub use announce::AnnounceTraversal;
 pub use bootstrap::BootstrapTraversal;
 pub use get_peers::GetPeersTraversal;
 
@@ -38,15 +40,17 @@ bitflags! {
 }
 
 pub enum Traversal {
-    GetPeers(Box<GetPeersTraversal>),
     Bootstrap(Box<BootstrapTraversal>),
+    GetPeers(Box<GetPeersTraversal>),
+    Announce(Box<AnnounceTraversal>),
 }
 
 impl Traversal {
     pub fn prune(&mut self, table: &mut RoutingTable) {
         match self {
-            Self::GetPeers(t) => t.prune(table),
             Self::Bootstrap(t) => t.prune(table),
+            Self::GetPeers(t) => t.prune(table),
+            Self::Announce(t) => t.prune(table),
         }
     }
 
@@ -57,22 +61,25 @@ impl Traversal {
         table: &mut RoutingTable,
     ) -> bool {
         match self {
-            Self::GetPeers(t) => t.handle_reply(resp, addr, table),
             Self::Bootstrap(t) => t.handle_reply(resp, addr, table),
+            Self::GetPeers(t) => t.handle_reply(resp, addr, table),
+            Self::Announce(t) => t.handle_reply(resp, addr, table),
         }
     }
 
     pub async fn invoke(&mut self, rpc: &mut RpcMgr) -> bool {
         match self {
-            Self::GetPeers(t) => t.invoke(rpc).await,
             Self::Bootstrap(t) => t.invoke(rpc).await,
+            Self::GetPeers(t) => t.invoke(rpc).await,
+            Self::Announce(t) => t.invoke(rpc).await,
         }
     }
 
     pub fn done(self) {
         match self {
-            Self::GetPeers(t) => t.done(),
             Self::Bootstrap(t) => t.done(),
+            Self::GetPeers(t) => t.done(),
+            Self::Announce(t) => t.done(),
         }
     }
 }

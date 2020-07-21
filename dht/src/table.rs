@@ -1,7 +1,7 @@
 use crate::bucket::Bucket;
 use crate::contact::{Contact, ContactRef, ContactStatus};
 use crate::id::NodeId;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 
@@ -16,7 +16,6 @@ pub enum BucketResult {
 pub struct RoutingTable {
     pub own_id: NodeId,
     pub buckets: Vec<Bucket>,
-    pub tokens: HashMap<NodeId, Vec<u8>>,
     pub router_nodes: HashSet<SocketAddr>,
 }
 
@@ -25,7 +24,6 @@ impl RoutingTable {
         Self {
             own_id,
             buckets: vec![Bucket::new()],
-            tokens: HashMap::new(),
             router_nodes: router_nodes.into_iter().collect(),
         }
     }
