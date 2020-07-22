@@ -1,17 +1,17 @@
 use crate::contact::{CompactNodes, CompactNodesV6, ContactRef};
 use crate::id::NodeId;
 use crate::msg::recv::{ErrorResponse, Msg, Query, Response};
-use crate::server::rpc::{RpcMgr, Transactions};
-use crate::server::traversal::{
-    AnnounceTraversal, BootstrapTraversal, GetPeersTraversal, Traversal,
-};
 use crate::table::RoutingTable;
+use rpc::{RpcMgr, Transactions};
 use std::collections::HashSet;
 use std::net::SocketAddr;
 use std::time::Duration;
 use tokio::net::UdpSocket;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio::sync::oneshot;
+use traversal::{
+    AnnounceTraversal, BootstrapTraversal, GetPeersTraversal, PingTraversal, Traversal,
+};
 
 mod rpc;
 mod traversal;
@@ -108,6 +108,11 @@ impl Server {
         let mut t = Box::new(BootstrapTraversal::new(target, &self.own_id));
         t.start(&mut self.table, &mut self.rpc).await;
         self.running.push(Traversal::Bootstrap(t));
+    }
+
+    pub fn submit_single_refresh(&mut self, id: &NodeId, addr: &SocketAddr) {
+        let t = Box::new(PingTraversal::new(&self.own_id, id, addr));
+        self.running.push(Traversal::Ping(t));
     }
 
     async fn refresh(&mut self, target: &NodeId) {

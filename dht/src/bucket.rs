@@ -1,6 +1,6 @@
 use crate::contact::{Contact, ContactRef};
-use std::time::{Duration, Instant};
 use crate::id::NodeId;
+use std::time::{Duration, Instant};
 
 #[derive(Debug, PartialEq)]
 pub enum BucketResult {
