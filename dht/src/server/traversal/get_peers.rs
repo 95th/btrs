@@ -82,7 +82,6 @@ impl GetPeersTraversal {
         if let Some(node) = self.nodes.iter_mut().find(|node| &node.addr == addr) {
             node.status.insert(Status::ALIVE);
         } else {
-            debug_assert!(false, "Shouldn't be here");
             return false;
         }
 
@@ -178,7 +177,7 @@ impl GetPeersTraversal {
             }
         }
 
-        outstanding == 0 && alive == Bucket::MAX_LEN
+        outstanding == 0 && alive == Bucket::MAX_LEN || self.txns.is_empty()
     }
 
     pub fn done(self) {
