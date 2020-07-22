@@ -6,8 +6,9 @@ use crate::server::traversal::{
     AnnounceTraversal, BootstrapTraversal, GetPeersTraversal, Traversal,
 };
 use crate::table::RoutingTable;
+use std::collections::HashSet;
 use std::net::SocketAddr;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tokio::net::UdpSocket;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio::sync::oneshot;
@@ -15,13 +16,12 @@ use tokio::sync::oneshot;
 mod rpc;
 mod traversal;
 
-type PeerSender = oneshot::Sender<Vec<SocketAddr>>;
+type PeerSender = oneshot::Sender<HashSet<SocketAddr>>;
 
 pub struct Server {
     rpc: RpcMgr,
     table: RoutingTable,
     own_id: NodeId,
-    next_refresh: Instant,
     client_rx: Receiver<ClientRequest>,
     client_tx: Sender<ClientRequest>,
     running: Vec<Traversal>,
@@ -50,7 +50,6 @@ impl Server {
             rpc: RpcMgr::new(socket),
             table: RoutingTable::new(id, router_nodes),
             own_id: id,
-            next_refresh: Instant::now(),
             client_tx,
             client_rx,
             running: vec![],
@@ -66,19 +65,14 @@ impl Server {
     }
 
     pub async fn run(mut self) {
-        loop {
-            if Instant::now() >= self.next_refresh {
-                // refresh the table
-                if self.table.is_empty() {
-                    let target = self.own_id;
-                    self.refresh(&target).await;
-                } else if let Some(target) = self.table.pick_refresh_id() {
-                    trace!("Bucket refresh target: {:?}", target);
-                    self.submit_refresh(&target).await;
-                }
+        let target = self.own_id;
+        self.refresh(&target).await;
 
-                // Self refresh every 15 mins
-                self.next_refresh = Instant::now() + Duration::from_secs(15 * 60);
+        loop {
+            // refresh the table
+            if let Some(target) = self.table.pick_refresh_id() {
+                trace!("Bucket refresh target: {:?}", target);
+                self.submit_refresh(&target).await;
             }
 
             // Check if any request from client such as Announce/Shutdown

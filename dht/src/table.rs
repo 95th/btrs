@@ -3,7 +3,7 @@ use crate::contact::{Contact, ContactRef, ContactStatus};
 use crate::id::NodeId;
 use std::collections::HashSet;
 use std::net::SocketAddr;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 #[derive(Debug)]
 pub enum BucketResult {
@@ -28,10 +28,12 @@ impl RoutingTable {
         }
     }
 
-    pub fn pick_refresh_id(&self) -> Option<NodeId> {
-        let timeout = Instant::now() - Duration::from_secs(15 * 60);
-        let bucket_no = self.buckets.iter().position(|b| b.last_updated < timeout)?;
+    pub fn pick_refresh_id(&mut self) -> Option<NodeId> {
+        let bucket_no = self.buckets.iter().position(|b| b.need_refresh())?;
+
+        self.buckets[bucket_no].last_updated = Instant::now();
         trace!("Refresh bucket: {}", bucket_no);
+
         Some(NodeId::gen_lz(bucket_no))
     }
 

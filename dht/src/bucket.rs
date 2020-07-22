@@ -1,5 +1,5 @@
 use crate::contact::{Contact, ContactRef};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 #[derive(Debug)]
 pub struct Bucket {
@@ -31,5 +31,12 @@ impl Bucket {
             .iter()
             .filter(|c| !c.failed())
             .for_each(|c| out.push(c.as_ref()));
+    }
+
+    pub fn need_refresh(&self) -> bool {
+        // Refresh every 15 mins
+        const REFRESH_INTERVAL: Duration = Duration::from_secs(15 * 60);
+
+        self.last_updated < Instant::now() - REFRESH_INTERVAL
     }
 }

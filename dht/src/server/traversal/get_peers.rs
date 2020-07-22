@@ -6,7 +6,7 @@ use crate::server::traversal::{Status, TraversalNode};
 use crate::server::{PeerSender, RpcMgr, Transactions};
 use crate::table::RoutingTable;
 use ben::Decoder;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
 
 pub struct GetPeersTraversal {
@@ -14,7 +14,7 @@ pub struct GetPeersTraversal {
     pub own_id: NodeId,
     pub nodes: Vec<TraversalNode>,
     pub tokens: HashMap<SocketAddr, Vec<u8>>,
-    peers: Vec<SocketAddr>,
+    peers: HashSet<SocketAddr>,
     txns: Transactions,
     tx: PeerSender,
     branch_factor: u8,
@@ -26,7 +26,7 @@ impl GetPeersTraversal {
             info_hash: *info_hash,
             own_id: *own_id,
             nodes: vec![],
-            peers: vec![],
+            peers: HashSet::new(),
             tokens: HashMap::new(),
             txns: Transactions::new(),
             tx,
