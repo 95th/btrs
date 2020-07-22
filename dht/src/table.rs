@@ -114,6 +114,12 @@ impl RoutingTable {
         self.buckets[idx].live.iter_mut().find(|c| c.id == *id)
     }
 
+    pub fn failed(&mut self, id: &NodeId) {
+        if let Some(c) = self.find_contact(id) {
+            c.timed_out();
+        }
+    }
+
     pub fn heard_from(&mut self, id: &NodeId) {
         let idx = self.find_bucket(id);
         let bucket = &mut self.buckets[idx];
@@ -121,7 +127,6 @@ impl RoutingTable {
         if let Some(c) = bucket.live.iter_mut().find(|c| c.id == *id) {
             c.status = ContactStatus::ALIVE | ContactStatus::QUERIED;
             c.clear_timeout();
-            c.last_updated = Instant::now();
             bucket.last_updated = Instant::now();
         }
     }

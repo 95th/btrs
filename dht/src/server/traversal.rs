@@ -54,6 +54,10 @@ impl Traversal {
         }
     }
 
+    /// Handle an incoming response and return `true` if it
+    /// was handled in this traversal.
+    /// Returning `false` means that the response didn't belong
+    /// to this traversal.
     pub fn handle_reply(
         &mut self,
         resp: &Response,

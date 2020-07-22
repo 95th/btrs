@@ -1,7 +1,6 @@
 use crate::id::NodeId;
 use ben::{Encode, Encoder};
 use std::net::SocketAddr;
-use std::time::Instant;
 
 bitflags! {
     pub struct ContactStatus: u8 {
@@ -32,9 +31,6 @@ impl ContactRef<'_> {
 pub struct Contact {
     pub id: NodeId,
     pub addr: SocketAddr,
-    pub last_updated: Instant,
-    pub last_queried: Instant,
-    pub token: Vec<u8>,
     pub status: ContactStatus,
     timeout_count: Option<u8>,
 }
@@ -44,9 +40,6 @@ impl Contact {
         Self {
             id,
             addr,
-            last_updated: Instant::now(),
-            last_queried: Instant::now(),
-            token: vec![],
             timeout_count: None,
             status: ContactStatus::INITIAL,
         }
@@ -57,10 +50,6 @@ impl Contact {
             id: &self.id,
             addr: self.addr,
         }
-    }
-
-    pub fn touch(&mut self) {
-        self.last_updated = Instant::now();
     }
 
     pub fn is_pinged(&self) -> bool {

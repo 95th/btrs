@@ -45,7 +45,7 @@ impl GetPeersTraversal {
         if self.nodes.len() < 3 {
             for node in &table.router_nodes {
                 self.nodes.push(TraversalNode {
-                    id: NodeId::gen(),
+                    id: NodeId::new(),
                     addr: *node,
                     status: Status::INITIAL | Status::NO_ID,
                 });
@@ -73,7 +73,13 @@ impl GetPeersTraversal {
     ) -> bool {
         if let Some(req) = self.txns.remove(&resp.txn_id) {
             if req.has_id {
-                table.heard_from(&req.id);
+                if &req.id == resp.id {
+                    table.heard_from(&req.id);
+                } else {
+                    warn!("ID mismatch from {}", addr);
+                    table.failed(&req.id);
+                    return true;
+                }
             }
         } else {
             return false;
