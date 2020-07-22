@@ -32,7 +32,7 @@ pub struct Contact {
     pub id: NodeId,
     pub addr: SocketAddr,
     pub status: ContactStatus,
-    timeout_count: Option<u8>,
+    pub timeout_count: Option<u8>,
 }
 
 impl Contact {

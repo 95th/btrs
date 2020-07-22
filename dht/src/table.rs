@@ -1,16 +1,9 @@
-use crate::bucket::Bucket;
+use crate::bucket::{Bucket, BucketResult};
 use crate::contact::{Contact, ContactRef, ContactStatus};
 use crate::id::NodeId;
 use std::collections::HashSet;
 use std::net::SocketAddr;
 use std::time::Instant;
-
-#[derive(Debug)]
-pub enum BucketResult {
-    Fail,
-    Success,
-    RequireSplit,
-}
 
 #[derive(Debug)]
 pub struct RoutingTable {
@@ -65,7 +58,7 @@ impl RoutingTable {
             if let Some(last) = self.buckets.iter().last() {
                 if last.live.is_empty() {
                     self.buckets.pop();
-                    debug_assert_eq!(matches!(result, BucketResult::RequireSplit), false);
+                    debug_assert_ne!(result, BucketResult::RequireSplit);
                 }
             }
         }
@@ -150,11 +143,11 @@ impl RoutingTable {
         if let Some(c) = bucket.live.iter_mut().find(|c| c.id == *contact.id) {
             if c.addr != contact.addr {
                 return BucketResult::Fail;
-            } else {
-                bucket.last_updated = Instant::now();
-                c.clear_timeout();
-                return BucketResult::Success;
             }
+
+            c.timeout_count = Some(0);
+            bucket.last_updated = Instant::now();
+            return BucketResult::Success;
         }
 
         let maybe_extra = bucket
@@ -163,33 +156,22 @@ impl RoutingTable {
             .enumerate()
             .find(|(_, c)| c.id == *contact.id);
 
+        let mut contact = contact.as_owned();
+
         if let Some((i, c)) = maybe_extra {
             if c.addr != contact.addr {
                 return BucketResult::Fail;
             }
 
-            c.clear_timeout();
-
-            if c.is_pinged() && bucket.live.len() < Bucket::MAX_LEN {
-                bucket.live.push(bucket.extra.remove(i));
-                bucket.last_updated = Instant::now();
-                return BucketResult::Success;
-            }
-
-            if can_split {
-                return BucketResult::RequireSplit;
-            }
-
-            let result = self.replace_node_impl(contact, bucket_index);
-            if !matches!(result, BucketResult::RequireSplit) {
-                return result;
-            }
+            c.timeout_count = Some(0);
+            contact = bucket.extra.remove(i);
         }
 
-        let bucket = &mut self.buckets[bucket_index];
-
         if bucket.live.len() < Bucket::MAX_LEN {
-            bucket.live.push(contact.as_owned());
+            if bucket.live.is_empty() {
+                bucket.live.reserve(Bucket::MAX_LEN);
+            }
+            bucket.live.push(contact);
             bucket.last_updated = Instant::now();
             return BucketResult::Success;
         }
@@ -198,25 +180,32 @@ impl RoutingTable {
             return BucketResult::RequireSplit;
         }
 
-        if bucket.extra.len() < Bucket::MAX_LEN * 2 {
-            bucket.extra.push(contact.as_owned());
-            bucket.last_updated = Instant::now();
-            BucketResult::Success
-        } else {
-            BucketResult::Fail
+        if contact.is_confirmed() {
+            let result = bucket.replace_node(&contact);
+            if result != BucketResult::RequireSplit {
+                return result;
+            }
         }
-    }
 
-    fn replace_node_impl(&mut self, contact: &ContactRef<'_>, bucket_index: usize) -> BucketResult {
-        let bucket = &mut self.buckets[bucket_index];
-        debug_assert!(bucket.live.len() >= Bucket::MAX_LEN);
-
-        if replace_stale(&mut bucket.live, contact) || replace_stale(&mut bucket.extra, contact) {
-            bucket.last_updated = Instant::now();
-            BucketResult::Success
-        } else {
-            BucketResult::Fail
+        if bucket.extra.len() >= Bucket::MAX_LEN {
+            if let Some(i) = bucket.extra.iter().position(|c| !c.is_pinged()) {
+                bucket.extra.remove(i);
+            } else {
+                let result = bucket.replace_node(&contact);
+                return if let BucketResult::Success = result {
+                    BucketResult::Success
+                } else {
+                    BucketResult::Fail
+                };
+            }
         }
+
+        if bucket.extra.is_empty() {
+            bucket.extra.reserve(Bucket::MAX_LEN);
+        }
+        bucket.extra.push(contact);
+        bucket.last_updated = Instant::now();
+        BucketResult::Success
     }
 
     fn split_bucket(&mut self) {
@@ -224,47 +213,10 @@ impl RoutingTable {
             return;
         }
 
-        let last_bucket_index = self.buckets.len() - 1;
-        let bucket = &mut self.buckets[last_bucket_index];
+        let index = self.buckets.len() - 1;
+        let last_bucket = &mut self.buckets[index];
 
-        debug_assert!(bucket.live.len() >= Bucket::MAX_LEN);
-
-        let mut new_bucket = Bucket::new();
-
-        let mut i = 0;
-        while i < bucket.live.len() {
-            let bucket_index = bucket.live[i].id.xlz(&self.own_id);
-            if bucket_index == last_bucket_index {
-                i += 1;
-                continue;
-            }
-
-            new_bucket.live.push(bucket.live.remove(i));
-        }
-
-        if bucket.live.len() > Bucket::MAX_LEN {
-            bucket.extra.extend(bucket.live.drain(Bucket::MAX_LEN..));
-        }
-
-        let mut i = 0;
-        while i < bucket.extra.len() {
-            let bucket_index = bucket.extra[i].id.xlz(&self.own_id);
-            if bucket_index == last_bucket_index {
-                if bucket.live.len() >= Bucket::MAX_LEN {
-                    i += 1;
-                    continue;
-                }
-                bucket.live.push(bucket.extra.remove(i));
-            } else {
-                let contact = bucket.extra.remove(i);
-                if new_bucket.live.len() < Bucket::MAX_LEN {
-                    new_bucket.live.push(contact);
-                } else {
-                    new_bucket.extra.push(contact);
-                }
-            }
-        }
-
+        let new_bucket = last_bucket.split(&self.own_id, index);
         self.buckets.push(new_bucket);
     }
 
@@ -273,16 +225,6 @@ impl RoutingTable {
         let last_idx = self.buckets.len().checked_sub(1).unwrap();
         idx.min(last_idx)
     }
-}
-
-fn replace_stale(vec: &mut Vec<Contact>, contact: &ContactRef<'_>) -> bool {
-    if let Some(most_stale) = vec.iter_mut().max_by_key(|c| c.fail_count()) {
-        if most_stale.fail_count() > 0 {
-            *most_stale = contact.as_owned();
-            return true;
-        }
-    }
-    false
 }
 
 #[cfg(test)]

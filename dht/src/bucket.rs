@@ -1,5 +1,13 @@
 use crate::contact::{Contact, ContactRef};
 use std::time::{Duration, Instant};
+use crate::id::NodeId;
+
+#[derive(Debug, PartialEq)]
+pub enum BucketResult {
+    Fail,
+    Success,
+    RequireSplit,
+}
 
 #[derive(Debug)]
 pub struct Bucket {
@@ -39,4 +47,66 @@ impl Bucket {
 
         self.last_updated < Instant::now() - REFRESH_INTERVAL
     }
+
+    pub fn replace_node(&mut self, contact: &Contact) -> BucketResult {
+        debug_assert!(self.live.len() >= Bucket::MAX_LEN);
+
+        if replace_stale(&mut self.live, contact) || replace_stale(&mut self.extra, contact) {
+            self.last_updated = Instant::now();
+            BucketResult::Success
+        } else {
+            BucketResult::RequireSplit
+        }
+    }
+
+    pub fn split(&mut self, own_id: &NodeId, curr_index: usize) -> Bucket {
+        debug_assert!(self.live.len() >= Bucket::MAX_LEN);
+
+        let mut new_bucket = Bucket::new();
+        let mut i = 0;
+        while i < self.live.len() {
+            let bucket_index = self.live[i].id.xlz(own_id);
+            if bucket_index == curr_index {
+                i += 1;
+                continue;
+            }
+
+            new_bucket.live.push(self.live.remove(i));
+        }
+
+        if self.live.len() > Bucket::MAX_LEN {
+            self.extra.extend(self.live.drain(Bucket::MAX_LEN..));
+        }
+
+        let mut i = 0;
+        while i < self.extra.len() {
+            let bucket_index = self.extra[i].id.xlz(own_id);
+            if bucket_index == curr_index {
+                if self.live.len() >= Bucket::MAX_LEN {
+                    i += 1;
+                    continue;
+                }
+                self.live.push(self.extra.remove(i));
+            } else {
+                let contact = self.extra.remove(i);
+                if new_bucket.live.len() < Bucket::MAX_LEN {
+                    new_bucket.live.push(contact);
+                } else {
+                    new_bucket.extra.push(contact);
+                }
+            }
+        }
+
+        new_bucket
+    }
+}
+
+fn replace_stale(vec: &mut Vec<Contact>, contact: &Contact) -> bool {
+    if let Some(most_stale) = vec.iter_mut().max_by_key(|c| c.fail_count()) {
+        if most_stale.fail_count() > 0 {
+            *most_stale = contact.clone();
+            return true;
+        }
+    }
+    false
 }
