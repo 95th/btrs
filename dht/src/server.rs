@@ -1,7 +1,7 @@
 use crate::contact::{CompactNodes, CompactNodesV6, ContactRef};
 use crate::id::NodeId;
 use crate::msg::recv::{ErrorResponse, Msg, Query, Response};
-use crate::table::RoutingTable;
+use crate::table::{Refresh, RoutingTable};
 use rpc::{RpcMgr, Transactions};
 use std::collections::HashSet;
 use std::net::SocketAddr;
@@ -70,9 +70,11 @@ impl Server {
 
         loop {
             // refresh the table
-            if let Some(target) = self.table.pick_refresh_id() {
-                trace!("Bucket refresh target: {:?}", target);
-                self.submit_refresh(&target).await;
+            if let Some(refresh) = self.table.next_refresh() {
+                match &refresh {
+                    Refresh::Single(id, addr) => self.submit_ping(id, addr),
+                    Refresh::Full(id) => self.submit_refresh(id).await,
+                }
             }
 
             // Check if any request from client such as Announce/Shutdown
@@ -110,7 +112,7 @@ impl Server {
         self.running.push(Traversal::Bootstrap(t));
     }
 
-    pub fn submit_single_refresh(&mut self, id: &NodeId, addr: &SocketAddr) {
+    pub fn submit_ping(&mut self, id: &NodeId, addr: &SocketAddr) {
         let t = Box::new(PingTraversal::new(&self.own_id, id, addr));
         self.running.push(Traversal::Ping(t));
     }

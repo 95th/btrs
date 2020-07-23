@@ -34,6 +34,10 @@ impl Bucket {
         Self::default()
     }
 
+    pub fn is_full(&self) -> bool {
+        self.live.len() >= Self::MAX_LEN && self.extra.len() >= Self::MAX_LEN
+    }
+
     pub fn get_contacts<'a>(&'a self, out: &mut Vec<ContactRef<'a>>) {
         self.live
             .iter()
