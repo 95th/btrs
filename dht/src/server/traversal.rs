@@ -8,10 +8,12 @@ use std::net::SocketAddr;
 mod announce;
 mod bootstrap;
 mod get_peers;
+mod ping;
 
 pub use announce::AnnounceTraversal;
 pub use bootstrap::BootstrapTraversal;
 pub use get_peers::GetPeersTraversal;
+pub use ping::PingTraversal;
 
 pub struct TraversalNode {
     id: NodeId,
@@ -43,6 +45,7 @@ pub enum Traversal {
     Bootstrap(Box<BootstrapTraversal>),
     GetPeers(Box<GetPeersTraversal>),
     Announce(Box<AnnounceTraversal>),
+    Ping(Box<PingTraversal>),
 }
 
 impl Traversal {
@@ -51,6 +54,7 @@ impl Traversal {
             Self::Bootstrap(t) => t.prune(table),
             Self::GetPeers(t) => t.prune(table),
             Self::Announce(t) => t.prune(table),
+            Self::Ping(t) => t.prune(table),
         }
     }
 
@@ -68,6 +72,7 @@ impl Traversal {
             Self::Bootstrap(t) => t.handle_reply(resp, addr, table),
             Self::GetPeers(t) => t.handle_reply(resp, addr, table),
             Self::Announce(t) => t.handle_reply(resp, addr, table),
+            Self::Ping(t) => t.handle_reply(resp, addr, table),
         }
     }
 
@@ -76,6 +81,7 @@ impl Traversal {
             Self::Bootstrap(t) => t.invoke(rpc).await,
             Self::GetPeers(t) => t.invoke(rpc).await,
             Self::Announce(t) => t.invoke(rpc).await,
+            Self::Ping(t) => t.invoke(rpc).await,
         }
     }
 
@@ -84,6 +90,7 @@ impl Traversal {
             Self::Bootstrap(t) => t.done(),
             Self::GetPeers(t) => t.done(),
             Self::Announce(t) => t.done(),
+            Self::Ping(t) => t.done(),
         }
     }
 }

@@ -1,17 +1,17 @@
 use crate::contact::{CompactNodes, CompactNodesV6, ContactRef};
 use crate::id::NodeId;
 use crate::msg::recv::{ErrorResponse, Msg, Query, Response};
-use crate::server::rpc::{RpcMgr, Transactions};
-use crate::server::traversal::{
-    AnnounceTraversal, BootstrapTraversal, GetPeersTraversal, Traversal,
-};
-use crate::table::RoutingTable;
+use crate::table::{Refresh, RoutingTable};
+use rpc::{RpcMgr, Transactions};
 use std::collections::HashSet;
 use std::net::SocketAddr;
 use std::time::Duration;
 use tokio::net::UdpSocket;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio::sync::oneshot;
+use traversal::{
+    AnnounceTraversal, BootstrapTraversal, GetPeersTraversal, PingTraversal, Traversal,
+};
 
 mod rpc;
 mod traversal;
@@ -70,9 +70,11 @@ impl Server {
 
         loop {
             // refresh the table
-            if let Some(target) = self.table.pick_refresh_id() {
-                trace!("Bucket refresh target: {:?}", target);
-                self.submit_refresh(&target).await;
+            if let Some(refresh) = self.table.next_refresh() {
+                match &refresh {
+                    Refresh::Single(id, addr) => self.submit_ping(id, addr),
+                    Refresh::Full(id) => self.submit_refresh(id).await,
+                }
             }
 
             // Check if any request from client such as Announce/Shutdown
@@ -108,6 +110,11 @@ impl Server {
         let mut t = Box::new(BootstrapTraversal::new(target, &self.own_id));
         t.start(&mut self.table, &mut self.rpc).await;
         self.running.push(Traversal::Bootstrap(t));
+    }
+
+    fn submit_ping(&mut self, id: &NodeId, addr: &SocketAddr) {
+        let t = Box::new(PingTraversal::new(&self.own_id, id, addr));
+        self.running.push(Traversal::Ping(t));
     }
 
     async fn refresh(&mut self, target: &NodeId) {

@@ -1,6 +1,6 @@
 use crate::contact::{Contact, ContactRef};
-use std::time::{Duration, Instant};
 use crate::id::NodeId;
+use std::time::{Duration, Instant};
 
 #[derive(Debug, PartialEq)]
 pub enum BucketResult {
@@ -32,6 +32,10 @@ impl Bucket {
 
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn is_full(&self) -> bool {
+        self.live.len() >= Self::MAX_LEN && self.extra.len() >= Self::MAX_LEN
     }
 
     pub fn get_contacts<'a>(&'a self, out: &mut Vec<ContactRef<'a>>) {

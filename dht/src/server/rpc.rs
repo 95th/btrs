@@ -122,9 +122,7 @@ impl Transactions {
             }
 
             if request.has_id {
-                if let Some(c) = table.find_contact(&request.id) {
-                    c.timed_out();
-                }
+                table.failed(&request.id);
             }
 
             f(&request.id);

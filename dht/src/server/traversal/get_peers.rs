@@ -99,6 +99,10 @@ impl GetPeersTraversal {
             }
         });
 
+        if let Err(e) = result {
+            warn!("{}", e);
+        }
+
         if let Some(token) = resp.body.get_bytes("token") {
             self.tokens.insert(*addr, token.to_vec());
         }
@@ -125,10 +129,6 @@ impl GetPeersTraversal {
         if let Some(peers) = resp.body.get_list("values") {
             let peers = peers.into_iter().flat_map(decode_peer);
             self.peers.extend(peers);
-        }
-
-        if let Err(e) = result {
-            warn!("{}", e);
         }
 
         let target = &self.info_hash;
