@@ -112,7 +112,7 @@ impl Server {
         self.running.push(Traversal::Bootstrap(t));
     }
 
-    pub fn submit_ping(&mut self, id: &NodeId, addr: &SocketAddr) {
+    fn submit_ping(&mut self, id: &NodeId, addr: &SocketAddr) {
         let t = Box::new(PingTraversal::new(&self.own_id, id, addr));
         self.running.push(Traversal::Ping(t));
     }
