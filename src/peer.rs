@@ -1,4 +1,3 @@
-use crate::bitfield::BitField;
 use rand::distributions::Alphanumeric;
 use rand::Rng;
 use std::convert::TryInto;
@@ -12,7 +11,6 @@ pub type Extensions = [u8; 8];
 #[derive(Clone)]
 pub struct Peer {
     pub addr: SocketAddr,
-    pieces: BitField,
 }
 
 impl fmt::Debug for Peer {
@@ -41,10 +39,7 @@ impl Peer {
 
 impl From<SocketAddr> for Peer {
     fn from(addr: SocketAddr) -> Self {
-        Self {
-            addr,
-            pieces: Default::default(),
-        }
+        Self { addr }
     }
 }
 

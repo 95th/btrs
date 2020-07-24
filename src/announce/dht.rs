@@ -47,7 +47,7 @@ impl DhtTracker {
 
         Ok(peers
             .into_iter()
-            .map(|a| Peer::new(a.ip(), a.port()))
+            .map(|a| a.into())
             .collect())
     }
 
