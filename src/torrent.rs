@@ -55,19 +55,18 @@ impl TorrentFile {
         let mut parser = Parser::new();
         let dict = parser.parse::<Dict>(bytes.as_ref())?;
         let announce = dict.get_str("announce").context("`announce` not found")?;
-        let info_bytes = dict.get("info").context("`info` not found")?.as_raw_bytes();
+        let info = dict.get_dict("info").context("`info` dict not found")?;
+        let info_bytes = info.as_raw_bytes();
         let info_hash = Sha1::from(info_bytes).digest().bytes().into();
 
-        let info_dict = dict.get_dict("info").context("`info` dict not found")?;
-        let length = info_dict.get_int("length").context("`length` not found")?;
-        let name = info_dict.get_str("name").unwrap_or_default();
-        let piece_len = info_dict
+        let length = info.get_int("length").context("`length` not found")?;
+        let name = info.get_str("name").unwrap_or_default();
+        let piece_len = info
             .get_int("piece length")
             .context("`piece length` not found")?;
-        let pieces = info_dict
-            .get("pieces")
-            .context("`pieces` not found")?
-            .as_raw_bytes();
+        let pieces = info
+            .get_bytes("pieces")
+            .context("`pieces` not found")?;
 
         let mut tracker_urls = hashset![announce.to_owned()];
         if let Some(list) = dict.get_list("announce-list") {
