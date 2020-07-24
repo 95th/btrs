@@ -1,4 +1,4 @@
-use crate::announce::Tracker;
+use crate::announce::{DhtTracker, Tracker};
 use crate::avg::SlidingAvg;
 use crate::client::{AsyncStream, Client};
 use crate::future::timeout;
@@ -64,9 +64,7 @@ impl TorrentFile {
         let piece_len = info
             .get_int("piece length")
             .context("`piece length` not found")?;
-        let pieces = info
-            .get_bytes("pieces")
-            .context("`pieces` not found")?;
+        let pieces = info.get_bytes("pieces").context("`pieces` not found")?;
 
         let mut tracker_urls = hashset![announce.to_owned()];
         if let Some(list) = dict.get_list("announce-list") {
@@ -163,9 +161,19 @@ impl TorrentWorker<'_> {
 
         let pending_downloads = FuturesUnordered::new();
         let pending_trackers = FuturesUnordered::new();
+        let pending_dht_trackers = FuturesUnordered::new();
 
         futures::pin_mut!(pending_downloads);
         futures::pin_mut!(pending_trackers);
+        futures::pin_mut!(pending_dht_trackers);
+
+        let mut dht = match DhtTracker::new().await {
+            Ok(d) => Some(d),
+            Err(e) => {
+                warn!("Dht failed to start: {}", e);
+                None
+            }
+        };
 
         // TODO: Make this configurable
         let max_connections = 10;
@@ -177,6 +185,13 @@ impl TorrentWorker<'_> {
                 // No remaining pieces are left and no pending downloads
                 if work.borrow().is_empty() && pending_downloads.is_empty() {
                     break;
+                }
+
+                if let Some(mut dht) = dht.take() {
+                    pending_dht_trackers.push(async move {
+                        let peers = dht.announce(info_hash).await;
+                        (peers, dht)
+                    });
                 }
 
                 // Announce
@@ -238,6 +253,24 @@ impl TorrentWorker<'_> {
                                 all_peers6.retain(|p| !failed.contains(p));
                             }
                             Err(e) => warn!("Announce error: {}", e),
+                        }
+                    }
+                    Poll::Ready(None) => {}
+                    Poll::Pending => tracker_pending = true,
+                }
+
+                match pending_dht_trackers.as_mut().poll_next(cx) {
+                    Poll::Ready(Some((resp, tracker))) => {
+                        match resp {
+                            Ok(peers) => {
+                                dht.replace(tracker);
+                                all_peers.extend(peers);
+
+                                // We don't want to connect failed peers again
+                                all_peers.retain(|p| !failed.contains(p));
+                                all_peers6.retain(|p| !failed.contains(p));
+                            }
+                            Err(e) => warn!("DHT announce error: {}", e),
                         }
                     }
                     Poll::Ready(None) => {}

@@ -65,6 +65,7 @@ impl Server {
     }
 
     pub async fn run(mut self) {
+        debug!("Starting DHT server");
         let target = self.own_id;
         self.refresh(&target).await;
 

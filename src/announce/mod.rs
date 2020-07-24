@@ -5,8 +5,11 @@ use std::collections::HashSet;
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 
+mod dht;
 mod http;
 mod udp;
+
+pub use self::dht::DhtTracker;
 
 const MIN_TRACKER_INTERVAL: u64 = 10;
 

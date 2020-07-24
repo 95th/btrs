@@ -1,4 +1,4 @@
-use crate::announce::Tracker;
+use crate::announce::{DhtTracker, Tracker};
 use crate::client::Client;
 use crate::future::timeout;
 use crate::metainfo::InfoHash;
@@ -113,6 +113,15 @@ impl MagnetUri {
         }
 
         debug!("Got {} v4 peers and {} v6 peers", peers.len(), peers6.len());
+
+        if peers.is_empty() && peers6.is_empty() {
+            if let Ok(mut dht) = DhtTracker::new().await {
+                if let Ok(p) = dht.announce(&self.info_hash).await {
+                    peers.extend(p);
+                }
+                dht.shutdown().await;
+            }
+        }
 
         if peers.is_empty() && peers6.is_empty() {
             bail!("No peers received from trackers");
