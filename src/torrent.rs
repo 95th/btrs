@@ -104,6 +104,7 @@ impl TorrentFile {
             tracker_urls: self.tracker_urls,
             peers: hashset![],
             peers6: hashset![],
+            dht_tracker: None,
         }
     }
 }
@@ -118,6 +119,7 @@ pub struct Torrent {
     pub tracker_urls: HashSet<String>,
     pub peers: HashSet<Peer>,
     pub peers6: HashSet<Peer>,
+    pub dht_tracker: Option<DhtTracker>,
 }
 
 impl Torrent {
@@ -133,6 +135,7 @@ pub struct TorrentWorker<'a> {
     trackers: VecDeque<Tracker<'a>>,
     peers: &'a mut HashSet<Peer>,
     peers6: &'a mut HashSet<Peer>,
+    dht_tracker: Option<&'a mut DhtTracker>,
 }
 
 impl<'a> TorrentWorker<'a> {
@@ -153,6 +156,7 @@ impl<'a> TorrentWorker<'a> {
             peers6: &mut torrent.peers6,
             work,
             trackers,
+            dht_tracker: torrent.dht_tracker.as_mut(),
         }
     }
 
@@ -168,6 +172,21 @@ impl<'a> TorrentWorker<'a> {
         let all_peers6 = &mut *self.peers6;
         let trackers = &mut self.trackers;
 
+        let mut new_dht;
+        let mut dht = match &mut self.dht_tracker {
+            Some(dht) => Some(&mut **dht),
+            None => match DhtTracker::new().await {
+                Ok(d) => {
+                    new_dht = Some(d);
+                    new_dht.as_mut()
+                }
+                Err(e) => {
+                    warn!("Dht failed to start: {}", e);
+                    None
+                }
+            },
+        };
+
         let pending_downloads = FuturesUnordered::new();
         let pending_trackers = FuturesUnordered::new();
         let pending_dht_trackers = FuturesUnordered::new();
@@ -175,14 +194,6 @@ impl<'a> TorrentWorker<'a> {
         futures::pin_mut!(pending_downloads);
         futures::pin_mut!(pending_trackers);
         futures::pin_mut!(pending_dht_trackers);
-
-        let mut dht = match DhtTracker::new().await {
-            Ok(d) => Some(d),
-            Err(e) => {
-                warn!("Dht failed to start: {}", e);
-                None
-            }
-        };
 
         // TODO: Make this configurable
         let max_connections = 10;
@@ -196,7 +207,7 @@ impl<'a> TorrentWorker<'a> {
                     break;
                 }
 
-                if let Some(mut dht) = dht.take() {
+                if let Some(dht) = dht.take() {
                     pending_dht_trackers.push(async move {
                         let peers = dht.announce(info_hash).await;
                         (peers, dht)

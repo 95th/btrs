@@ -39,7 +39,7 @@ impl MagnetUri {
     }
 
     pub async fn request_metadata(&self, peer_id: Box<PeerId>) -> crate::Result<Torrent> {
-        let (peers, peers6) = self.get_peers(&peer_id).await?;
+        let (peers, peers6, dht_tracker) = self.get_peers(&peer_id).await?;
 
         let mut iter = peers.iter().chain(&peers6);
         let mut futures = FuturesUnordered::new();
@@ -70,6 +70,7 @@ impl MagnetUri {
                                 tracker_urls: self.tracker_urls.clone(),
                                 peers,
                                 peers6,
+                                dht_tracker,
                             });
                         }
                     }
@@ -101,7 +102,10 @@ impl MagnetUri {
         })
     }
 
-    async fn get_peers(&self, peer_id: &PeerId) -> crate::Result<(HashSet<Peer>, HashSet<Peer>)> {
+    async fn get_peers(
+        &self,
+        peer_id: &PeerId,
+    ) -> crate::Result<(HashSet<Peer>, HashSet<Peer>, Option<DhtTracker>)> {
         debug!("Requesting peers");
 
         let mut futs: FuturesUnordered<_> = self
@@ -128,12 +132,13 @@ impl MagnetUri {
 
         debug!("Got {} v4 peers and {} v6 peers", peers.len(), peers6.len());
 
+        let mut dht_tracker = None;
         if peers.is_empty() && peers6.is_empty() {
             if let Ok(mut dht) = DhtTracker::new().await {
                 if let Ok(p) = dht.announce(&self.info_hash).await {
                     peers.extend(p);
                 }
-                dht.shutdown().await;
+                dht_tracker = Some(dht);
                 debug!(
                     "Got {} v4 peers and {} v6 peers from DHT",
                     peers.len(),
@@ -146,7 +151,7 @@ impl MagnetUri {
             bail!("No peers received from trackers");
         }
 
-        Ok((peers, peers6))
+        Ok((peers, peers6, dht_tracker))
     }
 
     async fn try_get(&self, peer: &Peer, peer_id: &PeerId) -> crate::Result<Vec<u8>> {

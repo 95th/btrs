@@ -45,10 +45,7 @@ impl DhtTracker {
             peers.len()
         );
 
-        Ok(peers
-            .into_iter()
-            .map(|a| a.into())
-            .collect())
+        Ok(peers.into_iter().map(|a| a.into()).collect())
     }
 
     pub async fn shutdown(&mut self) {
