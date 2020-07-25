@@ -102,6 +102,8 @@ impl TorrentFile {
             length: self.length,
             name: self.name,
             tracker_urls: self.tracker_urls,
+            peers: hashset![],
+            peers6: hashset![],
         }
     }
 }
@@ -114,49 +116,56 @@ pub struct Torrent {
     pub length: usize,
     pub name: String,
     pub tracker_urls: HashSet<String>,
+    pub peers: HashSet<Peer>,
+    pub peers6: HashSet<Peer>,
 }
 
 impl Torrent {
-    pub fn piece_iter(&self) -> PieceIter<'_> {
-        PieceIter::new(self)
+    pub fn worker(&mut self) -> TorrentWorker<'_> {
+        TorrentWorker::new(self)
     }
+}
 
-    pub fn worker(&self) -> TorrentWorker<'_> {
-        let trackers = self
+pub struct TorrentWorker<'a> {
+    peer_id: &'a PeerId,
+    info_hash: &'a InfoHash,
+    work: WorkQueue<'a>,
+    trackers: VecDeque<Tracker<'a>>,
+    peers: &'a mut HashSet<Peer>,
+    peers6: &'a mut HashSet<Peer>,
+}
+
+impl<'a> TorrentWorker<'a> {
+    pub fn new(torrent: &'a mut Torrent) -> Self {
+        let trackers = torrent
             .tracker_urls
             .iter()
             .map(|url| Tracker::new(url))
             .collect();
 
-        TorrentWorker {
-            torrent: self,
-            work: WorkQueue::new(self.piece_iter().collect()),
-            peers: hashset![],
-            peers6: hashset![],
+        let piece_iter = PieceIter::new(&torrent.piece_hashes, torrent.piece_len, torrent.length);
+        let work = WorkQueue::new(piece_iter.collect());
+
+        Self {
+            peer_id: &torrent.peer_id,
+            info_hash: &torrent.info_hash,
+            peers: &mut torrent.peers,
+            peers6: &mut torrent.peers6,
+            work,
             trackers,
         }
     }
-}
 
-pub struct TorrentWorker<'a> {
-    torrent: &'a Torrent,
-    work: WorkQueue<'a>,
-    peers: HashSet<Peer>,
-    peers6: HashSet<Peer>,
-    trackers: VecDeque<Tracker<'a>>,
-}
-
-impl TorrentWorker<'_> {
     pub fn num_pieces(&self) -> usize {
         self.work.borrow().len()
     }
 
     pub async fn run_worker(&mut self, piece_tx: Sender<Piece>) {
         let work = &self.work;
-        let info_hash = &self.torrent.info_hash;
-        let peer_id = &self.torrent.peer_id;
-        let all_peers = &mut self.peers;
-        let all_peers6 = &mut self.peers6;
+        let info_hash = &*self.info_hash;
+        let peer_id = &*self.peer_id;
+        let all_peers = &mut *self.peers;
+        let all_peers6 = &mut *self.peers6;
         let trackers = &mut self.trackers;
 
         let pending_downloads = FuturesUnordered::new();
@@ -539,17 +548,21 @@ impl<'w, 'p, C: AsyncStream> Download<'w, 'p, C> {
 }
 
 pub struct PieceIter<'a> {
-    torrent: &'a Torrent,
+    piece_hashes: &'a [u8],
+    piece_len: usize,
+    length: usize,
     index: u32,
     count: u32,
 }
 
-impl PieceIter<'_> {
-    fn new(torrent: &Torrent) -> PieceIter {
-        PieceIter {
-            torrent,
+impl<'a> PieceIter<'a> {
+    fn new(piece_hashes: &'a [u8], piece_len: usize, length: usize) -> Self {
+        Self {
+            piece_hashes,
+            piece_len,
+            length,
             index: 0,
-            count: (torrent.piece_hashes.len() / 20) as u32,
+            count: (piece_hashes.len() / 20) as u32,
         }
     }
 }
@@ -562,15 +575,15 @@ impl<'a> Iterator for PieceIter<'a> {
             return None;
         }
 
-        let hash = &self.torrent.piece_hashes[self.index as usize * HASH_LEN..][..HASH_LEN];
+        let hash = &self.piece_hashes[self.index as usize * HASH_LEN..][..HASH_LEN];
 
-        let piece_len = self.torrent.piece_len as u32;
+        let piece_len = self.piece_len as u32;
         let start = self.index * piece_len;
         let end = start + piece_len;
 
         let piece = PieceWork {
             index: self.index,
-            len: end.min(self.torrent.length as u32) - start,
+            len: end.min(self.length as u32) - start,
             hash,
         };
 

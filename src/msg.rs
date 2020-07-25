@@ -275,9 +275,11 @@ mod msg_type {
 impl<'a, 'p> ExtendedMessage<'a, 'p> {
     pub fn new(data: &'a [u8], parser: &'p mut Parser) -> crate::Result<Self> {
         let id = data[0];
-        let (value, i) = parser.parse_prefix(&data[1..])?;
+        let (value, i) = parser.parse_prefix::<Decoder>(&data[1..])?;
+        debug!("ext header len: {}", value.as_raw_bytes().len());
 
         let rest = &data[i + 1..];
+        debug!("ext data len: {}", rest.len());
         Ok(ExtendedMessage { id, value, rest })
     }
 
@@ -372,6 +374,16 @@ mod tests {
         assert!(ext.value.is_dict());
         assert_eq!(b"de", ext.value.as_raw_bytes());
         assert_eq!(&[1, 2, 3, 4], ext.rest);
+    }
+
+    #[test]
+    fn extended_new_2() {
+        let mut parser = Parser::new();
+        let ext = ExtendedMessage::new(&[0, b'd', b'e'], &mut parser).unwrap();
+        assert_eq!(0, ext.id);
+        assert!(ext.value.is_dict());
+        assert_eq!(b"de", ext.value.as_raw_bytes());
+        assert!(ext.rest.is_empty());
     }
 
     #[tokio::test]

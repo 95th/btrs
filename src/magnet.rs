@@ -41,40 +41,54 @@ impl MagnetUri {
     pub async fn request_metadata(&self, peer_id: Box<PeerId>) -> crate::Result<Torrent> {
         let (peers, peers6) = self.get_peers(&peer_id).await?;
 
-        let mut futs: FuturesUnordered<_> = peers
-            .iter()
-            .chain(peers6.iter())
-            .map(|peer| self.try_get(peer, &peer_id))
-            .map(|fut| timeout(fut, 10))
-            .collect();
-
-        while let Some(result) = futs.next().await {
-            match result {
-                Ok(data) => {
-                    if let Some(t) = self.read_info(&data) {
-                        drop(futs);
-                        trace!("Metadata requested successfully");
-                        return Ok(Torrent {
-                            peer_id,
-                            info_hash: self.info_hash.clone(),
-                            piece_len: t.piece_len,
-                            length: t.length,
-                            piece_hashes: t.piece_hashes,
-                            name: t.name,
-                            tracker_urls: self.tracker_urls.clone(),
-                        });
-                    }
+        let mut iter = peers.iter().chain(&peers6);
+        let mut futures = FuturesUnordered::new();
+        loop {
+            while futures.len() < 2 {
+                if let Some(peer) = iter.next() {
+                    futures.push(timeout(self.try_get(peer, &peer_id), 60));
+                } else {
+                    break;
                 }
-                Err(e) => debug!("Error : {}", e),
+            }
+
+            ensure!(!futures.is_empty(), "Metadata request failed");
+
+            if let Some(result) = futures.next().await {
+                match result {
+                    Ok(data) => {
+                        if let Some(t) = self.read_info(&data) {
+                            drop(futures);
+                            trace!("Metadata requested successfully");
+                            return Ok(Torrent {
+                                peer_id,
+                                info_hash: self.info_hash.clone(),
+                                piece_len: t.piece_len,
+                                length: t.length,
+                                piece_hashes: t.piece_hashes,
+                                name: t.name,
+                                tracker_urls: self.tracker_urls.clone(),
+                                peers,
+                                peers6,
+                            });
+                        }
+                    }
+                    Err(e) => debug!("Error : {}", e),
+                }
             }
         }
-
-        bail!("Metadata request failed");
     }
 
     fn read_info(&self, data: &[u8]) -> Option<TorrentInfo> {
+        trace!("Read torrent info, len: {}", data.len());
         let mut parser = Parser::new();
-        let info_dict = parser.parse::<Dict>(&data).ok()?;
+        let info_dict = match parser.parse::<Dict>(data) {
+            Ok(d) => d,
+            Err(e) => {
+                warn!("{}", e);
+                return None;
+            }
+        };
         let length = info_dict.get_int("length")? as usize;
         let name = info_dict.get_str("name").unwrap_or_default().to_string();
         let piece_len = info_dict.get_int("piece length")? as usize;
@@ -87,7 +101,7 @@ impl MagnetUri {
         })
     }
 
-    async fn get_peers(&self, peer_id: &PeerId) -> crate::Result<(Vec<Peer>, Vec<Peer>)> {
+    async fn get_peers(&self, peer_id: &PeerId) -> crate::Result<(HashSet<Peer>, HashSet<Peer>)> {
         debug!("Requesting peers");
 
         let mut futs: FuturesUnordered<_> = self
@@ -99,8 +113,8 @@ impl MagnetUri {
             })
             .collect();
 
-        let mut peers = vec![];
-        let mut peers6 = vec![];
+        let mut peers = hashset![];
+        let mut peers6 = hashset![];
 
         while let Some(r) = futs.next().await {
             match r {
@@ -120,6 +134,11 @@ impl MagnetUri {
                     peers.extend(p);
                 }
                 dht.shutdown().await;
+                debug!(
+                    "Got {} v4 peers and {} v6 peers from DHT",
+                    peers.len(),
+                    peers6.len()
+                );
             }
         }
 
@@ -131,7 +150,7 @@ impl MagnetUri {
     }
 
     async fn try_get(&self, peer: &Peer, peer_id: &PeerId) -> crate::Result<Vec<u8>> {
-        let mut client = Client::new_tcp(peer.addr).await?;
+        let mut client = timeout(Client::new_tcp(peer.addr), 3).await?;
         client.handshake(&self.info_hash, peer_id).await?;
         client.conn.flush().await?;
 
