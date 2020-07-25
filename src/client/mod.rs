@@ -332,7 +332,7 @@ mod tests {
             .await
             .unwrap();
         let expected = b"d1:md11:ut_metadatai1ee1:pi6881e4:reqqi500ee";
-        assert_eq!(&expected[..], ext.node().as_raw_bytes());
+        assert_eq!(&expected[..], ext.body().as_raw_bytes());
     }
 
     #[tokio::test]
@@ -363,7 +363,7 @@ mod tests {
             .unwrap();
         assert_eq!(1, ext_msg.id);
 
-        let list = ext_msg.node().as_list().unwrap();
+        let list = ext_msg.body().as_list().unwrap();
         assert_eq!(
             vec![1, 2, 3],
             list.iter()

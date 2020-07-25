@@ -252,7 +252,7 @@ impl Message {
                 buf.clear();
                 buf.resize(len as usize, 0);
                 rdr.read_exact(buf).await?;
-                let msg = ExtendedMessage::new(buf, parser)?;
+                let msg = ExtendedMessage::parse(buf, parser)?;
                 Ok(msg)
             }
             _ => bail!("Not an Extended message"),
@@ -273,21 +273,21 @@ mod msg_type {
 }
 
 impl<'a, 'p> ExtendedMessage<'a, 'p> {
-    pub fn new(data: &'a [u8], parser: &'p mut Parser) -> crate::Result<Self> {
+    pub fn parse(data: &'a [u8], parser: &'p mut Parser) -> crate::Result<Self> {
         let id = data[0];
         let (value, i) = parser.parse_prefix::<Decoder>(&data[1..])?;
         debug!("ext header len: {}", value.as_raw_bytes().len());
 
         let rest = &data[i + 1..];
         debug!("ext data len: {}", rest.len());
-        Ok(ExtendedMessage { id, value, rest })
+        Ok(Self { id, value, rest })
     }
 
     pub fn is_handshake(&self) -> bool {
         self.id == 0
     }
 
-    pub fn node(&self) -> &Decoder<'_, '_> {
+    pub fn body(&self) -> &Decoder<'_, '_> {
         &self.value
     }
 
@@ -369,7 +369,7 @@ mod tests {
     #[test]
     fn extended_new() {
         let mut parser = Parser::new();
-        let ext = ExtendedMessage::new(&[0, b'd', b'e', 1, 2, 3, 4], &mut parser).unwrap();
+        let ext = ExtendedMessage::parse(&[0, b'd', b'e', 1, 2, 3, 4], &mut parser).unwrap();
         assert_eq!(0, ext.id);
         assert!(ext.value.is_dict());
         assert_eq!(b"de", ext.value.as_raw_bytes());
@@ -379,7 +379,7 @@ mod tests {
     #[test]
     fn extended_new_2() {
         let mut parser = Parser::new();
-        let ext = ExtendedMessage::new(&[0, b'd', b'e'], &mut parser).unwrap();
+        let ext = ExtendedMessage::parse(&[0, b'd', b'e'], &mut parser).unwrap();
         assert_eq!(0, ext.id);
         assert!(ext.value.is_dict());
         assert_eq!(b"de", ext.value.as_raw_bytes());
