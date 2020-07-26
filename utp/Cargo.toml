@@ -1,0 +1,23 @@
+[package]
+authors = ["Ricardo Martins <ricardo@scarybox.net>", "Gurwinder Singh <vargwin@gmail.com>"]
+description = "A µTP (Micro/uTorrent Transport Library) library implemented in Rust"
+keywords = ["utp", "networking", "protocol", "transport"]
+license = "MIT/Apache-2.0"
+name = "utp"
+readme = "README.md"
+version = "0.1.0"
+edition = "2018"
+
+[dependencies]
+env_logger = "0.7.1"
+log = "0.4.11"
+num-traits = "0.2.12"
+rand = "0.7.3"
+tokio = { version = "0.2.22", features = ["full"] }
+futures = "0.3.5"
+
+[dev-dependencies]
+quickcheck = "0.9.2"
+
+[features]
+unstable = []
