@@ -71,7 +71,7 @@ async fn take_address<A: ToSocketAddrs>(addr: A) -> Result<SocketAddr> {
 /// ```no_run
 /// # async fn dox() {
 /// use utp::UtpSocket;
-/// 
+///
 /// let mut socket = UtpSocket::bind("127.0.0.1:1234").await.expect("Error binding socket");
 ///
 /// let mut buf = [0; 1000];
@@ -340,24 +340,23 @@ impl UtpSocket {
 
         if read > 0 {
             return Ok((read, self.connected_to));
-        } else {
-            // If the socket received a reset packet and all data has been flushed, then it can't
-            // receive anything else
-            if self.state == SocketState::ResetReceived {
-                return Err(SocketError::ConnectionReset.into());
+        }
+
+        // If the socket received a reset packet and all data has been flushed, then it can't
+        // receive anything else
+        if self.state == SocketState::ResetReceived {
+            return Err(SocketError::ConnectionReset.into());
+        }
+
+        loop {
+            // A closed socket with no pending data can only "read" 0 new bytes.
+            if self.state == SocketState::Closed {
+                return Ok((0, self.connected_to));
             }
 
-            loop {
-                // A closed socket with no pending data can only "read" 0 new bytes.
-                if self.state == SocketState::Closed {
-                    return Ok((0, self.connected_to));
-                }
-
-                match self.recv(buf).await {
-                    Ok((0, _src)) => continue,
-                    Ok(x) => return Ok(x),
-                    Err(e) => return Err(e),
-                }
+            match self.recv(buf).await {
+                Ok((0, _src)) => continue,
+                x => return x,
             }
         }
     }
@@ -376,13 +375,7 @@ impl UtpSocket {
                 return Err(SocketError::ConnectionTimedOut.into());
             }
 
-            let timeout = if self.state != SocketState::New {
-                debug!("setting read timeout of {} ms", self.congestion_timeout);
-                Duration::from_millis(self.congestion_timeout)
-            } else {
-                Duration::from_secs(10000)
-            };
-
+            let timeout = Duration::from_millis(self.congestion_timeout);
             match tokio::time::timeout(timeout, self.socket.recv_from(&mut b)).await {
                 Ok(result) => {
                     let (r, s) = result?;
@@ -396,8 +389,7 @@ impl UtpSocket {
                 }
             }
 
-            let elapsed = start.elapsed();
-            let elapsed_ms = elapsed.as_secs() * 1000 + (elapsed.subsec_nanos() / 1000_000) as u64;
+            let elapsed_ms = start.elapsed().as_millis();
             debug!("{} ms elapsed", elapsed_ms);
             retries += 1;
         }
