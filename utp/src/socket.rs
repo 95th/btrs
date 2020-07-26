@@ -139,6 +139,9 @@ pub struct UtpSocket {
     /// Data from the latest packet not yet returned in `recv_from`
     pending_data: Vec<u8>,
 
+    /// Position in `pending_data` field
+    pending_data_pos: usize,
+
     /// Bytes in flight
     curr_window: u32,
 
@@ -192,6 +195,7 @@ impl UtpSocket {
             rtt: 0,
             rtt_variance: 0,
             pending_data: Vec::new(),
+            pending_data_pos: 0,
             curr_window: 0,
             remote_wnd_size: 0,
             current_delays: Vec::new(),
@@ -528,14 +532,15 @@ impl UtpSocket {
         }
 
         // Return pending data from a partially read packet
-        if !self.pending_data.is_empty() {
-            let flushed = unsafe_copy(&self.pending_data[..], buf);
+        if self.pending_data_pos < self.pending_data.len() {
+            let flushed = unsafe_copy(&self.pending_data[self.pending_data_pos..], buf);
 
-            if flushed == self.pending_data.len() {
+            if flushed < self.pending_data.len() - self.pending_data_pos {
+                self.pending_data_pos += flushed;
+            } else {
+                self.pending_data_pos = 0;
                 self.pending_data.clear();
                 self.advance_incoming_buffer();
-            } else {
-                self.pending_data = self.pending_data[flushed..].to_vec();
             }
 
             return flushed;
@@ -545,12 +550,15 @@ impl UtpSocket {
             && (self.ack_nr == self.incoming_buffer[0].seq_nr()
                 || self.ack_nr + 1 == self.incoming_buffer[0].seq_nr())
         {
-            let flushed = unsafe_copy(&self.incoming_buffer[0].payload()[..], buf);
+            let payload = self.incoming_buffer[0].payload();
+            let flushed = unsafe_copy(payload, buf);
 
-            if flushed == self.incoming_buffer[0].payload().len() {
-                self.advance_incoming_buffer();
+            if flushed < payload.len() {
+                self.pending_data_pos = 0;
+                self.pending_data.clear();
+                self.pending_data.extend_from_slice(&payload[flushed..]);
             } else {
-                self.pending_data = self.incoming_buffer[0].payload()[flushed..].to_vec();
+                self.advance_incoming_buffer();
             }
 
             return flushed;
