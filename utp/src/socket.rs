@@ -4,6 +4,7 @@ use crate::time::*;
 use crate::util::*;
 use std::cmp::{max, min};
 use std::collections::VecDeque;
+use std::convert::TryFrom;
 use std::io::Result;
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
@@ -1242,7 +1243,7 @@ impl Incoming<'_> {
 #[cfg(test)]
 mod test {
     use crate::packet::*;
-    use crate::socket::{take_address, SocketState, UtpListener, UtpSocket, BUF_SIZE};
+    use crate::socket::*;
     use crate::time::now_microseconds;
     use std::io::ErrorKind;
     use std::net::ToSocketAddrs;

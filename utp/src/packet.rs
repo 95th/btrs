@@ -3,6 +3,7 @@
 use crate::bit_iterator::BitIterator;
 use crate::error::ParseError;
 use crate::time::{Delay, Timestamp};
+use std::convert::TryFrom;
 use std::fmt;
 
 pub const HEADER_SIZE: usize = 20;
@@ -31,14 +32,6 @@ macro_rules! make_setter {
     };
 }
 
-/// Attempt to construct `Self` through conversion.
-///
-/// Waiting for rust-lang/rust#33417 to become stable.
-pub trait TryFrom<T>: Sized {
-    type Err;
-    fn try_from(_: T) -> Result<Self, Self::Err>;
-}
-
 #[derive(PartialEq, Eq, Debug)]
 pub enum PacketType {
     Data,  // packet carries a data payload
@@ -49,8 +42,9 @@ pub enum PacketType {
 }
 
 impl TryFrom<u8> for PacketType {
-    type Err = ParseError;
-    fn try_from(original: u8) -> Result<Self, Self::Err> {
+    type Error = ParseError;
+
+    fn try_from(original: u8) -> Result<Self, Self::Error> {
         match original {
             0 => Ok(PacketType::Data),
             1 => Ok(PacketType::Fin),
@@ -164,12 +158,13 @@ impl AsRef<[u8]> for PacketHeader {
     }
 }
 
-impl<'a> TryFrom<&'a [u8]> for PacketHeader {
-    type Err = ParseError;
+impl TryFrom<&[u8]> for PacketHeader {
+    type Error = ParseError;
+
     /// Reads a byte buffer and returns the corresponding packet header.
     /// It assumes the fields are in network (big-endian) byte order,
     /// preserving it.
-    fn try_from(buf: &[u8]) -> Result<Self, Self::Err> {
+    fn try_from(buf: &[u8]) -> Result<Self, Self::Error> {
         // Check length
         if buf.len() < HEADER_SIZE {
             return Err(ParseError::InvalidPacketLength);
@@ -372,15 +367,15 @@ impl Packet {
     }
 }
 
-impl<'a> TryFrom<&'a [u8]> for Packet {
-    type Err = ParseError;
+impl TryFrom<&[u8]> for Packet {
+    type Error = ParseError;
 
     /// Decodes a byte slice and construct the equivalent Packet.
     ///
     /// Note that this method makes no attempt to guess the payload size, saving
     /// all except the initial 20 bytes corresponding to the header as payload.
     /// It's the caller's responsibility to use an appropriately sized buffer.
-    fn try_from(buf: &[u8]) -> Result<Self, Self::Err> {
+    fn try_from(buf: &[u8]) -> Result<Self, Self::Error> {
         PacketHeader::try_from(buf)
             .and(check_extensions(buf))
             .and(Ok(Packet(buf.to_owned())))
@@ -503,11 +498,11 @@ mod tests {
 
     #[test]
     fn test_packet_decode() {
-        let buf = [
+        let buf: &[u8] = &[
             0x21, 0x00, 0x41, 0xa8, 0x99, 0x2f, 0xd0, 0x2a, 0x9f, 0x4a, 0x26, 0x21, 0x00, 0x10,
             0x00, 0x00, 0x3a, 0xf2, 0x6c, 0x79,
         ];
-        let packet = Packet::try_from(&buf);
+        let packet = Packet::try_from(buf);
         assert!(packet.is_ok());
         let packet = packet.unwrap();
         assert_eq!(packet.get_version(), 1);
@@ -525,11 +520,11 @@ mod tests {
 
     #[test]
     fn test_decode_packet_with_extension() {
-        let buf = [
+        let buf: &[u8] = &[
             0x21, 0x01, 0x41, 0xa7, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
             0x05, 0xdc, 0xab, 0x53, 0x3a, 0xf5, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00,
         ];
-        let packet = Packet::try_from(&buf);
+        let packet = Packet::try_from(buf);
         assert!(packet.is_ok());
         let packet = packet.unwrap();
         assert_eq!(packet.get_version(), 1);
@@ -550,38 +545,38 @@ mod tests {
         assert_eq!(extensions[0].len(), extensions[0].data.len());
         assert_eq!(extensions[0].len(), 4);
         // Reversible
-        assert_eq!(packet.as_ref(), &buf);
+        assert_eq!(packet.as_ref(), buf);
     }
 
     #[test]
     fn test_packet_decode_with_missing_extension() {
-        let buf = [
+        let buf: &[u8] = &[
             0x21, 0x01, 0x41, 0xa8, 0x99, 0x2f, 0xd0, 0x2a, 0x9f, 0x4a, 0x26, 0x21, 0x00, 0x10,
             0x00, 0x00, 0x3a, 0xf2, 0x6c, 0x79,
         ];
-        let packet = Packet::try_from(&buf);
+        let packet = Packet::try_from(buf);
         assert!(packet.is_err());
     }
 
     #[test]
     fn test_packet_decode_with_malformed_extension() {
-        let buf = [
+        let buf: &[u8] = &[
             0x21, 0x01, 0x41, 0xa8, 0x99, 0x2f, 0xd0, 0x2a, 0x9f, 0x4a, 0x26, 0x21, 0x00, 0x10,
             0x00, 0x00, 0x3a, 0xf2, 0x6c, 0x79, 0x00, 0x04, 0x00,
         ];
-        let packet = Packet::try_from(&buf);
+        let packet = Packet::try_from(buf);
         assert!(packet.is_err());
     }
 
     #[test]
     fn test_decode_packet_with_unknown_extensions() {
-        let buf = [
+        let buf: &[u8] = &[
             0x21, 0x01, 0x41, 0xa7, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
             0x05, 0xdc, 0xab, 0x53, 0x3a, 0xf5, 0xff, 0x04, 0x00, 0x00, 0x00,
             0x00, // Imaginary extension
             0x00, 0x04, 0x00, 0x00, 0x00, 0x00,
         ];
-        match Packet::try_from(&buf) {
+        match Packet::try_from(buf) {
             Ok(packet) => {
                 assert_eq!(packet.get_version(), 1);
                 assert_eq!(packet.get_extension_type(), ExtensionType::SelectiveAck);
@@ -720,25 +715,25 @@ mod tests {
 
     #[test]
     fn test_reversible() {
-        let buf = [
+        let buf: &[u8] = &[
             0x01, 0x00, 0x41, 0xa8, 0x00, 0xe9, 0x03, 0x89, 0x65, 0xbf, 0x5d, 0xba, 0x00, 0x10,
             0x00, 0x00, 0x3a, 0xf2, 0x42, 0xc8, 0x48, 0x65, 0x6c, 0x6c, 0x6f, 0x0a,
         ];
-        assert_eq!(&Packet::try_from(&buf).unwrap().as_ref(), &buf);
+        assert_eq!(&Packet::try_from(buf).unwrap().as_ref(), &buf);
     }
 
     #[test]
     fn test_decode_evil_sequence() {
-        let buf = [
+        let buf: &[u8] = &[
             0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         ];
-        let packet = Packet::try_from(&buf);
+        let packet = Packet::try_from(buf);
         assert!(packet.is_err());
     }
 
     #[test]
     fn test_decode_empty_packet() {
-        let packet = Packet::try_from(&[]);
+        let packet = Packet::try_from(&[] as &[u8]);
         assert!(packet.is_err());
     }
 
@@ -746,10 +741,10 @@ mod tests {
     #[test]
     fn quicktest() {
         fn run(x: Vec<u8>) -> TestResult {
-            let packet = Packet::try_from(&x);
+            let packet = Packet::try_from(&x[..]);
 
-            if PacketHeader::try_from(&x)
-                .and(check_extensions(&x))
+            if PacketHeader::try_from(&x[..])
+                .and(check_extensions(&x[..]))
                 .is_err()
             {
                 TestResult::from_bool(packet.is_err())
@@ -766,18 +761,18 @@ mod tests {
 
     #[test]
     fn extension_iterator() {
-        let buf = [
+        let buf: &[u8] = &[
             0x21, 0x00, 0x41, 0xa8, 0x99, 0x2f, 0xd0, 0x2a, 0x9f, 0x4a, 0x26, 0x21, 0x00, 0x10,
             0x00, 0x00, 0x3a, 0xf2, 0x6c, 0x79,
         ];
-        let packet = Packet::try_from(&buf).unwrap();
+        let packet = Packet::try_from(buf).unwrap();
         assert_eq!(packet.extensions().count(), 0);
 
-        let buf = [
+        let buf: &[u8] = &[
             0x21, 0x01, 0x41, 0xa7, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
             0x05, 0xdc, 0xab, 0x53, 0x3a, 0xf5, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00,
         ];
-        let packet = Packet::try_from(&buf).unwrap();
+        let packet = Packet::try_from(buf).unwrap();
         let extensions: Vec<Extension<'_>> = packet.extensions().collect();
         assert_eq!(extensions.len(), 1);
         assert_eq!(extensions[0].ty, ExtensionType::SelectiveAck);
@@ -785,14 +780,14 @@ mod tests {
         assert_eq!(extensions[0].len(), extensions[0].data.len());
         assert_eq!(extensions[0].len(), 4);
 
-        let buf = [
+        let buf: &[u8] = &[
             0x21, 0x01, 0x41, 0xa7, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
             0x05, 0xdc, 0xab, 0x53, 0x3a, 0xf5, 0xff, 0x04, 0x01, 0x02, 0x03,
             0x04, // Imaginary extension
             0x00, 0x04, 0x05, 0x06, 0x07, 0x08,
         ];
 
-        let packet = Packet::try_from(&buf).unwrap();
+        let packet = Packet::try_from(buf).unwrap();
         let extensions: Vec<Extension<'_>> = packet.extensions().collect();
         assert_eq!(extensions.len(), 2);
         assert_eq!(extensions[0].ty, ExtensionType::SelectiveAck);
