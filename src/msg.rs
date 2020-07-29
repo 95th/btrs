@@ -337,7 +337,7 @@ impl Encode for MetadataMsg {
         match *self {
             MetadataMsg::Handshake(id) => {
                 let mut m = dict.add_dict("m");
-                m.add("ut_metadata", id as i64);
+                m.add("ut_metadata", i64::from(id));
                 m.finish();
 
                 dict.add("p", 6881);

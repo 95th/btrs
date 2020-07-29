@@ -277,7 +277,7 @@ impl<'a, 'p> Decoder<'a, 'p> {
             if c == b'-' {
                 negative = true;
             } else {
-                let digit = (c - b'0') as i64;
+                let digit = i64::from(c - b'0');
                 val = (val * 10) + digit;
             }
         }

@@ -85,7 +85,7 @@ impl Encode for AnnouncePeer<'_> {
         a.add("info_hash", self.info_hash);
 
         if !self.implied_port {
-            a.add("port", self.port as i64);
+            a.add("port", i64::from(self.port));
         }
 
         a.add("token", self.token);

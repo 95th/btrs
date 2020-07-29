@@ -293,7 +293,7 @@ impl UtpSocket {
 
         debug!("connected to: {}", socket.connected_to);
 
-        return Ok(socket);
+        Ok(socket)
     }
 
     /// Gracefully closes connection to peer.
@@ -528,7 +528,7 @@ impl UtpSocket {
                 use std::ptr::copy;
                 copy(src.as_ptr(), dst.as_mut_ptr(), max_len);
             }
-            return max_len;
+            max_len
         }
 
         // Return pending data from a partially read packet
@@ -564,7 +564,7 @@ impl UtpSocket {
             return flushed;
         }
 
-        return 0;
+        0
     }
 
     /// Sends data on the socket to the remote peer. On success, returns the number of bytes
@@ -698,7 +698,7 @@ impl UtpSocket {
     /// specified in RFC6817.
     fn update_current_delay(&mut self, v: Delay, now: Timestamp) {
         // Remove samples more than one RTT old
-        let rtt = (self.rtt as i64 * 100).into();
+        let rtt = (i64::from(self.rtt) * 100).into();
         while !self.current_delays.is_empty() && now - self.current_delays[0].received_at > rtt {
             self.current_delays.remove(0);
         }
@@ -762,7 +762,7 @@ impl UtpSocket {
             sack[byte] |= 1 << bit;
         }
 
-        return sack;
+        sack
     }
 
     /// Sends a fast resend request to the remote peer.
@@ -970,7 +970,7 @@ impl UtpSocket {
         debug!("min_base_delay: {}", min_base_delay);
         debug!("queuing_delay: {}", queuing_delay);
 
-        return queuing_delay;
+        queuing_delay
     }
 
     /// Calculates the new congestion window size, increasing it or decreasing it.
@@ -1295,9 +1295,9 @@ mod test {
         });
 
         let mut buf = [0u8; BUF_SIZE];
-        match server.recv_from(&mut buf).await {
-            e => println!("{:?}", e),
-        }
+        let e = server.recv_from(&mut buf).await;
+        println!("{:?}", e);
+
         // After establishing a new connection, the server's ids are a mirror of the client's.
         assert_eq!(
             server.receiver_connection_id,
@@ -1333,9 +1333,9 @@ mod test {
         });
 
         let mut buf = [0u8; BUF_SIZE];
-        match server.recv_from(&mut buf).await {
-            e => println!("{:?}", e),
-        }
+        let e = server.recv_from(&mut buf).await;
+        println!("{:?}", e);
+
         // After establishing a new connection, the server's ids are a mirror of the client's.
         assert_eq!(
             server.receiver_connection_id,
@@ -1861,7 +1861,7 @@ mod test {
         packet.set_seq_nr(2);
         packet.set_timestamp(456.into());
 
-        socket.insert_into_buffer(packet.clone());
+        socket.insert_into_buffer(packet);
         assert_eq!(socket.incoming_buffer.len(), 3);
         assert_eq!(socket.incoming_buffer[1].seq_nr(), 2);
         assert_eq!(socket.incoming_buffer[1].timestamp(), 128.into());

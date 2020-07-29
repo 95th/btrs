@@ -47,14 +47,14 @@ mod test {
     fn test_ewma_empty_vector() {
         let empty: Vec<u32> = vec![];
         let alpha = 1.0 / 3.0;
-        assert_eq!(ewma(empty.iter(), alpha), 0.0);
+        assert!(ewma(empty.iter(), alpha) < f64::EPSILON);
     }
 
     #[test]
     fn test_ewma_one_element() {
         let input = vec![1u32];
         let alpha = 1.0 / 3.0;
-        assert_eq!(ewma(input.iter(), alpha), 1.0);
+        assert!((ewma(input.iter(), alpha) - 1.0).abs() < f64::EPSILON);
     }
 
     #[test]
@@ -73,7 +73,7 @@ mod test {
             46439.0 / 6561.0,
             158488.0 / 19683.0,
         ];
-        assert_eq!(ewma(input.iter(), alpha), expected[expected.len() - 1]);
+        assert!((ewma(input.iter(), alpha) - expected[expected.len() - 1]).abs() < f64::EPSILON);
     }
 
     #[test]

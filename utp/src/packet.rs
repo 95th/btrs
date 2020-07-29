@@ -749,7 +749,7 @@ mod tests {
             {
                 TestResult::from_bool(packet.is_err())
             } else if let Ok(packet) = packet {
-                TestResult::from_bool(&packet.as_ref() == &x.as_slice())
+                TestResult::from_bool(packet.as_ref() == x.as_slice())
             } else {
                 TestResult::from_bool(false)
             }

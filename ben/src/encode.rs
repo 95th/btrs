@@ -504,12 +504,12 @@ mod tests {
                 match *self {
                     Self::A(a, b) => {
                         let mut dict = encoder.add_dict();
-                        dict.add("0", a as i64);
-                        dict.add("1", b as i64);
+                        dict.add("0", i64::from(a));
+                        dict.add("1", i64::from(b));
                     }
                     Self::B { x, y } => {
                         let mut dict = encoder.add_dict();
-                        dict.add("x", x as i64);
+                        dict.add("x", i64::from(x));
                         dict.add("y", y);
                     }
                 }

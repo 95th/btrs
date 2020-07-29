@@ -9,7 +9,7 @@ pub fn now_microseconds() -> Timestamp {
         .duration_since(time::UNIX_EPOCH)
         .unwrap_or_else(|e| e.duration());
     (t.as_secs().wrapping_mul(1_000_000) as u32)
-        .wrapping_add(t.subsec_nanos() / 1000)
+        .wrapping_add(t.subsec_micros())
         .into()
 }
 
@@ -20,7 +20,7 @@ impl Sub for Timestamp {
     type Output = Delay;
 
     fn sub(self, other: Timestamp) -> Delay {
-        Delay(self.0 as i64 - other.0 as i64)
+        Delay(i64::from(self.0) - i64::from(other.0))
     }
 }
 
@@ -53,7 +53,7 @@ impl From<i64> for Delay {
 
 impl From<u32> for Delay {
     fn from(value: u32) -> Delay {
-        Delay(value as i64)
+        Delay(i64::from(value))
     }
 }
 

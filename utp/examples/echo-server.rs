@@ -27,11 +27,8 @@ async fn main() {
     let mut incoming = listener.incoming();
     while let Some(connection) = incoming.next().await {
         // Spawn a new handler for each new connection
-        match connection {
-            Ok((socket, _src)) => {
-                tokio::spawn(handle_client(socket));
-            }
-            _ => (),
+        if let Ok((socket, _src)) = connection {
+            tokio::spawn(handle_client(socket));
         }
     }
 }

@@ -204,7 +204,7 @@ impl<'a, 't> State<'a, 't> {
         loop {
             match self.next_char()? {
                 c @ b'0'..=b'9' => {
-                    let digit = (c - b'0') as i64;
+                    let digit = i64::from(c - b'0');
                     match val.checked_mul(10).and_then(|n| n.checked_add(digit)) {
                         Some(n) => val = n,
                         None => return Err(Error::Overflow { pos: self.pos }),
