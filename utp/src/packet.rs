@@ -34,11 +34,20 @@ macro_rules! make_setter {
 
 #[derive(PartialEq, Eq, Debug)]
 pub enum PacketType {
-    Data,  // packet carries a data payload
-    Fin,   // signals the end of a connection
-    State, // signals acknowledgment of a packet
-    Reset, // forcibly terminates a connection
-    Syn,   // initiates a new connection with a peer
+    /// packet carries a data payload
+    Data,
+
+    /// signals the end of a connection
+    Fin,
+
+    /// signals acknowledgment of a packet
+    State,
+
+    /// forcibly terminates a connection
+    Reset,
+
+    /// initiates a new connection with a peer
+    Syn,
 }
 
 impl TryFrom<u8> for PacketType {
@@ -58,13 +67,7 @@ impl TryFrom<u8> for PacketType {
 
 impl From<PacketType> for u8 {
     fn from(original: PacketType) -> u8 {
-        match original {
-            PacketType::Data => 0,
-            PacketType::Fin => 1,
-            PacketType::State => 2,
-            PacketType::Reset => 3,
-            PacketType::Syn => 4,
-        }
+        original as u8
     }
 }
 

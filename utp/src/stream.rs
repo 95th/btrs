@@ -1,6 +1,5 @@
 use crate::socket::UtpSocket;
-use std::io::Result;
-use std::net::SocketAddr;
+use std::{io::Result, net::SocketAddr};
 use tokio::net::ToSocketAddrs;
 
 /// A structure that represents a uTP (Micro Transport Protocol) stream between a local socket and a

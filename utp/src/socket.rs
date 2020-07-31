@@ -1,13 +1,12 @@
-use crate::error::SocketError;
-use crate::packet::*;
-use crate::time::*;
-use crate::util::*;
-use std::cmp::{max, min};
-use std::collections::VecDeque;
-use std::convert::TryFrom;
-use std::io::Result;
-use std::net::SocketAddr;
-use std::time::{Duration, Instant};
+use crate::{error::SocketError, packet::*, time::*, util::*};
+use std::{
+    cmp::{max, min},
+    collections::VecDeque,
+    convert::TryFrom,
+    io::Result,
+    net::SocketAddr,
+    time::{Duration, Instant},
+};
 use tokio::net::{ToSocketAddrs, UdpSocket};
 
 // For simplicity's sake, let us assume no packet will ever exceed the
