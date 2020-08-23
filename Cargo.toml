@@ -5,7 +5,7 @@ authors = ["Gurwinder Singh <vargwin@gmail.com>"]
 edition = "2018"
 
 [workspace]
-members = ["dht", "utp", "ben"]
+members = ["dht", "utp"]
 
 [dependencies]
 url = "2.1.1"
@@ -18,7 +18,7 @@ rand = "0.7.3"
 log = { version = "0.4.8", features = ["release_max_level_off"] }
 percent-encoding = "2.1.0"
 env_logger = "0.7.1"
-ben = { path = "ben" }
+ben = "0.2.0"
 dht = { path = "dht" }
 utp = { path = "utp"}
 clap = "2.33.0"
