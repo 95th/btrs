@@ -26,7 +26,7 @@ impl DhtTracker {
     }
 
     pub async fn announce(&mut self, info_hash: &InfoHash) -> crate::Result<Vec<Peer>> {
-        tokio::time::delay_until(self.next_announce.into()).await;
+        tokio::time::sleep_until(self.next_announce.into()).await;
 
         debug!("Announcing to DHT");
         let start = Instant::now();

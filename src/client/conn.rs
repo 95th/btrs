@@ -1,10 +1,8 @@
-use bytes::{Buf, BufMut};
 use std::io;
-use std::mem::MaybeUninit;
 use std::net::SocketAddr;
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use tokio::io::{AsyncRead, AsyncWrite, BufStream};
+use tokio::io::{AsyncRead, AsyncWrite, BufStream, ReadBuf};
 use tokio::net::TcpStream;
 
 pub trait AsyncStream: AsyncRead + AsyncWrite + Unpin {}
@@ -26,32 +24,13 @@ impl Connection {
 }
 
 impl AsyncRead for Connection {
-    unsafe fn prepare_uninitialized_buffer(&self, buf: &mut [MaybeUninit<u8>]) -> bool {
-        match self {
-            Connection::Tcp(c) => c.prepare_uninitialized_buffer(buf),
-        }
-    }
-
     fn poll_read(
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
-        buf: &mut [u8],
-    ) -> Poll<io::Result<usize>> {
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
         match &mut *self {
             Connection::Tcp(c) => Pin::new(c).poll_read(cx, buf),
-        }
-    }
-
-    fn poll_read_buf<B: BufMut>(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buf: &mut B,
-    ) -> Poll<io::Result<usize>>
-    where
-        Self: Sized,
-    {
-        match &mut *self {
-            Connection::Tcp(c) => Pin::new(c).poll_read_buf(cx, buf),
         }
     }
 }
@@ -79,19 +58,6 @@ impl AsyncWrite for Connection {
     ) -> Poll<Result<(), io::Error>> {
         match &mut *self {
             Connection::Tcp(c) => Pin::new(c).poll_shutdown(cx),
-        }
-    }
-
-    fn poll_write_buf<B: Buf>(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buf: &mut B,
-    ) -> Poll<Result<usize, io::Error>>
-    where
-        Self: Sized,
-    {
-        match &mut *self {
-            Connection::Tcp(c) => Pin::new(c).poll_write_buf(cx, buf),
         }
     }
 }

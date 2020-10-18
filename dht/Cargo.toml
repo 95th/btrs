@@ -11,7 +11,7 @@ ben = "0.2.0"
 anyhow = "1.0.28"
 tokio-util = { version = "0.3.1", features = ["udp"] }
 bytes = "0.5.4"
-tokio = { version = "0.2.11", features = ["io-util", "net", "macros", "stream"] }
+tokio = { version = "0.3", features = ["full"] }
 log = "0.4.8"
 env_logger = "0.7.1"
 bitflags = "1.2.1"

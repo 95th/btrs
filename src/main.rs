@@ -11,7 +11,7 @@ use log::{debug, error, trace};
 use std::fs;
 use std::time::{Duration, Instant};
 
-#[tokio::main(basic_scheduler)]
+#[tokio::main]
 async fn main() -> btrs::Result<()> {
     let m = App::new("BT rust")
         .version("0.1")

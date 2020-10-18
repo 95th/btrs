@@ -45,7 +45,7 @@ impl<'a> Tracker<'a> {
         info_hash: &InfoHash,
         peer_id: &PeerId,
     ) -> crate::Result<AnnounceResponse> {
-        tokio::time::delay_until(self.next_announce.into()).await;
+        tokio::time::sleep_until(self.next_announce.into()).await;
 
         trace!("Announce to {}", self.url);
         let req = AnnounceRequest::new(&self.url, self.resolved_addr, info_hash, peer_id, 6881);
