@@ -2069,7 +2069,7 @@ mod test {
     #[tokio::test]
     async fn test_invalid_packet_on_connect() {
         let server_addr = next_test_ip4();
-        let mut server = UdpSocket::bind(server_addr).await.unwrap();
+        let server = UdpSocket::bind(server_addr).await.unwrap();
 
         let child = tokio::spawn(async move {
             let mut buf = [0u8; BUF_SIZE];
@@ -2093,7 +2093,7 @@ mod test {
     #[tokio::test]
     async fn test_receive_unexpected_reply_type_on_connect() {
         let server_addr = next_test_ip4();
-        let mut server = UdpSocket::bind(server_addr).await.unwrap();
+        let server = UdpSocket::bind(server_addr).await.unwrap();
 
         let child = tokio::spawn(async move {
             let mut buf = [0u8; BUF_SIZE];
@@ -2166,7 +2166,7 @@ mod test {
         let mut server = UtpSocket::bind(server_addr).await.unwrap();
 
         let child = tokio::spawn(async move {
-            let mut client = UtpSocket::connect(server_addr).await.unwrap();
+            let client = UtpSocket::connect(server_addr).await.unwrap();
             let mut packet = Packet::new();
             packet.set_wnd_size(BUF_SIZE as u32);
             packet.set_type(PacketType::Reset);
@@ -2304,7 +2304,7 @@ mod test {
         let addr = next_test_ip4();
         let server_addr = addr.to_socket_addrs().unwrap().next().unwrap();
         let mut server = UtpSocket::bind(server_addr).await.unwrap();
-        let (mut tx, mut rx) = channel(10);
+        let (tx, mut rx) = channel(10);
 
         // `peer_addr` should return an error because the socket isn't connected yet
         assert!(server.peer_addr().is_err());
