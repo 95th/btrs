@@ -114,7 +114,7 @@ impl<'a> UdpTracker<'a> {
     }
 
     async fn read_response<'b>(
-        &mut self,
+        &self,
         expected_action: u32,
         buf: &'b mut [u8],
         min_len: usize,
@@ -138,7 +138,7 @@ impl<'a> UdpTracker<'a> {
         Ok((len, c))
     }
 
-    fn write_connect(&mut self, buf: &mut [u8]) -> crate::Result<usize> {
+    fn write_connect(&self, buf: &mut [u8]) -> crate::Result<usize> {
         let mut c = Cursor::new(buf);
         c.write_u64::<BE>(TRACKER_CONSTANT)?;
         c.write_u32::<BE>(action::CONNECT)?;
@@ -146,7 +146,7 @@ impl<'a> UdpTracker<'a> {
         Ok(c.position() as usize)
     }
 
-    fn write_announce(&mut self, buf: &mut [u8]) -> crate::Result<usize> {
+    fn write_announce(&self, buf: &mut [u8]) -> crate::Result<usize> {
         let mut c = Cursor::new(buf);
         c.write_u64::<BE>(self.conn_id)?;
         c.write_u32::<BE>(action::ANNOUNCE)?;
