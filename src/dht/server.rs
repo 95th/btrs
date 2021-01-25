@@ -1,7 +1,7 @@
-use crate::contact::{CompactNodes, CompactNodesV6, ContactRef};
-use crate::id::NodeId;
-use crate::msg::recv::{ErrorResponse, Msg, Query, Response};
-use crate::table::{Refresh, RoutingTable};
+use crate::dht::contact::{CompactNodes, CompactNodesV6, ContactRef};
+use crate::dht::id::NodeId;
+use crate::dht::msg::recv::{ErrorResponse, Msg, Query, Response};
+use crate::dht::table::{Refresh, RoutingTable};
 use rpc::{RpcMgr, Transactions};
 use std::collections::HashSet;
 use std::net::SocketAddr;
@@ -164,17 +164,28 @@ impl Server {
     }
 
     async fn check_client_request(&mut self) -> bool {
-        match self.client_rx.try_recv() {
-            Ok(ClientRequest::GetPeers(info_hash, tx)) => {
+        let req = self.client_rx.recv();
+        let req = match tokio::time::timeout(Duration::from_millis(1), req).await {
+            // Got a request
+            Ok(Some(req)) => req,
+
+            // Channel closed
+            Ok(None) => return true,
+
+            // Timed out
+            Err(_) => return false,
+        };
+
+        match req {
+            ClientRequest::GetPeers(info_hash, tx) => {
                 self.get_peers(&info_hash, tx).await;
                 false
             }
-            Ok(ClientRequest::Announce(info_hash, tx)) => {
+            ClientRequest::Announce(info_hash, tx) => {
                 self.announce(&info_hash, tx).await;
                 false
             }
-            Ok(ClientRequest::Shutdown) => true,
-            Err(_) => false,
+            ClientRequest::Shutdown => true,
         }
     }
 

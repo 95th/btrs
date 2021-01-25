@@ -1,11 +1,11 @@
-use crate::contact::ContactRef;
-use crate::id::NodeId;
-use crate::msg::recv::Response;
-use crate::msg::send::Ping;
-use crate::msg::TxnId;
-use crate::server::traversal::{Status, TraversalNode};
-use crate::server::RpcMgr;
-use crate::table::RoutingTable;
+use crate::dht::contact::ContactRef;
+use crate::dht::id::NodeId;
+use crate::dht::msg::recv::Response;
+use crate::dht::msg::send::Ping;
+use crate::dht::msg::TxnId;
+use crate::dht::server::traversal::{Status, TraversalNode};
+use crate::dht::server::RpcMgr;
+use crate::dht::table::RoutingTable;
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 

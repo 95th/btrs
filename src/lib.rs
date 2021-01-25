@@ -24,6 +24,7 @@ pub mod announce;
 pub mod avg;
 pub mod bitfield;
 pub mod client;
+pub mod dht;
 pub mod future;
 pub mod magnet;
 pub mod metainfo;

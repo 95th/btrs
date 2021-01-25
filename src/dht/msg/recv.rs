@@ -1,5 +1,5 @@
-use crate::id::NodeId;
-use crate::msg::TxnId;
+use crate::dht::id::NodeId;
+use crate::dht::msg::TxnId;
 use ben::decode::{Dict, List};
 use ben::{Decode, Decoder};
 use std::convert::TryInto;

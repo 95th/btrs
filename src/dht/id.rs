@@ -65,15 +65,6 @@ impl NodeId {
     }
 
     /// Returns number of leading zeros.
-    ///
-    /// # Usage:
-    /// ```
-    /// # use dht::id::NodeId;
-    ///
-    /// let id = NodeId::all(0b0010_0010);
-    ///
-    /// assert_eq!(2, id.lz());
-    /// ```
     pub fn lz(&self) -> usize {
         let mut n = 0;
         for &c in self.iter() {
@@ -88,19 +79,6 @@ impl NodeId {
     }
 
     /// Returns number of leading zeros of `XOR` of `self` with given `NodeId`
-    ///
-    /// # Usage:
-    /// ```
-    /// # use dht::id::NodeId;
-    ///
-    /// let id1 = &NodeId::all(0b0000_0101);
-    /// let id2 = &NodeId::all(0b0010_0010);
-    ///
-    /// let n1 = id1.xlz(id2);
-    /// let n2 = (id1 ^ id2).lz();
-    ///
-    /// assert_eq!(n1, n2);
-    /// ```
     pub fn xlz(&self, other: &Self) -> usize {
         (self ^ other).lz()
     }

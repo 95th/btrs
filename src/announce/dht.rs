@@ -1,7 +1,7 @@
+use crate::dht::id::NodeId;
+use crate::dht::{Client, ClientRequest, Server};
 use crate::metainfo::InfoHash;
 use crate::peer::Peer;
-use dht::id::NodeId;
-use dht::{Client, ClientRequest, Server};
 use std::time::Instant;
 use tokio::sync::oneshot;
 

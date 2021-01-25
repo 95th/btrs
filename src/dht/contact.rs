@@ -1,8 +1,8 @@
-use crate::id::NodeId;
+use crate::dht::id::NodeId;
 use ben::{Encode, Encoder};
 use std::net::SocketAddr;
 
-bitflags! {
+bitflags::bitflags! {
     pub struct ContactStatus: u8 {
         const QUERIED       = 0b0000_0001;
         const INITIAL       = 0b0000_0010;

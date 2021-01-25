@@ -1,11 +1,11 @@
-use crate::bucket::Bucket;
-use crate::id::NodeId;
-use crate::msg::recv::Response;
-use crate::msg::send::AnnouncePeer;
-use crate::server::traversal::GetPeersTraversal;
-use crate::server::traversal::Status;
-use crate::server::{PeerSender, RpcMgr};
-use crate::table::RoutingTable;
+use crate::dht::bucket::Bucket;
+use crate::dht::id::NodeId;
+use crate::dht::msg::recv::Response;
+use crate::dht::msg::send::AnnouncePeer;
+use crate::dht::server::traversal::GetPeersTraversal;
+use crate::dht::server::traversal::Status;
+use crate::dht::server::{PeerSender, RpcMgr};
+use crate::dht::table::RoutingTable;
 use std::net::SocketAddr;
 
 pub struct AnnounceTraversal {

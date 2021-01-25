@@ -1,7 +1,7 @@
-use crate::id::NodeId;
-use crate::msg::recv::Msg;
-use crate::msg::TxnId;
-use crate::table::RoutingTable;
+use crate::dht::id::NodeId;
+use crate::dht::msg::recv::Msg;
+use crate::dht::msg::TxnId;
+use crate::dht::table::RoutingTable;
 use ben::{Encode, Parser};
 use std::collections::HashMap;
 use std::net::SocketAddr;

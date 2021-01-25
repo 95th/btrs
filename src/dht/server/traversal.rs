@@ -1,8 +1,8 @@
-use crate::contact::ContactRef;
-use crate::id::NodeId;
-use crate::msg::recv::Response;
-use crate::server::RpcMgr;
-use crate::table::RoutingTable;
+use crate::dht::contact::ContactRef;
+use crate::dht::id::NodeId;
+use crate::dht::msg::recv::Response;
+use crate::dht::server::RpcMgr;
+use crate::dht::table::RoutingTable;
 use std::net::SocketAddr;
 
 mod announce;
@@ -31,7 +31,7 @@ impl TraversalNode {
     }
 }
 
-bitflags! {
+bitflags::bitflags! {
     pub struct Status: u8 {
         const INITIAL   = 0x01;
         const ALIVE     = 0x02;

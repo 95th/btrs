@@ -1,6 +1,6 @@
-use crate::bucket::{Bucket, BucketResult};
-use crate::contact::{Contact, ContactRef, ContactStatus};
-use crate::id::NodeId;
+use crate::dht::bucket::{Bucket, BucketResult};
+use crate::dht::contact::{Contact, ContactRef, ContactStatus};
+use crate::dht::id::NodeId;
 use std::collections::HashSet;
 use std::net::SocketAddr;
 use std::time::Instant;
