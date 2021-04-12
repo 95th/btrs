@@ -11,7 +11,7 @@ pub struct DhtTracker {
 }
 
 impl DhtTracker {
-    pub async fn new() -> crate::Result<Self> {
+    pub async fn new() -> anyhow::Result<Self> {
         let addrs = vec![
             "192.168.43.212:17742".parse()?,
             "82.221.103.244:6881".parse()?,
@@ -25,7 +25,7 @@ impl DhtTracker {
         })
     }
 
-    pub async fn announce(&mut self, info_hash: &InfoHash) -> crate::Result<Vec<Peer>> {
+    pub async fn announce(&mut self, info_hash: &InfoHash) -> anyhow::Result<Vec<Peer>> {
         tokio::time::sleep_until(self.next_announce.into()).await;
 
         log::debug!("Announcing to DHT");

@@ -11,7 +11,7 @@ use std::fs;
 use std::time::{Duration, Instant};
 
 #[tokio::main(flavor = "current_thread")]
-async fn main() -> btrs::Result<()> {
+async fn main() -> anyhow::Result<()> {
     let m = App::new("BT rust")
         .version("0.1")
         .author("95th")
@@ -34,7 +34,7 @@ async fn main() -> btrs::Result<()> {
     }
 }
 
-pub async fn magnet(uri: &str) -> btrs::Result<()> {
+pub async fn magnet(uri: &str) -> anyhow::Result<()> {
     let magnet = MagnetUri::parse_lenient(uri)?;
     let peer_id = peer::generate_peer_id();
     log::debug!("Our peer_id: {:?}", peer_id);
@@ -43,7 +43,7 @@ pub async fn magnet(uri: &str) -> btrs::Result<()> {
     download(torrent).await
 }
 
-pub async fn torrent_file(file: &str) -> btrs::Result<()> {
+pub async fn torrent_file(file: &str) -> anyhow::Result<()> {
     let buf = fs::read(file)?;
     let torrent_file = TorrentFile::parse(buf)?;
 
@@ -53,7 +53,7 @@ pub async fn torrent_file(file: &str) -> btrs::Result<()> {
     download(torrent).await
 }
 
-pub async fn download(mut torrent: Torrent) -> btrs::Result<()> {
+pub async fn download(mut torrent: Torrent) -> anyhow::Result<()> {
     let torrent_name = torrent.name.clone();
     let piece_len = torrent.piece_len;
 

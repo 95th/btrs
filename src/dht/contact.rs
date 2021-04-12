@@ -106,7 +106,7 @@ pub struct CompactNodes<'a> {
 
 impl<'a> CompactNodes<'a> {
     pub fn new(buf: &'a [u8]) -> anyhow::Result<Self> {
-        ensure!(
+        anyhow::ensure!(
             buf.len() % 26 == 0,
             "Compact node list must have length multiple of 26, actual: {}",
             buf.len()
@@ -146,7 +146,7 @@ pub struct CompactNodesV6<'a> {
 
 impl<'a> CompactNodesV6<'a> {
     pub fn new(buf: &'a [u8]) -> anyhow::Result<Self> {
-        ensure!(
+        anyhow::ensure!(
             buf.len() % 38 == 0,
             "Compact node list must have length multiple of 38, actual: {}",
             buf.len()

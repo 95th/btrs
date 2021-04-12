@@ -107,7 +107,7 @@ impl Message {
         Ok(())
     }
 
-    pub async fn read<R>(reader: &mut R) -> crate::Result<Option<Self>>
+    pub async fn read<R>(reader: &mut R) -> anyhow::Result<Option<Self>>
     where
         R: AsyncRead + Unpin,
     {
@@ -123,37 +123,37 @@ impl Message {
 
         let msg = match id {
             0 => {
-                ensure!(len == 1, "Invalid Choke");
+                anyhow::ensure!(len == 1, "Invalid Choke");
                 Choke
             }
             1 => {
-                ensure!(len == 1, "Invalid Unchoke");
+                anyhow::ensure!(len == 1, "Invalid Unchoke");
                 Unchoke
             }
             2 => {
-                ensure!(len == 1, "Invalid Interested");
+                anyhow::ensure!(len == 1, "Invalid Interested");
                 Interested
             }
             3 => {
-                ensure!(len == 1, "Invalid NotInterested");
+                anyhow::ensure!(len == 1, "Invalid NotInterested");
                 NotInterested
             }
             4 => {
-                ensure!(len == 5, "Invalid Have");
+                anyhow::ensure!(len == 5, "Invalid Have");
                 Have {
                     index: reader.read_u32().await?,
                 }
             }
             5 => Bitfield { len: len - 1 },
             6 => {
-                ensure!(len == 13, "Invalid Request");
+                anyhow::ensure!(len == 13, "Invalid Request");
                 let index = reader.read_u32().await?;
                 let begin = reader.read_u32().await?;
                 let len = reader.read_u32().await?;
                 Request { index, begin, len }
             }
             7 => {
-                ensure!(len > 9, "Invalid Piece");
+                anyhow::ensure!(len > 9, "Invalid Piece");
                 let index = reader.read_u32().await?;
                 let begin = reader.read_u32().await?;
                 Piece {
@@ -163,7 +163,7 @@ impl Message {
                 }
             }
             8 => {
-                ensure!(len == 13, "Invalid Cancel");
+                anyhow::ensure!(len == 13, "Invalid Cancel");
                 let index = reader.read_u32().await?;
                 let begin = reader.read_u32().await?;
                 let len = reader.read_u32().await?;
@@ -198,28 +198,28 @@ impl Message {
         Ok(())
     }
 
-    pub async fn read_piece<R>(&self, rdr: &mut R, buf: &mut [u8]) -> crate::Result<()>
+    pub async fn read_piece<R>(&self, rdr: &mut R, buf: &mut [u8]) -> anyhow::Result<()>
     where
         R: AsyncRead + Unpin,
     {
         match *self {
             Message::Piece { begin, len, .. } => {
                 let begin = begin as usize;
-                ensure!(begin <= buf.len(), "Begin offset too high");
+                anyhow::ensure!(begin <= buf.len(), "Begin offset too high");
 
                 let len = len as usize;
                 log::trace!("Reading piece message of len: {}", len);
 
-                ensure!(begin + len <= buf.len(), "Data too large");
+                anyhow::ensure!(begin + len <= buf.len(), "Data too large");
 
                 rdr.read_exact(&mut buf[begin..][..len]).await?;
                 Ok(())
             }
-            _ => bail!("Not a piece"),
+            _ => anyhow::bail!("Not a piece"),
         }
     }
 
-    pub async fn read_bitfield<R>(&self, rdr: &mut R, buf: &mut [u8]) -> crate::Result<()>
+    pub async fn read_bitfield<R>(&self, rdr: &mut R, buf: &mut [u8]) -> anyhow::Result<()>
     where
         R: AsyncRead + Unpin,
     {
@@ -227,12 +227,12 @@ impl Message {
             Message::Bitfield { len } => {
                 let len = len as usize;
                 log::trace!("Reading bitfield message of len: {}", len);
-                ensure!(len <= buf.len(), "Data too large");
+                anyhow::ensure!(len <= buf.len(), "Data too large");
 
                 rdr.read_exact(&mut buf[..len]).await?;
                 Ok(())
             }
-            _ => bail!("Not a piece"),
+            _ => anyhow::bail!("Not a piece"),
         }
     }
 
@@ -241,7 +241,7 @@ impl Message {
         rdr: &mut R,
         buf: &'a mut Vec<u8>,
         parser: &'p mut Parser,
-    ) -> crate::Result<ExtendedMessage<'a, 'p>>
+    ) -> anyhow::Result<ExtendedMessage<'a, 'p>>
     where
         R: AsyncRead + Unpin,
     {
@@ -255,7 +255,7 @@ impl Message {
                 let msg = ExtendedMessage::parse(buf, parser)?;
                 Ok(msg)
             }
-            _ => bail!("Not an Extended message"),
+            _ => anyhow::bail!("Not an Extended message"),
         }
     }
 }
@@ -273,7 +273,7 @@ mod msg_type {
 }
 
 impl<'a, 'p> ExtendedMessage<'a, 'p> {
-    pub fn parse(data: &'a [u8], parser: &'p mut Parser) -> crate::Result<Self> {
+    pub fn parse(data: &'a [u8], parser: &'p mut Parser) -> anyhow::Result<Self> {
         let id = data[0];
         let (value, i) = parser.parse_prefix::<Decoder>(&data[1..])?;
         log::debug!("ext header len: {}", value.as_raw_bytes().len());
@@ -300,18 +300,18 @@ impl<'a, 'p> ExtendedMessage<'a, 'p> {
         Some(Metadata { id, len })
     }
 
-    pub fn data(&self, expected_piece: i64) -> crate::Result<&[u8]> {
+    pub fn data(&self, expected_piece: i64) -> anyhow::Result<&[u8]> {
         log::trace!("data: {:#?}", self.value);
         let dict = self.value.as_dict().context("Not a dict")?;
 
         let msg_type = dict.get_int("msg_type").context("`msg_type` not found")?;
-        ensure!(msg_type == msg_type::DATA, "Not a DATA message");
+        anyhow::ensure!(msg_type == msg_type::DATA, "Not a DATA message");
 
         let piece = dict.get_int("piece").context("`piece` not found")?;
-        ensure!(piece == expected_piece, "Incorrect piece");
+        anyhow::ensure!(piece == expected_piece, "Incorrect piece");
 
         if self.rest.len() > METADATA_PIECE_LEN {
-            bail!("Piece can't be larger than 16kB");
+            anyhow::bail!("Piece can't be larger than 16kB");
         }
 
         Ok(self.rest)

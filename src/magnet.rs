@@ -30,15 +30,15 @@ struct TorrentInfo {
 }
 
 impl MagnetUri {
-    pub fn parse(s: &str) -> crate::Result<Self> {
+    pub fn parse(s: &str) -> anyhow::Result<Self> {
         parser::MagnetUriParser::new().parse(s)
     }
 
-    pub fn parse_lenient(s: &str) -> crate::Result<Self> {
+    pub fn parse_lenient(s: &str) -> anyhow::Result<Self> {
         parser::MagnetUriParser::new_lenient().parse(s)
     }
 
-    pub async fn request_metadata(&self, peer_id: Box<PeerId>) -> crate::Result<Torrent> {
+    pub async fn request_metadata(&self, peer_id: Box<PeerId>) -> anyhow::Result<Torrent> {
         let (peers, peers6, dht_tracker) = self.get_peers(&peer_id).await?;
 
         let mut iter = peers.iter().chain(&peers6);
@@ -52,7 +52,7 @@ impl MagnetUri {
                 }
             }
 
-            ensure!(!futures.is_empty(), "Metadata request failed");
+            anyhow::ensure!(!futures.is_empty(), "Metadata request failed");
 
             if let Some(result) = futures.next().await {
                 match result {
@@ -105,7 +105,7 @@ impl MagnetUri {
     async fn get_peers(
         &self,
         peer_id: &PeerId,
-    ) -> crate::Result<(HashSet<Peer>, HashSet<Peer>, Option<DhtTracker>)> {
+    ) -> anyhow::Result<(HashSet<Peer>, HashSet<Peer>, Option<DhtTracker>)> {
         log::debug!("Requesting peers");
 
         let mut futs: FuturesUnordered<_> = self
@@ -148,13 +148,13 @@ impl MagnetUri {
         }
 
         if peers.is_empty() && peers6.is_empty() {
-            bail!("No peers received from trackers");
+            anyhow::bail!("No peers received from trackers");
         }
 
         Ok((peers, peers6, dht_tracker))
     }
 
-    async fn try_get(&self, peer: &Peer, peer_id: &PeerId) -> crate::Result<Vec<u8>> {
+    async fn try_get(&self, peer: &Peer, peer_id: &PeerId) -> anyhow::Result<Vec<u8>> {
         let mut client = timeout(Client::new_tcp(peer.addr), 3).await?;
         client.handshake(&self.info_hash, peer_id).await?;
         client.conn.flush().await?;
@@ -172,7 +172,7 @@ impl MagnetUri {
         };
 
         if !ext.is_handshake() {
-            bail!("Expected Extended Handshake");
+            anyhow::bail!("Expected Extended Handshake");
         }
 
         let metadata = ext
@@ -193,10 +193,10 @@ impl MagnetUri {
 
             if let Message::Extended { .. } = msg {
                 let ext = msg.read_ext(&mut client.conn, ext_buf, parser).await?;
-                ensure!(ext.id == metadata.id, "Expected Metadata message");
+                anyhow::ensure!(ext.id == metadata.id, "Expected Metadata message");
 
                 let data = ext.data(piece)?;
-                ensure!(data.len() <= remaining, "Incorrect data length received");
+                anyhow::ensure!(data.len() <= remaining, "Incorrect data length received");
 
                 buf.extend(data);
                 remaining -= data.len();
@@ -235,9 +235,9 @@ mod parser {
             Self { strict: false }
         }
 
-        pub fn parse(&self, uri: &str) -> crate::Result<MagnetUri> {
+        pub fn parse(&self, uri: &str) -> anyhow::Result<MagnetUri> {
             let url = Url::parse(uri).unwrap();
-            ensure!(url.scheme() == SCHEME, "Incorrect scheme");
+            anyhow::ensure!(url.scheme() == SCHEME, "Incorrect scheme");
 
             let mut magnet = MagnetUri::default();
             let mut has_ih = false;
@@ -248,7 +248,7 @@ mod parser {
                             let info_hash = build_info_hash(&value[INFOHASH_PREFIX.len()..])?;
 
                             if has_ih && info_hash != magnet.info_hash {
-                                bail!("Multiple infohashes found");
+                                anyhow::bail!("Multiple infohashes found");
                             }
 
                             magnet.info_hash = info_hash;
@@ -263,7 +263,7 @@ mod parser {
                         Ok(addr) => magnet.peer_addrs.push(addr),
                         Err(_) => {
                             if self.strict {
-                                bail!("Invalid peer addr");
+                                anyhow::bail!("Invalid peer addr");
                             }
                         }
                     },
@@ -271,12 +271,12 @@ mod parser {
                 }
             }
 
-            ensure!(has_ih, "No infohash found");
+            anyhow::ensure!(has_ih, "No infohash found");
             Ok(magnet)
         }
     }
 
-    fn build_info_hash(encoded: &str) -> crate::Result<InfoHash> {
+    fn build_info_hash(encoded: &str) -> anyhow::Result<InfoHash> {
         use data_encoding::{BASE32 as base32, HEXLOWER_PERMISSIVE as hex};
 
         let encoded = encoded.as_bytes();
@@ -294,7 +294,7 @@ mod parser {
                     .ok()
                     .context("Invalid base 32 string")?;
             }
-            _ => bail!("Invalid infohash length"),
+            _ => anyhow::bail!("Invalid infohash length"),
         }
 
         Ok(id)

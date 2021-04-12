@@ -17,7 +17,7 @@ mod action {
     pub const ANNOUNCE: u32 = 1;
 }
 
-pub async fn announce(req: AnnounceRequest<'_>, buf: &mut [u8]) -> crate::Result<AnnounceResponse> {
+pub async fn announce(req: AnnounceRequest<'_>, buf: &mut [u8]) -> anyhow::Result<AnnounceResponse> {
     let mut t = UdpTracker::new(req).await?;
     t.connect(buf).await?;
     t.announce(buf).await
@@ -32,7 +32,7 @@ struct UdpTracker<'a> {
 }
 
 impl<'a> UdpTracker<'a> {
-    pub async fn new(req: AnnounceRequest<'a>) -> crate::Result<UdpTracker<'a>> {
+    pub async fn new(req: AnnounceRequest<'a>) -> anyhow::Result<UdpTracker<'a>> {
         let socket = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0)).await?;
         let addr = match req.resolved_addr {
             Some(a) => a,
@@ -52,14 +52,14 @@ impl<'a> UdpTracker<'a> {
         self.txn_id = thread_rng().gen();
     }
 
-    async fn connect(&mut self, buf: &mut [u8]) -> crate::Result<()> {
+    async fn connect(&mut self, buf: &mut [u8]) -> anyhow::Result<()> {
         self.update_txn_id();
 
         log::trace!("Sending connect to {}, txn id: {}", self.addr, self.txn_id);
 
         let n = self.write_connect(buf)?;
         let written = self.socket.send_to(&buf[..n], &self.addr).await?;
-        ensure!(written == n, "Error sending data");
+        anyhow::ensure!(written == n, "Error sending data");
 
         let (_, mut c) = self.read_response(action::CONNECT, buf, 16).await?;
         let conn_id = c.read_u64::<BE>()?;
@@ -69,14 +69,14 @@ impl<'a> UdpTracker<'a> {
         Ok(())
     }
 
-    async fn announce(&mut self, buf: &mut [u8]) -> crate::Result<AnnounceResponse> {
+    async fn announce(&mut self, buf: &mut [u8]) -> anyhow::Result<AnnounceResponse> {
         self.update_txn_id();
 
         log::trace!("Sending announce to {}, txn id: {}", self.addr, self.txn_id);
 
         let n = self.write_announce(buf)?;
         let written = self.socket.send_to(&buf[..n], &self.addr).await?;
-        ensure!(written == n, "Error sending data");
+        anyhow::ensure!(written == n, "Error sending data");
 
         let (len, mut c) = self.read_response(action::ANNOUNCE, buf, 20).await?;
 
@@ -89,7 +89,7 @@ impl<'a> UdpTracker<'a> {
         log::trace!("leechers: {}", leechers);
 
         let mut n = len - 20;
-        ensure!(n % 6 == 0, "IPs should be 6 byte each");
+        anyhow::ensure!(n % 6 == 0, "IPs should be 6 byte each");
 
         let mut peers = hashset![];
         while n > 0 {
@@ -118,11 +118,11 @@ impl<'a> UdpTracker<'a> {
         expected_action: u32,
         buf: &'b mut [u8],
         min_len: usize,
-    ) -> crate::Result<(usize, Cursor<&'b [u8]>)> {
+    ) -> anyhow::Result<(usize, Cursor<&'b [u8]>)> {
         let (len, addr) = self.socket.recv_from(buf).await?;
 
-        ensure!(addr == self.addr, "Packet received from unexpected address");
-        ensure!(len >= min_len, "Packet too small");
+        anyhow::ensure!(addr == self.addr, "Packet received from unexpected address");
+        anyhow::ensure!(len >= min_len, "Packet too small");
 
         let buf = &buf[..len];
 
@@ -132,13 +132,13 @@ impl<'a> UdpTracker<'a> {
 
         log::trace!("Received action: {}, txn_id: {}", action, txn_id);
 
-        ensure!(expected_action == action, "Incorrect msg action received");
-        ensure!(self.txn_id == txn_id, "Txn Id mismatch");
+        anyhow::ensure!(expected_action == action, "Incorrect msg action received");
+        anyhow::ensure!(self.txn_id == txn_id, "Txn Id mismatch");
 
         Ok((len, c))
     }
 
-    fn write_connect(&self, buf: &mut [u8]) -> crate::Result<usize> {
+    fn write_connect(&self, buf: &mut [u8]) -> anyhow::Result<usize> {
         let mut c = Cursor::new(buf);
         c.write_u64::<BE>(TRACKER_CONSTANT)?;
         c.write_u32::<BE>(action::CONNECT)?;
@@ -146,7 +146,7 @@ impl<'a> UdpTracker<'a> {
         Ok(c.position() as usize)
     }
 
-    fn write_announce(&self, buf: &mut [u8]) -> crate::Result<usize> {
+    fn write_announce(&self, buf: &mut [u8]) -> anyhow::Result<usize> {
         let mut c = Cursor::new(buf);
         c.write_u64::<BE>(self.conn_id)?;
         c.write_u32::<BE>(action::ANNOUNCE)?;
@@ -165,9 +165,9 @@ impl<'a> UdpTracker<'a> {
     }
 }
 
-async fn resolve_addr(url: &str) -> crate::Result<SocketAddr> {
+async fn resolve_addr(url: &str) -> anyhow::Result<SocketAddr> {
     let url: Url = url.parse().context("Failed to parse tracker url")?;
-    ensure!(url.scheme() == "udp", "Not a UDP url");
+    anyhow::ensure!(url.scheme() == "udp", "Not a UDP url");
 
     let host = url.host_str().context("Missing host")?;
     let port = url.port().context("Missing port")?;
@@ -177,6 +177,6 @@ async fn resolve_addr(url: &str) -> crate::Result<SocketAddr> {
         log::trace!("Resolved {}/{} to {}", host, port, addr);
         Ok(addr)
     } else {
-        bail!("Host/port is not resolved to a socket addr")
+        anyhow::bail!("Host/port is not resolved to a socket addr")
     }
 }

@@ -57,13 +57,13 @@ impl<'a, C: AsyncStream> Handshake<'a, C> {
         self.conn.flush().await
     }
 
-    pub async fn read(&mut self) -> crate::Result<HandshakeResult> {
+    pub async fn read(&mut self) -> anyhow::Result<HandshakeResult> {
         log::trace!("Read handshake message");
 
         let mut buf = [0; 68];
         self.conn.read_exact(&mut buf).await?;
 
-        ensure!(buf.starts_with(PROTOCOL), "Invalid Protocol");
+        anyhow::ensure!(buf.starts_with(PROTOCOL), "Invalid Protocol");
 
         let result = HandshakeResult {
             extensions: buf[20..28].try_into().unwrap(),
@@ -71,7 +71,7 @@ impl<'a, C: AsyncStream> Handshake<'a, C> {
             peer_id: buf[48..68].try_into().unwrap(),
         };
 
-        ensure!(*self.info_hash == result.info_hash, "InfoHash mismatch");
+        anyhow::ensure!(*self.info_hash == result.info_hash, "InfoHash mismatch");
         Ok(result)
     }
 }

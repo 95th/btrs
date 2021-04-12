@@ -20,7 +20,7 @@ pub struct Client<C = Connection> {
 }
 
 impl Client {
-    pub async fn new_tcp(addr: SocketAddr) -> crate::Result<Self> {
+    pub async fn new_tcp(addr: SocketAddr) -> anyhow::Result<Self> {
         log::trace!("Create new TCP client to {:?}", addr);
         let conn = Connection::new_tcp(addr).await?;
         Ok(Client::new(conn))
@@ -36,7 +36,7 @@ impl<C: AsyncStream> Client<C> {
         }
     }
 
-    pub async fn handshake(&mut self, info_hash: &InfoHash, peer_id: &PeerId) -> crate::Result<()> {
+    pub async fn handshake(&mut self, info_hash: &InfoHash, peer_id: &PeerId) -> anyhow::Result<()> {
         let mut handshake = Handshake::new(&mut self.conn, info_hash, peer_id);
         handshake.set_extended(true);
         handshake.write().await?;
@@ -45,7 +45,7 @@ impl<C: AsyncStream> Client<C> {
         Ok(())
     }
 
-    pub async fn read(&mut self) -> crate::Result<Option<Message>> {
+    pub async fn read(&mut self) -> anyhow::Result<Option<Message>> {
         log::trace!("Client::read");
         let msg = match Message::read(&mut self.conn).await? {
             Some(msg) => msg,
@@ -78,7 +78,7 @@ impl<C: AsyncStream> Client<C> {
         }
     }
 
-    pub async fn read_in_loop(&mut self) -> crate::Result<Message> {
+    pub async fn read_in_loop(&mut self) -> anyhow::Result<Message> {
         log::trace!("Client::read_in_loop");
         loop {
             if let Some(msg) = self.read().await? {
@@ -164,7 +164,7 @@ impl<C: AsyncStream> Client<C> {
         msg.write_ext(&mut self.conn, id, &data).await
     }
 
-    pub async fn send_keep_alive(&mut self) -> crate::Result<()> {
+    pub async fn send_keep_alive(&mut self) -> anyhow::Result<()> {
         log::trace!("Send Keep-alive message");
         self.conn.write_u32(0).await?;
         Ok(())

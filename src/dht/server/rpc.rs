@@ -38,7 +38,7 @@ impl RpcMgr {
         let n = self.socket.send_to(&self.buf, addr).await?;
         log::trace!("Sent: {} bytes to {}", n, addr);
 
-        ensure!(n == self.buf.len(), "Failed to send complete message");
+        anyhow::ensure!(n == self.buf.len(), "Failed to send complete message");
         Ok(())
     }
 

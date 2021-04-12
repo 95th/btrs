@@ -12,9 +12,6 @@ macro_rules! hashset {
     ($($x:expr,)*) => (hashset![$($x),*])
 }
 
-#[macro_use]
-extern crate anyhow;
-
 pub const CLIENT_NAME: &str = "95th 0.1";
 
 pub mod announce;
@@ -31,5 +28,3 @@ pub mod storage;
 pub mod torrent;
 mod util;
 pub mod work;
-
-pub use anyhow::{Error, Result};

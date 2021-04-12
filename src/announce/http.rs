@@ -7,7 +7,7 @@ use reqwest::Client;
 use std::collections::HashSet;
 use std::convert::TryInto;
 
-pub async fn announce(req: AnnounceRequest<'_>) -> crate::Result<AnnounceResponse> {
+pub async fn announce(req: AnnounceRequest<'_>) -> anyhow::Result<AnnounceResponse> {
     let peer_id = std::str::from_utf8(&req.peer_id[..]).unwrap();
     let info_hash_encoded = req.info_hash.encode_url();
     log::debug!("Infohash Encoded: {}", info_hash_encoded);
@@ -47,7 +47,7 @@ pub async fn announce(req: AnnounceRequest<'_>) -> crate::Result<AnnounceRespons
         }
         Some(peers) => {
             let peers = peers.as_bytes().unwrap_or_default();
-            ensure!(peers.len() % 6 == 0, "Invalid peer len");
+            anyhow::ensure!(peers.len() % 6 == 0, "Invalid peer len");
             peers.chunks_exact(6).map(Peer::v4).collect()
         }
         None => hashset![],
@@ -56,7 +56,7 @@ pub async fn announce(req: AnnounceRequest<'_>) -> crate::Result<AnnounceRespons
     log::debug!("Found {} peers (v4): {:?}", peers.len(), peers);
 
     let peers6 = value.get_bytes("peers6").unwrap_or_default();
-    ensure!(peers6.len() % 18 == 0, "Invalid peer len");
+    anyhow::ensure!(peers6.len() % 18 == 0, "Invalid peer len");
 
     let peers6: HashSet<_> = peers6.chunks_exact(18).map(Peer::v6).collect();
     log::debug!("Found {} peers (v6): {:?}", peers6.len(), peers6);

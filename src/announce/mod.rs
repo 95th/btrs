@@ -44,7 +44,7 @@ impl<'a> Tracker<'a> {
         &mut self,
         info_hash: &InfoHash,
         peer_id: &PeerId,
-    ) -> crate::Result<AnnounceResponse> {
+    ) -> anyhow::Result<AnnounceResponse> {
         tokio::time::sleep_until(self.next_announce.into()).await;
 
         log::trace!("Announce to {}", self.url);
@@ -107,13 +107,13 @@ impl<'a> AnnounceRequest<'a> {
         }
     }
 
-    pub async fn announce(self, buf: &mut [u8]) -> crate::Result<AnnounceResponse> {
+    pub async fn announce(self, buf: &mut [u8]) -> anyhow::Result<AnnounceResponse> {
         if self.url.starts_with("http") {
             http::announce(self).await
         } else if self.url.starts_with("udp") {
             udp::announce(self, buf).await
         } else {
-            bail!("Unsupported tracker URL");
+            anyhow::bail!("Unsupported tracker URL");
         }
     }
 }

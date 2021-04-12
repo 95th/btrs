@@ -51,7 +51,7 @@ impl fmt::Debug for TorrentFile {
 }
 
 impl TorrentFile {
-    pub fn parse(bytes: impl AsRef<[u8]>) -> crate::Result<TorrentFile> {
+    pub fn parse(bytes: impl AsRef<[u8]>) -> anyhow::Result<TorrentFile> {
         let mut parser = Parser::new();
         let dict = parser.parse::<Dict>(bytes.as_ref())?;
         let announce = dict.get_str("announce").context("`announce` not found")?;
@@ -376,7 +376,7 @@ impl<'w, 'p, C: AsyncStream> Download<'w, 'p, C> {
         mut client: Client<C>,
         work: &'w WorkQueue<'p>,
         piece_tx: Sender<Piece>,
-    ) -> crate::Result<Download<'w, 'p, C>> {
+    ) -> anyhow::Result<Download<'w, 'p, C>> {
         client.send_unchoke().await?;
         client.send_interested().await?;
         client.conn.flush().await?;
@@ -402,7 +402,7 @@ impl<'w, 'p, C: AsyncStream> Download<'w, 'p, C> {
         })
     }
 
-    async fn download(&mut self) -> crate::Result<()> {
+    async fn download(&mut self) -> anyhow::Result<()> {
         log::trace!("download");
         loop {
             self.pick_pieces();
@@ -422,7 +422,7 @@ impl<'w, 'p, C: AsyncStream> Download<'w, 'p, C> {
         Ok(())
     }
 
-    async fn handle_msg(&mut self) -> crate::Result<()> {
+    async fn handle_msg(&mut self) -> anyhow::Result<()> {
         let msg = timeout(self.client.read_in_loop(), 5).await?;
 
         let (index, len) = match msg {
@@ -452,7 +452,7 @@ impl<'w, 'p, C: AsyncStream> Download<'w, 'p, C> {
         self.piece_done(p).await
     }
 
-    async fn piece_done(&mut self, state: PieceInProgress<'p>) -> crate::Result<()> {
+    async fn piece_done(&mut self, state: PieceInProgress<'p>) -> anyhow::Result<()> {
         log::trace!("Piece downloaded: {}", state.piece.index);
         if !state.piece.check_integrity(&state.buf) {
             log::error!("Bad piece: Hash mismatch for {}", state.piece.index);
@@ -497,7 +497,7 @@ impl<'w, 'p, C: AsyncStream> Download<'w, 'p, C> {
         }
     }
 
-    async fn fill_backlog(&mut self) -> crate::Result<()> {
+    async fn fill_backlog(&mut self) -> anyhow::Result<()> {
         if self.client.choked || self.backlog >= MIN_REQUESTS {
             // Either
             // - Choked - Wait for peer to send us an Unchoke

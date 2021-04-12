@@ -42,11 +42,11 @@ impl NodeId {
 
     pub fn from_hex(hex: &[u8]) -> anyhow::Result<Self> {
         let len = hex_decoder.decode_len(hex.len())?;
-        ensure!(len == 20, "Invalid hex for node ID");
+        anyhow::ensure!(len == 20, "Invalid hex for node ID");
 
         let mut id = Self::new();
         if let Err(e) = hex_decoder.decode_mut(hex, &mut id[..]) {
-            bail!("Unable to parse hex string: {:?}", e);
+            anyhow::bail!("Unable to parse hex string: {:?}", e);
         }
 
         Ok(id)
@@ -58,7 +58,7 @@ impl NodeId {
 
     pub fn encode_hex(&self, buf: &mut [u8]) -> anyhow::Result<()> {
         let len = hex_decoder.encode_len(self.len());
-        ensure!(len == buf.len(), "Invalid hex for node ID");
+        anyhow::ensure!(len == buf.len(), "Invalid hex for node ID");
 
         hex_decoder.encode_mut(&self[..], buf);
         Ok(())
