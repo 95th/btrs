@@ -61,46 +61,53 @@ pub async fn download(mut torrent: Torrent) -> btrs::Result<()> {
     let mut worker = torrent.worker();
     let num_pieces = worker.num_pieces();
 
-    let (piece_tx, mut piece_rx) = mpsc::channel::<Piece>(200);
+    let (piece_tx, piece_rx) = mpsc::channel::<Piece>(200);
 
-    let writer_task = async move {
-        let mut file = fs::OpenOptions::new()
-            .create_new(true)
-            .write(true)
-            .open(torrent_name)
-            .unwrap();
-        let mut storage = StorageWriter::new(&mut file, piece_len);
-        let mut bitfield = BitField::new(num_pieces);
-        let mut downloaded = 0;
-        let mut tick = Instant::now();
-
-        while let Some(piece) = piece_rx.next().await {
-            let index = piece.index as usize;
-            match bitfield.get(index) {
-                Some(true) => error!("Duplicate piece downloaded: {}", index),
-                None => error!("Unexpected piece downloaded: {}", index),
-                _ => {}
-            }
-
-            storage.insert(piece).unwrap();
-            bitfield.set(index, true);
-
-            downloaded += piece_len;
-            let now = Instant::now();
-            if now - tick >= Duration::from_secs(1) {
-                println!(
-                    "{} kBps",
-                    downloaded / 1000 / (now - tick).as_secs() as usize
-                );
-                downloaded = 0;
-                tick = now;
-            }
-        }
-        println!("All pieces downloaded: {}", bitfield.all_true());
-        println!("File downloaded; size: {}", file.metadata().unwrap().len());
-    };
-
+    let writer_task = write_to_file(torrent_name, piece_len, num_pieces, piece_rx);
     let download_task = worker.run_worker(piece_tx);
+
     futures::join!(writer_task, download_task);
     Ok(())
+}
+
+async fn write_to_file(
+    torrent_name: String,
+    piece_len: usize,
+    num_pieces: usize,
+    mut piece_rx: mpsc::Receiver<Piece>,
+) {
+    let mut file = fs::OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(torrent_name)
+        .unwrap();
+    let mut storage = StorageWriter::new(&mut file, piece_len);
+    let mut bitfield = BitField::new(num_pieces);
+    let mut downloaded = 0;
+    let mut tick = Instant::now();
+
+    while let Some(piece) = piece_rx.next().await {
+        let index = piece.index as usize;
+        match bitfield.get(index) {
+            Some(true) => error!("Duplicate piece downloaded: {}", index),
+            None => error!("Unexpected piece downloaded: {}", index),
+            _ => {}
+        }
+
+        storage.insert(piece).unwrap();
+        bitfield.set(index, true);
+
+        downloaded += piece_len;
+        let now = Instant::now();
+        if now - tick >= Duration::from_secs(1) {
+            println!(
+                "{} kBps",
+                downloaded / 1000 / (now - tick).as_secs() as usize
+            );
+            downloaded = 0;
+            tick = now;
+        }
+    }
+    println!("All pieces downloaded: {}", bitfield.all_true());
+    println!("File downloaded; size: {}", file.metadata().unwrap().len());
 }
