@@ -119,7 +119,7 @@ impl Message {
         }
 
         let id = reader.read_u8().await?;
-        trace!("got id: {}", id);
+        log::trace!("got id: {}", id);
 
         let msg = match id {
             0 => {
@@ -181,16 +181,16 @@ impl Message {
         R: AsyncRead + Unpin,
     {
         use Message::*;
-        trace!("read_discard: {:?}", self);
+        log::trace!("read_discard: {:?}", self);
         if let Piece { len, .. } | Bitfield { len } | Extended { len } | Unknown { len, .. } = *self
         {
             let total = len as usize;
-            trace!("have to ignore {} bytes", total);
+            log::trace!("have to ignore {} bytes", total);
             let mut done = 0;
             let mut buf = [0u8; 1024];
             while done < total {
                 let n = (total - done).min(1024);
-                trace!("Reading ignore bytes: {}", n);
+                log::trace!("Reading ignore bytes: {}", n);
                 rdr.read_exact(&mut buf[..n]).await?;
                 done += n;
             }
@@ -208,7 +208,7 @@ impl Message {
                 ensure!(begin <= buf.len(), "Begin offset too high");
 
                 let len = len as usize;
-                trace!("Reading piece message of len: {}", len);
+                log::trace!("Reading piece message of len: {}", len);
 
                 ensure!(begin + len <= buf.len(), "Data too large");
 
@@ -226,7 +226,7 @@ impl Message {
         match *self {
             Message::Bitfield { len } => {
                 let len = len as usize;
-                trace!("Reading bitfield message of len: {}", len);
+                log::trace!("Reading bitfield message of len: {}", len);
                 ensure!(len <= buf.len(), "Data too large");
 
                 rdr.read_exact(&mut buf[..len]).await?;
@@ -248,7 +248,7 @@ impl Message {
         match *self {
             Self::Extended { len } => {
                 let len = len as usize;
-                trace!("Reading ext message of len: {}", len);
+                log::trace!("Reading ext message of len: {}", len);
                 buf.clear();
                 buf.resize(len as usize, 0);
                 rdr.read_exact(buf).await?;
@@ -276,10 +276,10 @@ impl<'a, 'p> ExtendedMessage<'a, 'p> {
     pub fn parse(data: &'a [u8], parser: &'p mut Parser) -> crate::Result<Self> {
         let id = data[0];
         let (value, i) = parser.parse_prefix::<Decoder>(&data[1..])?;
-        debug!("ext header len: {}", value.as_raw_bytes().len());
+        log::debug!("ext header len: {}", value.as_raw_bytes().len());
 
         let rest = &data[i + 1..];
-        debug!("ext data len: {}", rest.len());
+        log::debug!("ext data len: {}", rest.len());
         Ok(Self { id, value, rest })
     }
 
@@ -292,7 +292,7 @@ impl<'a, 'p> ExtendedMessage<'a, 'p> {
     }
 
     pub fn metadata(&self) -> Option<Metadata> {
-        trace!("metadata: {:#?}", self.value);
+        log::trace!("metadata: {:#?}", self.value);
         let dict = self.value.as_dict()?;
         let m = dict.get_dict("m")?;
         let id = m.get_int("ut_metadata")? as u8;
@@ -301,7 +301,7 @@ impl<'a, 'p> ExtendedMessage<'a, 'p> {
     }
 
     pub fn data(&self, expected_piece: i64) -> crate::Result<&[u8]> {
-        trace!("data: {:#?}", self.value);
+        log::trace!("data: {:#?}", self.value);
         let dict = self.value.as_dict().context("Not a dict")?;
 
         let msg_type = dict.get_int("msg_type").context("`msg_type` not found")?;

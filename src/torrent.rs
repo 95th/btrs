@@ -181,7 +181,7 @@ impl<'a> TorrentWorker<'a> {
                     new_dht.as_mut()
                 }
                 Err(e) => {
-                    warn!("Dht failed to start: {}", e);
+                    log::warn!("Dht failed to start: {}", e);
                     None
                 }
             },
@@ -246,7 +246,7 @@ impl<'a> TorrentWorker<'a> {
                         pending_downloads.push(dl);
                         connected.push(peer.clone());
 
-                        trace!(
+                        log::trace!(
                             "{} active connections, {} pending trackers, {} pending downloads",
                             connected.len(),
                             pending_trackers.len(),
@@ -272,7 +272,7 @@ impl<'a> TorrentWorker<'a> {
                                 all_peers.retain(|p| !failed.contains(p));
                                 all_peers6.retain(|p| !failed.contains(p));
                             }
-                            Err(e) => warn!("Announce error: {}", e),
+                            Err(e) => log::warn!("Announce error: {}", e),
                         }
                     }
                     Poll::Ready(None) => {}
@@ -290,7 +290,7 @@ impl<'a> TorrentWorker<'a> {
                                 all_peers.retain(|p| !failed.contains(p));
                                 all_peers6.retain(|p| !failed.contains(p));
                             }
-                            Err(e) => warn!("DHT announce error: {}", e),
+                            Err(e) => log::warn!("DHT announce error: {}", e),
                         }
                     }
                     Poll::Ready(None) => {}
@@ -300,7 +300,7 @@ impl<'a> TorrentWorker<'a> {
                 match futures::ready!(pending_downloads.as_mut().poll_next(cx)) {
                     Some(result) => {
                         if let Err((e, peer)) = result {
-                            warn!("Error occurred for peer {} : {}", peer.addr, e);
+                            log::warn!("Error occurred for peer {} : {}", peer.addr, e);
                             match connected.iter().position(|p| *p == peer) {
                                 Some(pos) => {
                                     connected.swap_remove(pos);
@@ -382,9 +382,9 @@ impl<'w, 'p, C: AsyncStream> Download<'w, 'p, C> {
         client.conn.flush().await?;
 
         while client.choked {
-            trace!("We're choked. Waiting for unchoke");
+            log::trace!("We're choked. Waiting for unchoke");
             if let Some(msg) = client.read().await? {
-                warn!("Ignoring: {:?}", msg);
+                log::warn!("Ignoring: {:?}", msg);
                 msg.read_discard(&mut client.conn).await?;
             }
         }
@@ -403,11 +403,11 @@ impl<'w, 'p, C: AsyncStream> Download<'w, 'p, C> {
     }
 
     async fn download(&mut self) -> crate::Result<()> {
-        trace!("download");
+        log::trace!("download");
         loop {
             self.pick_pieces();
 
-            trace!("Pending pieces: {}", self.in_progress.len());
+            log::trace!("Pending pieces: {}", self.in_progress.len());
             if self.in_progress.is_empty() && self.backlog == 0 {
                 // No new pieces to download and no pending requests
                 // We're done
@@ -416,7 +416,7 @@ impl<'w, 'p, C: AsyncStream> Download<'w, 'p, C> {
 
             self.fill_backlog().await?;
 
-            trace!("Current backlog: {}", self.backlog);
+            log::trace!("Current backlog: {}", self.backlog);
             self.handle_msg().await?;
         }
         Ok(())
@@ -441,7 +441,7 @@ impl<'w, 'p, C: AsyncStream> Download<'w, 'p, C> {
         msg.read_piece(&mut self.client.conn, &mut p.buf).await?;
         p.downloaded += len;
         self.backlog -= 1;
-        trace!("current index {}: {}/{}", index, p.downloaded, p.piece.len);
+        log::trace!("current index {}: {}/{}", index, p.downloaded, p.piece.len);
 
         if p.downloaded < p.piece.len {
             // Not done yet
@@ -453,14 +453,14 @@ impl<'w, 'p, C: AsyncStream> Download<'w, 'p, C> {
     }
 
     async fn piece_done(&mut self, state: PieceInProgress<'p>) -> crate::Result<()> {
-        trace!("Piece downloaded: {}", state.piece.index);
+        log::trace!("Piece downloaded: {}", state.piece.index);
         if !state.piece.check_integrity(&state.buf) {
-            error!("Bad piece: Hash mismatch for {}", state.piece.index);
+            log::error!("Bad piece: Hash mismatch for {}", state.piece.index);
             self.work.borrow_mut().push_back(state.piece);
             return Ok(());
         }
 
-        info!("Downloaded and Verified {} piece", state.piece.index);
+        log::info!("Downloaded and Verified {} piece", state.piece.index);
         self.client.send_have(state.piece.index).await?;
         let piece = Piece {
             index: state.piece.index,
@@ -527,7 +527,7 @@ impl<'w, 'p, C: AsyncStream> Download<'w, 'p, C> {
             self.last_requested_blocks = self.backlog;
             self.last_requested = Instant::now();
 
-            trace!("Flushing the client");
+            log::trace!("Flushing the client");
             timeout(self.client.conn.flush(), 5).await
         } else {
             Ok(())
@@ -535,7 +535,7 @@ impl<'w, 'p, C: AsyncStream> Download<'w, 'p, C> {
     }
 
     fn adjust_watermark(&mut self) {
-        debug!("Old max_requests: {}", self.max_requests);
+        log::debug!("Old max_requests: {}", self.max_requests);
 
         let millis = (Instant::now() - self.last_requested).as_millis();
         if millis == 0 {
@@ -554,7 +554,7 @@ impl<'w, 'p, C: AsyncStream> Download<'w, 'p, C> {
             self.max_requests = rate.min(MAX_REQUESTS);
         }
 
-        debug!("New max_requests: {}", self.max_requests);
+        log::debug!("New max_requests: {}", self.max_requests);
     }
 }
 

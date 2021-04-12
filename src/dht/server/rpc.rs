@@ -36,7 +36,7 @@ impl RpcMgr {
         msg.encode(&mut self.buf);
 
         let n = self.socket.send_to(&self.buf, addr).await?;
-        trace!("Sent: {} bytes to {}", n, addr);
+        log::trace!("Sent: {} bytes to {}", n, addr);
 
         ensure!(n == self.buf.len(), "Failed to send complete message");
         Ok(())
@@ -44,10 +44,10 @@ impl RpcMgr {
 
     pub async fn recv(&mut self) -> anyhow::Result<(Msg<'_, '_>, SocketAddr)> {
         let (n, addr) = self.socket.recv_from(&mut self.recv_buf).await?;
-        trace!("Received: {} bytes from {}", n, addr);
+        log::trace!("Received: {} bytes from {}", n, addr);
 
         let msg = self.parser.parse(&self.recv_buf[..n])?;
-        trace!("{:#?}", msg);
+        log::trace!("{:#?}", msg);
         Ok((msg, addr))
     }
 
@@ -127,7 +127,7 @@ impl Transactions {
 
             f(&request.id);
 
-            trace!("Txn {:?} expired", txn_id);
+            log::trace!("Txn {:?} expired", txn_id);
             false
         });
     }

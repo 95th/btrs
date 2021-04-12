@@ -55,7 +55,7 @@ impl<'a> UdpTracker<'a> {
     async fn connect(&mut self, buf: &mut [u8]) -> crate::Result<()> {
         self.update_txn_id();
 
-        trace!("Sending connect to {}, txn id: {}", self.addr, self.txn_id);
+        log::trace!("Sending connect to {}, txn id: {}", self.addr, self.txn_id);
 
         let n = self.write_connect(buf)?;
         let written = self.socket.send_to(&buf[..n], &self.addr).await?;
@@ -63,7 +63,7 @@ impl<'a> UdpTracker<'a> {
 
         let (_, mut c) = self.read_response(action::CONNECT, buf, 16).await?;
         let conn_id = c.read_u64::<BE>()?;
-        trace!("conn_id: {}", conn_id);
+        log::trace!("conn_id: {}", conn_id);
         self.conn_id = conn_id;
 
         Ok(())
@@ -72,7 +72,7 @@ impl<'a> UdpTracker<'a> {
     async fn announce(&mut self, buf: &mut [u8]) -> crate::Result<AnnounceResponse> {
         self.update_txn_id();
 
-        trace!("Sending announce to {}, txn id: {}", self.addr, self.txn_id);
+        log::trace!("Sending announce to {}, txn id: {}", self.addr, self.txn_id);
 
         let n = self.write_announce(buf)?;
         let written = self.socket.send_to(&buf[..n], &self.addr).await?;
@@ -84,9 +84,9 @@ impl<'a> UdpTracker<'a> {
         let leechers = c.read_u32::<BE>()?;
         let seeders = c.read_u32::<BE>()?;
 
-        trace!("interval: {}", interval);
-        trace!("seeders: {}", seeders);
-        trace!("leechers: {}", leechers);
+        log::trace!("interval: {}", interval);
+        log::trace!("seeders: {}", seeders);
+        log::trace!("leechers: {}", leechers);
 
         let mut n = len - 20;
         ensure!(n % 6 == 0, "IPs should be 6 byte each");
@@ -101,7 +101,7 @@ impl<'a> UdpTracker<'a> {
             n -= 6;
         }
 
-        trace!("Got peers: {:?}", peers);
+        log::trace!("Got peers: {:?}", peers);
 
         let resp = AnnounceResponse {
             interval: interval as u64,
@@ -130,7 +130,7 @@ impl<'a> UdpTracker<'a> {
         let action = c.read_u32::<BE>()?;
         let txn_id = c.read_u32::<BE>()?;
 
-        trace!("Received action: {}, txn_id: {}", action, txn_id);
+        log::trace!("Received action: {}, txn_id: {}", action, txn_id);
 
         ensure!(expected_action == action, "Incorrect msg action received");
         ensure!(self.txn_id == txn_id, "Txn Id mismatch");
@@ -174,7 +174,7 @@ async fn resolve_addr(url: &str) -> crate::Result<SocketAddr> {
 
     let mut result = lookup_host((host, port)).await?;
     if let Some(addr) = result.next() {
-        trace!("Resolved {}/{} to {}", host, port, addr);
+        log::trace!("Resolved {}/{} to {}", host, port, addr);
         Ok(addr)
     } else {
         bail!("Host/port is not resolved to a socket addr")

@@ -27,7 +27,7 @@ impl BootstrapTraversal {
     }
 
     pub async fn start(&mut self, table: &mut RoutingTable, rpc: &mut RpcMgr) {
-        trace!("Start BOOTSTRAP traversal");
+        log::trace!("Start BOOTSTRAP traversal");
         let mut closest = Vec::with_capacity(Bucket::MAX_LEN);
         table.find_closest(&self.target, &mut closest, Bucket::MAX_LEN);
         for c in closest {
@@ -48,7 +48,7 @@ impl BootstrapTraversal {
     }
 
     pub fn prune(&mut self, table: &mut RoutingTable) {
-        trace!("Prune BOOTSTRAP traversal");
+        log::trace!("Prune BOOTSTRAP traversal");
         let nodes = &mut self.nodes;
         self.txns.prune_with(table, |id| {
             if let Some(node) = nodes.iter_mut().find(|node| &node.id == id) {
@@ -68,7 +68,7 @@ impl BootstrapTraversal {
                 if &req.id == resp.id {
                     table.heard_from(&req.id);
                 } else {
-                    warn!("ID mismatch from {}", addr);
+                    log::warn!("ID mismatch from {}", addr);
                     table.failed(&req.id);
                     return true;
                 }
@@ -83,7 +83,7 @@ impl BootstrapTraversal {
             return false;
         }
 
-        trace!("Handle BOOTSTRAP traversal response");
+        log::trace!("Handle BOOTSTRAP traversal response");
 
         let result = table.read_nodes_with(resp, |c| {
             if !self.nodes.iter().any(|n| &n.id == c.id) {
@@ -92,7 +92,7 @@ impl BootstrapTraversal {
         });
 
         if let Err(e) = result {
-            warn!("{}", e);
+            log::warn!("{}", e);
         }
 
         let target = &self.target;
@@ -103,7 +103,7 @@ impl BootstrapTraversal {
     }
 
     pub async fn invoke(&mut self, rpc: &mut RpcMgr) -> bool {
-        trace!("Invoke BOOTSTRAP traversal");
+        log::trace!("Invoke BOOTSTRAP traversal");
         let mut outstanding = 0;
         let mut alive = 0;
 
@@ -141,7 +141,7 @@ impl BootstrapTraversal {
                     outstanding += 1;
                 }
                 Err(e) => {
-                    warn!("{}", e);
+                    log::warn!("{}", e);
                     n.status.insert(Status::FAILED);
                 }
             }
@@ -151,6 +151,6 @@ impl BootstrapTraversal {
     }
 
     pub fn done(self) {
-        debug!("Done bootstrapping");
+        log::debug!("Done bootstrapping");
     }
 }

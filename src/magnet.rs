@@ -59,7 +59,7 @@ impl MagnetUri {
                     Ok(data) => {
                         if let Some(t) = self.read_info(&data) {
                             drop(futures);
-                            trace!("Metadata requested successfully");
+                            log::trace!("Metadata requested successfully");
                             return Ok(Torrent {
                                 peer_id,
                                 info_hash: self.info_hash.clone(),
@@ -74,19 +74,19 @@ impl MagnetUri {
                             });
                         }
                     }
-                    Err(e) => debug!("Error : {}", e),
+                    Err(e) => log::debug!("Error : {}", e),
                 }
             }
         }
     }
 
     fn read_info(&self, data: &[u8]) -> Option<TorrentInfo> {
-        trace!("Read torrent info, len: {}", data.len());
+        log::trace!("Read torrent info, len: {}", data.len());
         let mut parser = Parser::new();
         let info_dict = match parser.parse::<Dict>(data) {
             Ok(d) => d,
             Err(e) => {
-                warn!("{}", e);
+                log::warn!("{}", e);
                 return None;
             }
         };
@@ -106,7 +106,7 @@ impl MagnetUri {
         &self,
         peer_id: &PeerId,
     ) -> crate::Result<(HashSet<Peer>, HashSet<Peer>, Option<DhtTracker>)> {
-        debug!("Requesting peers");
+        log::debug!("Requesting peers");
 
         let mut futs: FuturesUnordered<_> = self
             .tracker_urls
@@ -126,11 +126,11 @@ impl MagnetUri {
                     peers.extend(r.peers);
                     peers6.extend(r.peers6);
                 }
-                Err(e) => debug!("Error: {}", e),
+                Err(e) => log::debug!("Error: {}", e),
             }
         }
 
-        debug!("Got {} v4 peers and {} v6 peers", peers.len(), peers6.len());
+        log::debug!("Got {} v4 peers and {} v6 peers", peers.len(), peers6.len());
 
         let mut dht_tracker = None;
         if peers.is_empty() && peers6.is_empty() {
@@ -139,7 +139,7 @@ impl MagnetUri {
                     peers.extend(p);
                 }
                 dht_tracker = Some(dht);
-                debug!(
+                log::debug!(
                     "Got {} v4 peers and {} v6 peers from DHT",
                     peers.len(),
                     peers6.len()
@@ -179,7 +179,7 @@ impl MagnetUri {
             .metadata()
             .context("Peer doesn't support Metadata extension")?;
 
-        debug!("{:?}", metadata);
+        log::debug!("{:?}", metadata);
         client.send_ext_handshake(metadata.id).await?;
 
         let mut remaining = metadata.len;

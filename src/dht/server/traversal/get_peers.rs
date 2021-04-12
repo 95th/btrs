@@ -35,7 +35,7 @@ impl GetPeersTraversal {
     }
 
     pub async fn start(&mut self, table: &mut RoutingTable, rpc: &mut RpcMgr) {
-        trace!("Start GET_PEERS traversal");
+        log::trace!("Start GET_PEERS traversal");
         let mut closest = Vec::with_capacity(Bucket::MAX_LEN);
         table.find_closest(&self.info_hash, &mut closest, Bucket::MAX_LEN);
         for c in closest {
@@ -56,7 +56,7 @@ impl GetPeersTraversal {
     }
 
     pub fn prune(&mut self, table: &mut RoutingTable) {
-        trace!("Prune GET_PEERS traversal");
+        log::trace!("Prune GET_PEERS traversal");
         let nodes = &mut self.nodes;
         self.txns.prune_with(table, |id| {
             if let Some(node) = nodes.iter_mut().find(|node| &node.id == id) {
@@ -76,7 +76,7 @@ impl GetPeersTraversal {
                 if &req.id == resp.id {
                     table.heard_from(&req.id);
                 } else {
-                    warn!("ID mismatch from {}", addr);
+                    log::warn!("ID mismatch from {}", addr);
                     table.failed(&req.id);
                     return true;
                 }
@@ -91,7 +91,7 @@ impl GetPeersTraversal {
             return false;
         }
 
-        trace!("Handle GET_PEERS traversal response");
+        log::trace!("Handle GET_PEERS traversal response");
 
         let result = table.read_nodes_with(resp, |c| {
             if !self.nodes.iter().any(|n| &n.id == c.id) {
@@ -100,7 +100,7 @@ impl GetPeersTraversal {
         });
 
         if let Err(e) = result {
-            warn!("{}", e);
+            log::warn!("{}", e);
         }
 
         if let Some(token) = resp.body.get_bytes("token") {
@@ -117,10 +117,10 @@ impl GetPeersTraversal {
                         return Some((ip, port).into());
                     }
                 } else {
-                    warn!("Incorrect Peer length. Expected: 6, Actual: {}", b.len());
+                    log::warn!("Incorrect Peer length. Expected: 6, Actual: {}", b.len());
                 }
             } else {
-                warn!("Unexpected Peer format: {:?}", d);
+                log::warn!("Unexpected Peer format: {:?}", d);
             }
 
             None
@@ -139,7 +139,7 @@ impl GetPeersTraversal {
     }
 
     pub async fn invoke(&mut self, rpc: &mut RpcMgr) -> bool {
-        trace!("Invoke GET_PEERS traversal");
+        log::trace!("Invoke GET_PEERS traversal");
         let mut outstanding = 0;
         let mut alive = 0;
 
@@ -177,7 +177,7 @@ impl GetPeersTraversal {
                     outstanding += 1;
                 }
                 Err(e) => {
-                    warn!("{}", e);
+                    log::warn!("{}", e);
                     n.status.insert(Status::FAILED);
                 }
             }
@@ -188,8 +188,8 @@ impl GetPeersTraversal {
 
     pub fn done(self) {
         match self.tx.send(self.peers) {
-            Ok(_) => debug!("Replied to GET_PEERS client request"),
-            Err(_) => warn!("Reply to GET_PEERS client request failed"),
+            Ok(_) => log::debug!("Replied to GET_PEERS client request"),
+            Err(_) => log::warn!("Reply to GET_PEERS client request failed"),
         }
     }
 }

@@ -31,7 +31,7 @@ impl RoutingTable {
 
         let bucket = &mut self.buckets[bucket_no];
         bucket.last_updated = Instant::now();
-        trace!("Refresh bucket: {}", bucket_no);
+        log::trace!("Refresh bucket: {}", bucket_no);
 
         let c = bucket
             .live
@@ -60,9 +60,9 @@ impl RoutingTable {
                 BucketResult::RequireSplit => {}
             }
 
-            trace!("Split the buckets, before count: {}", self.buckets.len());
+            log::trace!("Split the buckets, before count: {}", self.buckets.len());
             self.split_bucket();
-            trace!("Split the buckets, after count : {}", self.buckets.len());
+            log::trace!("Split the buckets, after count : {}", self.buckets.len());
 
             if let Some(last) = self.buckets.iter().last() {
                 if last.live.len() > Bucket::MAX_LEN {

@@ -7,7 +7,6 @@ use btrs::work::Piece;
 use clap::{App, Arg};
 use futures::channel::mpsc;
 use futures::StreamExt;
-use log::{debug, error, trace};
 use std::fs;
 use std::time::{Duration, Instant};
 
@@ -38,7 +37,7 @@ async fn main() -> btrs::Result<()> {
 pub async fn magnet(uri: &str) -> btrs::Result<()> {
     let magnet = MagnetUri::parse_lenient(uri)?;
     let peer_id = peer::generate_peer_id();
-    debug!("Our peer_id: {:?}", peer_id);
+    log::debug!("Our peer_id: {:?}", peer_id);
 
     let torrent = magnet.request_metadata(peer_id).await?;
     download(torrent).await
@@ -48,7 +47,7 @@ pub async fn torrent_file(file: &str) -> btrs::Result<()> {
     let buf = fs::read(file)?;
     let torrent_file = TorrentFile::parse(buf)?;
 
-    trace!("Parsed torrent file: {:#?}", torrent_file);
+    log::trace!("Parsed torrent file: {:#?}", torrent_file);
 
     let torrent = torrent_file.into_torrent();
     download(torrent).await
@@ -89,8 +88,8 @@ async fn write_to_file(
     while let Some(piece) = piece_rx.next().await {
         let index = piece.index as usize;
         match bitfield.get(index) {
-            Some(true) => error!("Duplicate piece downloaded: {}", index),
-            None => error!("Unexpected piece downloaded: {}", index),
+            Some(true) => log::error!("Duplicate piece downloaded: {}", index),
+            None => log::error!("Unexpected piece downloaded: {}", index),
             _ => {}
         }
 

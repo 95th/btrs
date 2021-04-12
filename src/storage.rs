@@ -13,7 +13,7 @@ impl<T: Storage> StorageWriter<T> {
     }
 
     pub fn insert(&mut self, piece: Piece) -> io::Result<()> {
-        trace!(
+        log::trace!(
             "Writing index {}, {} bytes [piece len: {}, so pieces: {}]",
             piece.index,
             piece.buf.len(),

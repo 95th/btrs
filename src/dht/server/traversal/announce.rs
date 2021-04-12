@@ -68,9 +68,9 @@ impl AnnounceTraversal {
             match rpc.send(&msg, &n.addr).await {
                 Ok(_) => {
                     announce_count += 1;
-                    debug!("Announced to {}", n.addr);
+                    log::debug!("Announced to {}", n.addr);
                 }
-                Err(e) => warn!("Announce failed to {}: {}", n.addr, e),
+                Err(e) => log::warn!("Announce failed to {}: {}", n.addr, e),
             }
         }
 

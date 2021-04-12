@@ -68,7 +68,7 @@ impl<'a, 'p> Decode<'a, 'p> for Msg<'a, 'p> {
                     b"get_peers" => QueryKind::GetPeers,
                     b"announce_peer" => QueryKind::AnnouncePeer,
                     other => {
-                        trace!("Unexpected Query type: {:?}", other);
+                        log::trace!("Unexpected Query type: {:?}", other);
                         return Err(Other("Unexpected Query type"));
                     }
                 };
@@ -93,7 +93,7 @@ impl<'a, 'p> Decode<'a, 'p> for Msg<'a, 'p> {
                 Msg::Error(ErrorResponse { txn_id, list })
             }
             other => {
-                trace!("Unexpected Message type: {:?}", other);
+                log::trace!("Unexpected Message type: {:?}", other);
                 return Err(Other("Unexpected Message type"));
             }
         };

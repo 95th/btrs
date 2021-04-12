@@ -15,9 +15,6 @@ macro_rules! hashset {
 #[macro_use]
 extern crate anyhow;
 
-#[macro_use]
-extern crate log;
-
 pub const CLIENT_NAME: &str = "95th 0.1";
 
 pub mod announce;

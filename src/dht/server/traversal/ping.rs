@@ -33,7 +33,7 @@ impl PingTraversal {
     }
 
     pub fn prune(&mut self, table: &mut RoutingTable) {
-        trace!("Prune PING traversal");
+        log::trace!("Prune PING traversal");
         if !self.done && self.sent < Instant::now() - Duration::from_secs(10) {
             table.failed(&self.node.id);
             self.done = true;
@@ -50,7 +50,7 @@ impl PingTraversal {
             return false;
         }
 
-        trace!("Handle PING traversal response");
+        log::trace!("Handle PING traversal response");
 
         if self.node.id == *resp.id && self.node.addr == *addr {
             table.add_contact(&ContactRef {
@@ -66,7 +66,7 @@ impl PingTraversal {
     }
 
     pub async fn invoke(&mut self, rpc: &mut RpcMgr) -> bool {
-        trace!("Invoke PING traversal");
+        log::trace!("Invoke PING traversal");
         if self.done {
             return true;
         }
@@ -83,13 +83,13 @@ impl PingTraversal {
                 false
             }
             Err(e) => {
-                warn!("{}", e);
+                log::warn!("{}", e);
                 true
             }
         }
     }
 
     pub fn done(self) {
-        debug!("Done Pinging");
+        log::debug!("Done Pinging");
     }
 }

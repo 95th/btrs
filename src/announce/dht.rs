@@ -28,7 +28,7 @@ impl DhtTracker {
     pub async fn announce(&mut self, info_hash: &InfoHash) -> crate::Result<Vec<Peer>> {
         tokio::time::sleep_until(self.next_announce.into()).await;
 
-        debug!("Announcing to DHT");
+        log::debug!("Announcing to DHT");
         let start = Instant::now();
 
         let (tx, rx) = oneshot::channel();
@@ -39,7 +39,7 @@ impl DhtTracker {
 
         let peers = rx.await?;
         let took = Instant::now() - start;
-        debug!(
+        log::debug!(
             "Announce completed in {} ms, got {} peers",
             took.as_millis(),
             peers.len()

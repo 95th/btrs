@@ -65,7 +65,7 @@ impl Server {
     }
 
     pub async fn run(mut self) {
-        debug!("Starting DHT server");
+        log::debug!("Starting DHT server");
         let target = self.own_id;
         self.refresh(&target).await;
 
@@ -80,7 +80,7 @@ impl Server {
 
             // Check if any request from client such as Announce/Shutdown
             if self.check_client_request().await {
-                debug!("Shutdown received from client");
+                log::debug!("Shutdown received from client");
                 // TODO: Save DHT state on disk
                 break;
             }
@@ -134,7 +134,7 @@ impl Server {
                 Ok(Some(x)) => x,
                 Ok(None) => continue,
                 Err(e) => {
-                    warn!("{}", e);
+                    log::warn!("{}", e);
                     continue;
                 }
             };
@@ -144,7 +144,7 @@ impl Server {
             }
         }
 
-        debug!(
+        log::debug!(
             "Table size:: live: {}, extra: {}",
             self.table.len(),
             self.table.len_extra()
@@ -194,7 +194,7 @@ impl Server {
             Ok(Some(x)) => x,
             Ok(None) => return,
             Err(e) => {
-                warn!("{}", e);
+                log::warn!("{}", e);
                 return;
             }
         };
@@ -215,11 +215,11 @@ impl Server {
 
 impl RoutingTable {
     fn handle_query(&mut self, query: &Query) {
-        debug!("Got query request: {:#?}", query);
+        log::debug!("Got query request: {:#?}", query);
     }
 
     fn handle_error(&mut self, err: &ErrorResponse) {
-        debug!("Got query request: {:#?}", err);
+        log::debug!("Got query request: {:#?}", err);
     }
 
     fn read_nodes_with<F>(&mut self, response: &Response, mut f: F) -> anyhow::Result<()>
