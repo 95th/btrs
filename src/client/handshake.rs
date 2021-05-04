@@ -51,7 +51,7 @@ impl<'a, C: AsyncStream> Handshake<'a, C> {
     pub async fn write(&mut self) -> io::Result<()> {
         log::trace!("Write handshake message");
         self.conn.write_all(PROTOCOL).await?;
-        self.conn.write_all(&self.extensions).await?;
+        self.conn.write_all(&self.extensions[..]).await?;
         self.conn.write_all(self.info_hash.as_ref()).await?;
         self.conn.write_all(&self.peer_id[..]).await?;
         self.conn.flush().await
@@ -66,9 +66,9 @@ impl<'a, C: AsyncStream> Handshake<'a, C> {
         anyhow::ensure!(buf.starts_with(PROTOCOL), "Invalid Protocol");
 
         let result = HandshakeResult {
-            extensions: buf[20..28].try_into().unwrap(),
+            extensions: Extensions::new(buf[20..28].try_into().unwrap()),
             info_hash: buf[28..48].try_into().unwrap(),
-            peer_id: buf[48..68].try_into().unwrap(),
+            peer_id: PeerId::new(buf[48..68].try_into().unwrap()),
         };
 
         anyhow::ensure!(*self.info_hash == result.info_hash, "InfoHash mismatch");

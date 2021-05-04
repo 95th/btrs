@@ -38,7 +38,7 @@ impl MagnetUri {
         parser::MagnetUriParser::new_lenient().parse(s)
     }
 
-    pub async fn request_metadata(&self, peer_id: Box<PeerId>) -> anyhow::Result<Torrent> {
+    pub async fn request_metadata(&self, peer_id: PeerId) -> anyhow::Result<Torrent> {
         let (peers, peers6, dht_tracker) = self.get_peers(&peer_id).await?;
 
         let mut iter = peers.iter().chain(&peers6);

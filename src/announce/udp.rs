@@ -17,7 +17,10 @@ mod action {
     pub const ANNOUNCE: u32 = 1;
 }
 
-pub async fn announce(req: AnnounceRequest<'_>, buf: &mut [u8]) -> anyhow::Result<AnnounceResponse> {
+pub async fn announce(
+    req: AnnounceRequest<'_>,
+    buf: &mut [u8],
+) -> anyhow::Result<AnnounceResponse> {
     let mut t = UdpTracker::new(req).await?;
     t.connect(buf).await?;
     t.announce(buf).await
@@ -152,7 +155,7 @@ impl<'a> UdpTracker<'a> {
         c.write_u32::<BE>(action::ANNOUNCE)?;
         c.write_u32::<BE>(self.txn_id)?;
         c.write_all(self.req.info_hash.as_ref())?;
-        c.write_all(&self.req.peer_id)?;
+        c.write_all(&self.req.peer_id[..])?;
         c.write_u64::<BE>(0)?; // downloaded
         c.write_u64::<BE>(0)?; // left
         c.write_u64::<BE>(0)?; // uploaded

@@ -36,7 +36,11 @@ impl<C: AsyncStream> Client<C> {
         }
     }
 
-    pub async fn handshake(&mut self, info_hash: &InfoHash, peer_id: &PeerId) -> anyhow::Result<()> {
+    pub async fn handshake(
+        &mut self,
+        info_hash: &InfoHash,
+        peer_id: &PeerId,
+    ) -> anyhow::Result<()> {
         let mut handshake = Handshake::new(&mut self.conn, info_hash, peer_id);
         handshake.set_extended(true);
         handshake.write().await?;

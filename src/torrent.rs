@@ -110,7 +110,7 @@ impl TorrentFile {
 }
 
 pub struct Torrent {
-    pub peer_id: Box<PeerId>,
+    pub peer_id: PeerId,
     pub info_hash: InfoHash,
     pub piece_hashes: Vec<u8>,
     pub piece_len: usize,
@@ -590,11 +590,11 @@ impl<'a> Iterator for PieceIter<'a> {
 
         let piece_len = self.piece_len as u32;
         let start = self.index * piece_len;
-        let end = start + piece_len;
+        let len = piece_len.min(self.length as u32 - start);
 
         let piece = PieceWork {
             index: self.index,
-            len: end.min(self.length as u32) - start,
+            len,
             hash,
         };
 

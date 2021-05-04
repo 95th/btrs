@@ -1,12 +1,40 @@
-use rand::distributions::Alphanumeric;
-use rand::Rng;
-use std::convert::TryInto;
-use std::fmt;
-use std::hash::Hash;
-use std::net::{IpAddr, SocketAddr};
+use rand::{distributions::Alphanumeric, Rng};
+use std::{
+    convert::TryInto,
+    fmt,
+    hash::Hash,
+    net::{IpAddr, SocketAddr},
+};
 
-pub type PeerId = [u8; 20];
-pub type Extensions = [u8; 8];
+macro_rules! thin_wrapper {
+    ($name:ident, $ty:ty) => {
+        #[derive(Default, Debug, Clone)]
+        pub struct $name($ty);
+
+        impl $name {
+            pub fn new(val: $ty) -> Self {
+                Self(val)
+            }
+        }
+
+        impl std::ops::Deref for $name {
+            type Target = $ty;
+
+            fn deref(&self) -> &Self::Target {
+                &self.0
+            }
+        }
+
+        impl std::ops::DerefMut for $name {
+            fn deref_mut(&mut self) -> &mut Self::Target {
+                &mut self.0
+            }
+        }
+    };
+}
+
+thin_wrapper!(PeerId, [u8; 20]);
+thin_wrapper!(Extensions, [u8; 8]);
 
 #[derive(Clone)]
 pub struct Peer {
@@ -57,11 +85,11 @@ impl Hash for Peer {
     }
 }
 
-pub fn generate_peer_id() -> Box<PeerId> {
+pub fn generate_peer_id() -> PeerId {
     let mut buf = *b"-UT3100-000000000000";
     rand::thread_rng()
         .sample_iter(&Alphanumeric)
         .zip(&mut buf[8..])
         .for_each(|(c, b)| *b = c as u8);
-    Box::new(buf)
+    PeerId::new(buf)
 }
