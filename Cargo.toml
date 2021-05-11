@@ -20,3 +20,7 @@ clap = "2.33.0"
 byteorder = "1.4.2"
 anyhow = "1.0.38"
 bitflags = "1.2.1"
+
+[[bin]]
+name = "dht"
+path = "src/dht/main.rs"

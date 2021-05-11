@@ -1,9 +1,9 @@
-use dht::id::NodeId;
-use dht::{ClientRequest, Server};
+use btrs::dht::id::NodeId;
+use btrs::dht::{ClientRequest, Server};
 use std::time::Duration;
 use tokio::sync::oneshot;
 
-#[tokio::main]
+#[tokio::main(flavor = "current_thread")]
 async fn main() -> anyhow::Result<()> {
     env_logger::init();
     let addrs = vec![
