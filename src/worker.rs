@@ -50,7 +50,7 @@ impl<'a> TorrentWorker<'a> {
         self.work.borrow().len()
     }
 
-    pub async fn run_worker(&mut self, piece_tx: Sender<Piece>) {
+    pub async fn run(&mut self, piece_tx: Sender<Piece>) {
         let work = &self.work;
         let info_hash = &*self.info_hash;
         let peer_id = &*self.peer_id;

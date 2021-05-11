@@ -63,7 +63,7 @@ pub async fn download(mut torrent: Torrent) -> anyhow::Result<()> {
     let (piece_tx, piece_rx) = mpsc::channel::<Piece>(200);
 
     let writer_task = write_to_file(torrent_name, piece_len, num_pieces, piece_rx);
-    let download_task = worker.run_worker(piece_tx);
+    let download_task = worker.run(piece_tx);
 
     futures::join!(writer_task, download_task);
     Ok(())
