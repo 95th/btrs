@@ -5,8 +5,6 @@ use std::collections::VecDeque;
 
 pub type WorkQueue<'a> = RefCell<VecDeque<PieceInfo<'a>>>;
 
-const HASH_LEN: usize = 20;
-
 #[derive(Debug)]
 pub struct PieceInfo<'a> {
     pub index: u32,
@@ -46,7 +44,7 @@ impl Ord for Piece {
     }
 }
 
-pub struct PieceIter<'a> {
+pub struct PieceIter<'a, const N: usize> {
     piece_hashes: &'a [u8],
     piece_len: usize,
     length: usize,
@@ -54,7 +52,7 @@ pub struct PieceIter<'a> {
     count: u32,
 }
 
-impl<'a> PieceIter<'a> {
+impl<'a, const N: usize> PieceIter<'a, N> {
     pub fn new(piece_hashes: &'a [u8], piece_len: usize, length: usize) -> Self {
         Self {
             piece_hashes,
@@ -66,7 +64,7 @@ impl<'a> PieceIter<'a> {
     }
 }
 
-impl<'a> Iterator for PieceIter<'a> {
+impl<'a, const N: usize> Iterator for PieceIter<'a, N> {
     type Item = PieceInfo<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -74,7 +72,7 @@ impl<'a> Iterator for PieceIter<'a> {
             return None;
         }
 
-        let hash = &self.piece_hashes[self.index as usize * HASH_LEN..][..HASH_LEN];
+        let hash = &self.piece_hashes[self.index as usize * N..][..N];
 
         let piece_len = self.piece_len as u32;
         let start = self.index * piece_len;
