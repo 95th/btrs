@@ -3,6 +3,7 @@ use crate::dht::{Client, ClientRequest, Server};
 use crate::metainfo::InfoHash;
 use crate::peer::Peer;
 use std::time::Instant;
+use tokio::net::lookup_host;
 use tokio::sync::oneshot;
 
 pub struct DhtTracker {
@@ -12,11 +13,10 @@ pub struct DhtTracker {
 
 impl DhtTracker {
     pub async fn new() -> anyhow::Result<Self> {
-        let addrs = vec![
-            "192.168.43.212:17742".parse()?,
-            "82.221.103.244:6881".parse()?,
-        ];
-        let server = Server::new(6881, addrs).await?;
+        let mut dht_routers = vec![];
+        dht_routers.extend(lookup_host("dht.libtorrent.org:25401").await?);
+
+        let server = Server::new(6881, dht_routers).await?;
         let client = server.new_client();
         tokio::spawn(server.run());
         Ok(Self {

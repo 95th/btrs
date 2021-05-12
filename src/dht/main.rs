@@ -1,17 +1,16 @@
 use btrs::dht::id::NodeId;
 use btrs::dht::{ClientRequest, Server};
-use std::time::Duration;
+use std::{net::ToSocketAddrs, time::Duration};
 use tokio::sync::oneshot;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> anyhow::Result<()> {
     env_logger::init();
-    let addrs = vec![
-        "192.168.43.212:17742".parse()?,
-        "82.221.103.244:6881".parse()?,
-    ];
 
-    let server = Server::new(6881, addrs).await?;
+    let mut dht_routers = vec![];
+    dht_routers.extend("dht.libtorrent.org:25401".to_socket_addrs()?);
+
+    let server = Server::new(6881, dht_routers).await?;
     let client = server.new_client();
     tokio::spawn(server.run());
 
