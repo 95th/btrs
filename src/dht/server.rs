@@ -13,6 +13,8 @@ use traversal::{
     AnnounceTraversal, BootstrapTraversal, GetPeersTraversal, PingTraversal, Traversal,
 };
 
+use super::future::poll_once;
+
 mod rpc;
 mod traversal;
 
@@ -163,17 +165,20 @@ impl Server {
         self.running.push(Traversal::Announce(t));
     }
 
+    /// Check for client requests.
+    /// Returns `true` if server should shutdown.
     async fn check_client_request(&mut self) -> bool {
-        let req = self.client_rx.recv();
-        let req = match tokio::time::timeout(Duration::from_millis(1), req).await {
+        let fut = poll_once(|cx| self.client_rx.poll_recv(cx));
+
+        let req = match fut.await {
             // Got a request
-            Ok(Some(req)) => req,
+            Some(Some(req)) => req,
 
             // Channel closed
-            Ok(None) => return true,
+            Some(None) => return true,
 
-            // Timed out
-            Err(_) => return false,
+            // Not ready
+            None => return false,
         };
 
         match req {
