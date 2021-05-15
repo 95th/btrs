@@ -6,4 +6,4 @@ pub mod msg;
 mod server;
 pub mod table;
 
-pub use server::{Client, ClientRequest, Server};
+pub use server::Dht;

@@ -1,10 +1,10 @@
 use crate::dht::contact::ContactRef;
+use crate::dht::server::request::{DhtNode, Status};
+use crate::dht::server::RpcMgr;
 use crate::dht::id::NodeId;
 use crate::dht::msg::recv::Response;
 use crate::dht::msg::send::Ping;
 use crate::dht::msg::TxnId;
-use crate::dht::server::request::{DhtNode, Status};
-use crate::dht::server::RpcMgr;
 use crate::dht::table::RoutingTable;
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
@@ -87,9 +87,5 @@ impl PingRequest {
                 true
             }
         }
-    }
-
-    pub fn done(self) {
-        log::debug!("Done Ping");
     }
 }

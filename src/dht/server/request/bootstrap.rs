@@ -146,8 +146,4 @@ impl BootstrapRequest {
 
         outstanding == 0 && alive == Bucket::MAX_LEN || self.txns.is_empty()
     }
-
-    pub fn done(self) {
-        log::debug!("Done BOOTSTRAP");
-    }
 }

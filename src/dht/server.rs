@@ -1,71 +1,51 @@
-use crate::dht::contact::{CompactNodes, CompactNodesV6, ContactRef};
 use crate::dht::id::NodeId;
 use crate::dht::msg::recv::{ErrorResponse, Msg, Query, Response};
 use crate::dht::table::{Refresh, RoutingTable};
+use crate::dht::{
+    contact::{CompactNodes, CompactNodesV6, ContactRef},
+    server::request::AnnounceRequest,
+};
 use request::DhtRequest;
 use rpc::{RpcMgr, Transactions};
 use std::net::SocketAddr;
 use std::time::Duration;
 use tokio::net::UdpSocket;
-use tokio::sync::mpsc::{self, Receiver, Sender};
-
-use super::future::poll_once;
 
 mod request;
 mod rpc;
 
-type PeerSender = mpsc::Sender<SocketAddr>;
-
-pub struct Server {
+pub struct Dht {
     rpc: RpcMgr,
     table: RoutingTable,
     own_id: NodeId,
-    client_rx: Receiver<ClientRequest>,
-    client_tx: Sender<ClientRequest>,
     running: Vec<DhtRequest>,
 }
 
-#[derive(Clone)]
-pub struct Client {
-    pub tx: Sender<ClientRequest>,
-}
-
-#[derive(Debug)]
-pub enum ClientRequest {
-    Announce(NodeId, PeerSender),
-    GetPeers(NodeId, PeerSender),
-    Shutdown,
-}
-
-impl Server {
-    pub async fn new(port: u16, router_nodes: Vec<SocketAddr>) -> anyhow::Result<Server> {
+impl Dht {
+    pub async fn new(port: u16, router_nodes: Vec<SocketAddr>) -> anyhow::Result<Dht> {
         let addr = SocketAddr::from(([0u8; 4], port));
         let socket = UdpSocket::bind(addr).await?;
         let id = NodeId::gen();
-        let (client_tx, client_rx) = mpsc::channel(100);
 
-        let server = Server {
+        let server = Dht {
             rpc: RpcMgr::new(socket),
             table: RoutingTable::new(id, router_nodes),
             own_id: id,
-            client_tx,
-            client_rx,
             running: vec![],
         };
 
         Ok(server)
     }
 
-    pub fn new_client(&self) -> Client {
-        Client {
-            tx: self.client_tx.clone(),
-        }
+    pub async fn bootstrap(&mut self) -> anyhow::Result<()> {
+        let target = self.own_id;
+        self.refresh(&target).await?;
+        Ok(())
     }
 
-    pub async fn run(mut self) {
-        log::debug!("Starting DHT server");
-        let target = self.own_id;
-        self.refresh(&target).await;
+    pub async fn announce(&mut self, info_hash: &NodeId) -> anyhow::Result<Vec<SocketAddr>> {
+        log::debug!("Start announce for {:?}", info_hash);
+        let mut req = AnnounceRequest::new(info_hash, &self.own_id, &mut self.table);
 
         loop {
             // refresh the table
@@ -77,32 +57,32 @@ impl Server {
             }
 
             // Housekeep running requests
-            self.check_running().await;
+            self.check_running().await?;
 
-            // Check if any request from client such as Announce/Shutdown
-            if self.check_client_request().await {
-                log::debug!("Shutdown received from client");
-                // TODO: Save DHT state on disk
-                break;
+            req.prune(&mut self.table);
+
+            if req.invoke(&mut self.rpc).await? {
+                return Ok(req.get_peers());
             }
 
             // Wait for socket response
-            self.recv_response(Duration::from_secs(1)).await;
+            self.recv_response(Duration::from_secs(1), &mut req).await?;
         }
     }
 
-    async fn check_running(&mut self) {
+    async fn check_running(&mut self) -> anyhow::Result<()> {
         let mut i = 0;
         while let Some(t) = self.running.get_mut(i) {
             t.prune(&mut self.table);
 
-            if t.invoke(&mut self.rpc).await {
-                let t = self.running.swap_remove(i);
-                t.done();
+            if t.invoke(&mut self.rpc).await? {
+                self.running.swap_remove(i);
             } else {
                 i += 1;
             }
         }
+
+        Ok(())
     }
 
     fn submit_refresh(&mut self, target: &NodeId) {
@@ -115,24 +95,19 @@ impl Server {
         self.running.push(request);
     }
 
-    async fn refresh(&mut self, target: &NodeId) {
+    async fn refresh(&mut self, target: &NodeId) -> anyhow::Result<()> {
         let mut request = DhtRequest::new_bootstrap(target, &self.own_id, &mut self.table);
 
         loop {
-            if request.invoke(&mut self.rpc).await {
-                request.done();
+            if request.invoke(&mut self.rpc).await? {
                 break;
             }
 
             request.prune(&mut self.table);
 
-            let (msg, addr) = match self.rpc.recv_timeout(Duration::from_secs(1)).await {
-                Ok(Some(x)) => x,
-                Ok(None) => continue,
-                Err(e) => {
-                    log::warn!("{}", e);
-                    continue;
-                }
+            let (msg, addr) = match self.rpc.recv_timeout(Duration::from_secs(1)).await? {
+                Some(x) => x,
+                None => continue,
             };
 
             if let Msg::Response(resp) = msg {
@@ -145,59 +120,36 @@ impl Server {
             self.table.len(),
             self.table.len_extra()
         );
+
+        Ok(())
     }
 
-    pub fn submit_get_peers(&mut self, info_hash: &NodeId, tx: PeerSender) {
-        let request = DhtRequest::new_get_peers(info_hash, &self.own_id, tx, &mut self.table);
+    pub fn submit_get_peers(&mut self, info_hash: &NodeId) {
+        let request = DhtRequest::new_get_peers(info_hash, &self.own_id, &mut self.table);
         self.running.push(request);
     }
 
-    pub fn submit_announce(&mut self, info_hash: &NodeId, tx: PeerSender) {
-        let request = DhtRequest::new_announce(info_hash, &self.own_id, tx, &mut self.table);
+    pub fn submit_announce(&mut self, info_hash: &NodeId) {
+        let request = DhtRequest::new_announce(info_hash, &self.own_id, &mut self.table);
         self.running.push(request);
     }
 
-    /// Check for client requests.
-    /// Returns `true` if server should shutdown.
-    async fn check_client_request(&mut self) -> bool {
-        let fut = poll_once(|cx| self.client_rx.poll_recv(cx));
-
-        let req = match fut.await {
-            // Got a request
-            Some(Some(req)) => req,
-
-            // Channel closed
-            Some(None) => return true,
-
-            // Not ready
-            None => return false,
-        };
-
-        match req {
-            ClientRequest::GetPeers(info_hash, tx) => {
-                self.submit_get_peers(&info_hash, tx);
-                false
-            }
-            ClientRequest::Announce(info_hash, tx) => {
-                self.submit_announce(&info_hash, tx);
-                false
-            }
-            ClientRequest::Shutdown => true,
-        }
-    }
-
-    async fn recv_response(&mut self, timeout: Duration) {
-        let (msg, addr) = match self.rpc.recv_timeout(timeout).await {
-            Ok(Some(x)) => x,
-            Ok(None) => return,
-            Err(e) => {
-                log::warn!("{}", e);
-                return;
-            }
+    async fn recv_response(
+        &mut self,
+        timeout: Duration,
+        req: &mut AnnounceRequest,
+    ) -> anyhow::Result<()> {
+        let (msg, addr) = match self.rpc.recv_timeout(timeout).await? {
+            Some(x) => x,
+            None => return Ok(()),
         };
 
         match msg {
             Msg::Response(resp) => {
+                if req.handle_reply(&resp, &addr, &mut self.table) {
+                    return Ok(());
+                }
+
                 for t in &mut self.running {
                     if t.handle_reply(&resp, &addr, &mut self.table).await {
                         break;
@@ -207,6 +159,8 @@ impl Server {
             Msg::Query(query) => self.table.handle_query(&query),
             Msg::Error(err) => self.table.handle_error(&err),
         }
+
+        Ok(())
     }
 }
 

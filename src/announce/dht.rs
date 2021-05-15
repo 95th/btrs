@@ -1,13 +1,12 @@
 use crate::dht::id::NodeId;
-use crate::dht::{Client, ClientRequest, Server};
+use crate::dht::Dht;
 use crate::metainfo::InfoHash;
 use crate::peer::Peer;
-use std::{collections::HashSet, time::Instant};
+use std::time::Instant;
 use tokio::net::lookup_host;
-use tokio::sync::mpsc;
 
 pub struct DhtTracker {
-    client: Client,
+    dht: Dht,
     next_announce: Instant,
 }
 
@@ -16,11 +15,11 @@ impl DhtTracker {
         let mut dht_routers = vec![];
         dht_routers.extend(lookup_host("dht.libtorrent.org:25401").await?);
 
-        let server = Server::new(6881, dht_routers).await?;
-        let client = server.new_client();
-        tokio::spawn(server.run());
+        let mut dht = Dht::new(6881, dht_routers).await?;
+        dht.bootstrap().await?;
+
         Ok(Self {
-            client,
+            dht,
             next_announce: Instant::now(),
         })
     }
@@ -31,16 +30,7 @@ impl DhtTracker {
         log::debug!("Announcing to DHT");
         let start = Instant::now();
 
-        let (tx, mut rx) = mpsc::channel(100);
-        self.client
-            .tx
-            .send(ClientRequest::Announce(NodeId(*info_hash.as_ref()), tx))
-            .await?;
-
-        let mut peers = HashSet::new();
-        while let Some(p) = rx.recv().await {
-            peers.insert(p);
-        }
+        let peers = self.dht.announce(&NodeId(*info_hash.as_ref())).await?;
 
         let took = Instant::now() - start;
         log::debug!(
@@ -50,9 +40,5 @@ impl DhtTracker {
         );
 
         Ok(peers.into_iter().map(|a| a.into()).collect())
-    }
-
-    pub async fn shutdown(&mut self) {
-        self.client.tx.send(ClientRequest::Shutdown).await.ok();
     }
 }

@@ -3,10 +3,10 @@ use crate::dht::id::NodeId;
 use crate::dht::msg::recv::Response;
 use crate::dht::msg::send::GetPeers;
 use crate::dht::server::request::{DhtNode, Status};
-use crate::dht::server::{PeerSender, RpcMgr, Transactions};
+use crate::dht::server::{RpcMgr, Transactions};
 use crate::dht::table::RoutingTable;
 use ben::Decoder;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
 
 pub struct GetPeersRequest {
@@ -15,17 +15,12 @@ pub struct GetPeersRequest {
     pub nodes: Vec<DhtNode>,
     pub tokens: HashMap<SocketAddr, Vec<u8>>,
     txns: Transactions,
-    tx: PeerSender,
+    peers: HashSet<SocketAddr>,
     branch_factor: u8,
 }
 
 impl GetPeersRequest {
-    pub(super) fn new(
-        info_hash: &NodeId,
-        own_id: &NodeId,
-        tx: PeerSender,
-        table: &mut RoutingTable,
-    ) -> Self {
+    pub fn new(info_hash: &NodeId, own_id: &NodeId, table: &mut RoutingTable) -> Self {
         let mut closest = Vec::with_capacity(Bucket::MAX_LEN);
         table.find_closest(info_hash, &mut closest, Bucket::MAX_LEN);
 
@@ -50,7 +45,7 @@ impl GetPeersRequest {
             nodes,
             tokens: HashMap::new(),
             txns: Transactions::new(),
-            tx,
+            peers: HashSet::new(),
             branch_factor: 3,
         }
     }
@@ -65,7 +60,7 @@ impl GetPeersRequest {
         })
     }
 
-    pub async fn handle_reply(
+    pub fn handle_reply(
         &mut self,
         resp: &Response<'_, '_>,
         addr: &SocketAddr,
@@ -127,11 +122,8 @@ impl GetPeersRequest {
         }
 
         if let Some(peers) = resp.body.get_list("values") {
-            for p in peers.into_iter().flat_map(decode_peer) {
-                if self.tx.send(p).await.is_err() {
-                    break;
-                }
-            }
+            let peers = peers.into_iter().flat_map(decode_peer);
+            self.peers.extend(peers);
         }
 
         let target = &self.info_hash;
@@ -189,7 +181,7 @@ impl GetPeersRequest {
         outstanding == 0 && alive == Bucket::MAX_LEN || self.txns.is_empty()
     }
 
-    pub fn done(self) {
-        log::debug!("Done GET_PEERS");
+    pub fn get_peers(self) -> Vec<SocketAddr> {
+        self.peers.into_iter().collect()
     }
 }

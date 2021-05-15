@@ -15,8 +15,6 @@ pub use bootstrap::BootstrapRequest;
 pub use get_peers::GetPeersRequest;
 pub use ping::PingRequest;
 
-use super::PeerSender;
-
 pub struct DhtNode {
     id: NodeId,
     addr: SocketAddr,
@@ -55,22 +53,12 @@ impl DhtRequest {
         Self::Bootstrap(Box::new(BootstrapRequest::new(target, own_id, table)))
     }
 
-    pub fn new_get_peers(
-        info_hash: &NodeId,
-        own_id: &NodeId,
-        tx: PeerSender,
-        table: &mut RoutingTable,
-    ) -> Self {
-        Self::GetPeers(Box::new(GetPeersRequest::new(info_hash, own_id, tx, table)))
+    pub fn new_get_peers(info_hash: &NodeId, own_id: &NodeId, table: &mut RoutingTable) -> Self {
+        Self::GetPeers(Box::new(GetPeersRequest::new(info_hash, own_id, table)))
     }
 
-    pub fn new_announce(
-        info_hash: &NodeId,
-        own_id: &NodeId,
-        tx: PeerSender,
-        table: &mut RoutingTable,
-    ) -> Self {
-        Self::Announce(Box::new(AnnounceRequest::new(info_hash, own_id, tx, table)))
+    pub fn new_announce(info_hash: &NodeId, own_id: &NodeId, table: &mut RoutingTable) -> Self {
+        Self::Announce(Box::new(AnnounceRequest::new(info_hash, own_id, table)))
     }
 
     pub fn new_ping(own_id: &NodeId, id: &NodeId, addr: &SocketAddr) -> Self {
@@ -98,27 +86,19 @@ impl DhtRequest {
     ) -> bool {
         match self {
             Self::Bootstrap(t) => t.handle_reply(resp, addr, table),
-            Self::GetPeers(t) => t.handle_reply(resp, addr, table).await,
-            Self::Announce(t) => t.handle_reply(resp, addr, table).await,
+            Self::GetPeers(t) => t.handle_reply(resp, addr, table),
+            Self::Announce(t) => t.handle_reply(resp, addr, table),
             Self::Ping(t) => t.handle_reply(resp, addr, table),
         }
     }
 
-    pub async fn invoke(&mut self, rpc: &mut RpcMgr) -> bool {
-        match self {
+    pub async fn invoke(&mut self, rpc: &mut RpcMgr) -> anyhow::Result<bool> {
+        let handled = match self {
             Self::Bootstrap(t) => t.invoke(rpc).await,
             Self::GetPeers(t) => t.invoke(rpc).await,
-            Self::Announce(t) => t.invoke(rpc).await,
+            Self::Announce(t) => t.invoke(rpc).await?,
             Self::Ping(t) => t.invoke(rpc).await,
-        }
-    }
-
-    pub fn done(self) {
-        match self {
-            Self::Bootstrap(t) => t.done(),
-            Self::GetPeers(t) => t.done(),
-            Self::Announce(t) => t.done(),
-            Self::Ping(t) => t.done(),
-        }
+        };
+        Ok(handled)
     }
 }
