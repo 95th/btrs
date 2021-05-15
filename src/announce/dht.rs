@@ -2,9 +2,9 @@ use crate::dht::id::NodeId;
 use crate::dht::{Client, ClientRequest, Server};
 use crate::metainfo::InfoHash;
 use crate::peer::Peer;
-use std::time::Instant;
+use std::{collections::HashSet, time::Instant};
 use tokio::net::lookup_host;
-use tokio::sync::oneshot;
+use tokio::sync::mpsc;
 
 pub struct DhtTracker {
     client: Client,
@@ -31,13 +31,17 @@ impl DhtTracker {
         log::debug!("Announcing to DHT");
         let start = Instant::now();
 
-        let (tx, rx) = oneshot::channel();
+        let (tx, mut rx) = mpsc::channel(100);
         self.client
             .tx
             .send(ClientRequest::Announce(NodeId(*info_hash.as_ref()), tx))
             .await?;
 
-        let peers = rx.await?;
+        let mut peers = HashSet::new();
+        while let Some(p) = rx.recv().await {
+            peers.insert(p);
+        }
+
         let took = Instant::now() - start;
         log::debug!(
             "Announce completed in {} ms, got {} peers",

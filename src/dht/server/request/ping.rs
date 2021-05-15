@@ -90,6 +90,6 @@ impl PingRequest {
     }
 
     pub fn done(self) {
-        log::debug!("Done Pinging");
+        log::debug!("Done Ping");
     }
 }

@@ -6,7 +6,7 @@ use crate::dht::server::request::{DhtNode, Status};
 use crate::dht::server::{PeerSender, RpcMgr, Transactions};
 use crate::dht::table::RoutingTable;
 use ben::Decoder;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::net::SocketAddr;
 
 pub struct GetPeersRequest {
@@ -14,7 +14,6 @@ pub struct GetPeersRequest {
     pub own_id: NodeId,
     pub nodes: Vec<DhtNode>,
     pub tokens: HashMap<SocketAddr, Vec<u8>>,
-    peers: HashSet<SocketAddr>,
     txns: Transactions,
     tx: PeerSender,
     branch_factor: u8,
@@ -49,7 +48,6 @@ impl GetPeersRequest {
             info_hash: *info_hash,
             own_id: *own_id,
             nodes,
-            peers: HashSet::new(),
             tokens: HashMap::new(),
             txns: Transactions::new(),
             tx,
@@ -67,9 +65,9 @@ impl GetPeersRequest {
         })
     }
 
-    pub fn handle_reply(
+    pub async fn handle_reply(
         &mut self,
-        resp: &Response,
+        resp: &Response<'_, '_>,
         addr: &SocketAddr,
         table: &mut RoutingTable,
     ) -> bool {
@@ -129,8 +127,11 @@ impl GetPeersRequest {
         }
 
         if let Some(peers) = resp.body.get_list("values") {
-            let peers = peers.into_iter().flat_map(decode_peer);
-            self.peers.extend(peers);
+            for p in peers.into_iter().flat_map(decode_peer) {
+                if self.tx.send(p).await.is_err() {
+                    break;
+                }
+            }
         }
 
         let target = &self.info_hash;
@@ -189,9 +190,6 @@ impl GetPeersRequest {
     }
 
     pub fn done(self) {
-        match self.tx.send(self.peers) {
-            Ok(_) => log::debug!("Replied to GET_PEERS client request"),
-            Err(_) => log::warn!("Reply to GET_PEERS client request failed"),
-        }
+        log::debug!("Done GET_PEERS");
     }
 }

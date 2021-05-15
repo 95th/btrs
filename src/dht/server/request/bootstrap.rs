@@ -148,6 +148,6 @@ impl BootstrapRequest {
     }
 
     pub fn done(self) {
-        log::debug!("Done bootstrapping");
+        log::debug!("Done BOOTSTRAP");
     }
 }

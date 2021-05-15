@@ -90,16 +90,16 @@ impl DhtRequest {
     /// was handled in this request.
     /// Returning `false` means that the response didn't belong
     /// to this request.
-    pub fn handle_reply(
+    pub async fn handle_reply(
         &mut self,
-        resp: &Response,
+        resp: &Response<'_, '_>,
         addr: &SocketAddr,
         table: &mut RoutingTable,
     ) -> bool {
         match self {
             Self::Bootstrap(t) => t.handle_reply(resp, addr, table),
-            Self::GetPeers(t) => t.handle_reply(resp, addr, table),
-            Self::Announce(t) => t.handle_reply(resp, addr, table),
+            Self::GetPeers(t) => t.handle_reply(resp, addr, table).await,
+            Self::Announce(t) => t.handle_reply(resp, addr, table).await,
             Self::Ping(t) => t.handle_reply(resp, addr, table),
         }
     }

@@ -28,13 +28,13 @@ impl AnnounceRequest {
         self.inner.prune(table);
     }
 
-    pub fn handle_reply(
+    pub async fn handle_reply(
         &mut self,
-        resp: &Response,
+        resp: &Response<'_, '_>,
         addr: &SocketAddr,
         table: &mut RoutingTable,
     ) -> bool {
-        self.inner.handle_reply(resp, addr, table)
+        self.inner.handle_reply(resp, addr, table).await
     }
 
     pub async fn invoke(&mut self, rpc: &mut RpcMgr) -> bool {
@@ -79,6 +79,6 @@ impl AnnounceRequest {
     }
 
     pub fn done(self) {
-        self.inner.done();
+        log::debug!("Done ANNOUNCE")
     }
 }

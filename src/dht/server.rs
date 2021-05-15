@@ -4,19 +4,17 @@ use crate::dht::msg::recv::{ErrorResponse, Msg, Query, Response};
 use crate::dht::table::{Refresh, RoutingTable};
 use request::DhtRequest;
 use rpc::{RpcMgr, Transactions};
-use std::collections::HashSet;
 use std::net::SocketAddr;
 use std::time::Duration;
 use tokio::net::UdpSocket;
 use tokio::sync::mpsc::{self, Receiver, Sender};
-use tokio::sync::oneshot;
 
 use super::future::poll_once;
 
 mod request;
 mod rpc;
 
-type PeerSender = oneshot::Sender<HashSet<SocketAddr>>;
+type PeerSender = mpsc::Sender<SocketAddr>;
 
 pub struct Server {
     rpc: RpcMgr,
@@ -138,7 +136,7 @@ impl Server {
             };
 
             if let Msg::Response(resp) = msg {
-                request.handle_reply(&resp, &addr, &mut self.table);
+                request.handle_reply(&resp, &addr, &mut self.table).await;
             }
         }
 
@@ -201,7 +199,7 @@ impl Server {
         match msg {
             Msg::Response(resp) => {
                 for t in &mut self.running {
-                    if t.handle_reply(&resp, &addr, &mut self.table) {
+                    if t.handle_reply(&resp, &addr, &mut self.table).await {
                         break;
                     }
                 }
