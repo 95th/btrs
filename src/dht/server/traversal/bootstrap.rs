@@ -16,27 +16,18 @@ pub struct BootstrapTraversal {
 }
 
 impl BootstrapTraversal {
-    pub fn new(target: &NodeId, own_id: &NodeId) -> Self {
-        Self {
-            target: *target,
-            own_id: *own_id,
-            nodes: vec![],
-            txns: Transactions::new(),
-            branch_factor: 3,
-        }
-    }
-
-    pub async fn start(&mut self, table: &mut RoutingTable, rpc: &mut RpcMgr) {
-        log::trace!("Start BOOTSTRAP traversal");
+    pub fn new(target: &NodeId, own_id: &NodeId, table: &mut RoutingTable) -> Self {
         let mut closest = Vec::with_capacity(Bucket::MAX_LEN);
-        table.find_closest(&self.target, &mut closest, Bucket::MAX_LEN);
+        table.find_closest(target, &mut closest, Bucket::MAX_LEN);
+
+        let mut nodes = vec![];
         for c in closest {
-            self.nodes.push(TraversalNode::new(&c));
+            nodes.push(TraversalNode::new(&c));
         }
 
-        if self.nodes.len() < 3 {
+        if nodes.len() < 3 {
             for node in &table.router_nodes {
-                self.nodes.push(TraversalNode {
+                nodes.push(TraversalNode {
                     id: NodeId::new(),
                     addr: *node,
                     status: Status::INITIAL | Status::NO_ID,
@@ -44,7 +35,13 @@ impl BootstrapTraversal {
             }
         }
 
-        self.invoke(rpc).await;
+        Self {
+            target: *target,
+            own_id: *own_id,
+            nodes,
+            txns: Transactions::new(),
+            branch_factor: 3,
+        }
     }
 
     pub fn prune(&mut self, table: &mut RoutingTable) {

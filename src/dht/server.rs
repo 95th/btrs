@@ -76,9 +76,12 @@ impl Server {
             if let Some(refresh) = self.table.next_refresh() {
                 match &refresh {
                     Refresh::Single(id, addr) => self.submit_ping(id, addr),
-                    Refresh::Full(id) => self.submit_refresh(id).await,
+                    Refresh::Full(id) => self.submit_refresh(id),
                 }
             }
+
+            // Housekeep running requests
+            self.check_running().await;
 
             // Check if any request from client such as Announce/Shutdown
             if self.check_client_request().await {
@@ -89,9 +92,6 @@ impl Server {
 
             // Wait for socket response
             self.recv_response(Duration::from_secs(1)).await;
-
-            // Housekeep running requests
-            self.check_running().await;
         }
     }
 
@@ -109,10 +109,13 @@ impl Server {
         }
     }
 
-    async fn submit_refresh(&mut self, target: &NodeId) {
-        let mut t = Box::new(BootstrapTraversal::new(target, &self.own_id));
-        t.start(&mut self.table, &mut self.rpc).await;
-        self.running.push(Traversal::Bootstrap(t));
+    fn submit_refresh(&mut self, target: &NodeId) {
+        let traversal = Box::new(BootstrapTraversal::new(
+            target,
+            &self.own_id,
+            &mut self.table,
+        ));
+        self.running.push(Traversal::Bootstrap(traversal));
     }
 
     fn submit_ping(&mut self, id: &NodeId, addr: &SocketAddr) {
@@ -121,16 +124,19 @@ impl Server {
     }
 
     async fn refresh(&mut self, target: &NodeId) {
-        let mut t = Box::new(BootstrapTraversal::new(target, &self.own_id));
-        t.start(&mut self.table, &mut self.rpc).await;
+        let mut traversal = Box::new(BootstrapTraversal::new(
+            target,
+            &self.own_id,
+            &mut self.table,
+        ));
 
         loop {
-            if t.invoke(&mut self.rpc).await {
-                t.done();
+            if traversal.invoke(&mut self.rpc).await {
+                traversal.done();
                 break;
             }
 
-            t.prune(&mut self.table);
+            traversal.prune(&mut self.table);
 
             let (msg, addr) = match self.rpc.recv_timeout(Duration::from_secs(1)).await {
                 Ok(Some(x)) => x,
@@ -142,7 +148,7 @@ impl Server {
             };
 
             if let Msg::Response(resp) = msg {
-                t.handle_reply(&resp, &addr, &mut self.table);
+                traversal.handle_reply(&resp, &addr, &mut self.table);
             }
         }
 
@@ -153,16 +159,24 @@ impl Server {
         );
     }
 
-    pub async fn get_peers(&mut self, info_hash: &NodeId, tx: PeerSender) {
-        let mut t = Box::new(GetPeersTraversal::new(info_hash, &self.own_id, tx));
-        t.start(&mut self.table, &mut self.rpc).await;
-        self.running.push(Traversal::GetPeers(t));
+    pub fn submit_get_peers(&mut self, info_hash: &NodeId, tx: PeerSender) {
+        let traversal = Box::new(GetPeersTraversal::new(
+            info_hash,
+            &self.own_id,
+            tx,
+            &mut self.table,
+        ));
+        self.running.push(Traversal::GetPeers(traversal));
     }
 
-    pub async fn announce(&mut self, info_hash: &NodeId, tx: PeerSender) {
-        let mut t = Box::new(AnnounceTraversal::new(info_hash, &self.own_id, tx));
-        t.start(&mut self.table, &mut self.rpc).await;
-        self.running.push(Traversal::Announce(t));
+    pub fn submit_announce(&mut self, info_hash: &NodeId, tx: PeerSender) {
+        let traversal = Box::new(AnnounceTraversal::new(
+            info_hash,
+            &self.own_id,
+            tx,
+            &mut self.table,
+        ));
+        self.running.push(Traversal::Announce(traversal));
     }
 
     /// Check for client requests.
@@ -183,11 +197,11 @@ impl Server {
 
         match req {
             ClientRequest::GetPeers(info_hash, tx) => {
-                self.get_peers(&info_hash, tx).await;
+                self.submit_get_peers(&info_hash, tx);
                 false
             }
             ClientRequest::Announce(info_hash, tx) => {
-                self.announce(&info_hash, tx).await;
+                self.submit_announce(&info_hash, tx);
                 false
             }
             ClientRequest::Shutdown => true,

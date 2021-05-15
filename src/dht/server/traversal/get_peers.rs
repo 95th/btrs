@@ -21,30 +21,23 @@ pub struct GetPeersTraversal {
 }
 
 impl GetPeersTraversal {
-    pub fn new(info_hash: &NodeId, own_id: &NodeId, tx: PeerSender) -> Self {
-        Self {
-            info_hash: *info_hash,
-            own_id: *own_id,
-            nodes: vec![],
-            peers: HashSet::new(),
-            tokens: HashMap::new(),
-            txns: Transactions::new(),
-            tx,
-            branch_factor: 3,
-        }
-    }
-
-    pub async fn start(&mut self, table: &mut RoutingTable, rpc: &mut RpcMgr) {
-        log::trace!("Start GET_PEERS traversal");
+    pub fn new(
+        info_hash: &NodeId,
+        own_id: &NodeId,
+        tx: PeerSender,
+        table: &mut RoutingTable,
+    ) -> Self {
         let mut closest = Vec::with_capacity(Bucket::MAX_LEN);
-        table.find_closest(&self.info_hash, &mut closest, Bucket::MAX_LEN);
+        table.find_closest(info_hash, &mut closest, Bucket::MAX_LEN);
+
+        let mut nodes = vec![];
         for c in closest {
-            self.nodes.push(TraversalNode::new(&c));
+            nodes.push(TraversalNode::new(&c));
         }
 
-        if self.nodes.len() < 3 {
+        if nodes.len() < 3 {
             for node in &table.router_nodes {
-                self.nodes.push(TraversalNode {
+                nodes.push(TraversalNode {
                     id: NodeId::new(),
                     addr: *node,
                     status: Status::INITIAL | Status::NO_ID,
@@ -52,7 +45,16 @@ impl GetPeersTraversal {
             }
         }
 
-        self.invoke(rpc).await;
+        Self {
+            info_hash: *info_hash,
+            own_id: *own_id,
+            nodes,
+            peers: HashSet::new(),
+            tokens: HashMap::new(),
+            txns: Transactions::new(),
+            tx,
+            branch_factor: 3,
+        }
     }
 
     pub fn prune(&mut self, table: &mut RoutingTable) {

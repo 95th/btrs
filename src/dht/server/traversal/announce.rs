@@ -13,14 +13,15 @@ pub struct AnnounceTraversal {
 }
 
 impl AnnounceTraversal {
-    pub fn new(info_hash: &NodeId, own_id: &NodeId, tx: PeerSender) -> Self {
+    pub fn new(
+        info_hash: &NodeId,
+        own_id: &NodeId,
+        tx: PeerSender,
+        table: &mut RoutingTable,
+    ) -> Self {
         Self {
-            inner: GetPeersTraversal::new(info_hash, own_id, tx),
+            inner: GetPeersTraversal::new(info_hash, own_id, tx, table),
         }
-    }
-
-    pub async fn start(&mut self, table: &mut RoutingTable, rpc: &mut RpcMgr) {
-        self.inner.start(table, rpc).await
     }
 
     pub fn prune(&mut self, table: &mut RoutingTable) {
