@@ -3,25 +3,25 @@ use crate::dht::id::NodeId;
 use crate::dht::msg::recv::Response;
 use crate::dht::msg::send::Ping;
 use crate::dht::msg::TxnId;
-use crate::dht::server::traversal::{Status, TraversalNode};
+use crate::dht::server::request::{DhtNode, Status};
 use crate::dht::server::RpcMgr;
 use crate::dht::table::RoutingTable;
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 
-pub struct PingTraversal {
+pub struct PingRequest {
     own_id: NodeId,
-    node: TraversalNode,
+    node: DhtNode,
     txn_id: TxnId,
     sent: Instant,
     done: bool,
 }
 
-impl PingTraversal {
-    pub fn new(own_id: &NodeId, id: &NodeId, addr: &SocketAddr) -> Self {
+impl PingRequest {
+    pub(super) fn new(own_id: &NodeId, id: &NodeId, addr: &SocketAddr) -> Self {
         Self {
             own_id: *own_id,
-            node: TraversalNode {
+            node: DhtNode {
                 id: *id,
                 addr: *addr,
                 status: Status::INITIAL,
@@ -33,7 +33,7 @@ impl PingTraversal {
     }
 
     pub fn prune(&mut self, table: &mut RoutingTable) {
-        log::trace!("Prune PING traversal");
+        log::trace!("Prune PING request");
         if !self.done && self.sent < Instant::now() - Duration::from_secs(10) {
             table.failed(&self.node.id);
             self.done = true;
@@ -50,7 +50,7 @@ impl PingTraversal {
             return false;
         }
 
-        log::trace!("Handle PING traversal response");
+        log::trace!("Handle PING response");
 
         if self.node.id == *resp.id && self.node.addr == *addr {
             table.add_contact(&ContactRef {
@@ -66,7 +66,7 @@ impl PingTraversal {
     }
 
     pub async fn invoke(&mut self, rpc: &mut RpcMgr) -> bool {
-        log::trace!("Invoke PING traversal");
+        log::trace!("Invoke PING request");
         if self.done {
             return true;
         }

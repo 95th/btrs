@@ -2,6 +2,7 @@ use crate::dht::contact::{CompactNodes, CompactNodesV6, ContactRef};
 use crate::dht::id::NodeId;
 use crate::dht::msg::recv::{ErrorResponse, Msg, Query, Response};
 use crate::dht::table::{Refresh, RoutingTable};
+use request::DhtRequest;
 use rpc::{RpcMgr, Transactions};
 use std::collections::HashSet;
 use std::net::SocketAddr;
@@ -9,14 +10,11 @@ use std::time::Duration;
 use tokio::net::UdpSocket;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio::sync::oneshot;
-use traversal::{
-    AnnounceTraversal, BootstrapTraversal, GetPeersTraversal, PingTraversal, Traversal,
-};
 
 use super::future::poll_once;
 
+mod request;
 mod rpc;
-mod traversal;
 
 type PeerSender = oneshot::Sender<HashSet<SocketAddr>>;
 
@@ -26,7 +24,7 @@ pub struct Server {
     own_id: NodeId,
     client_rx: Receiver<ClientRequest>,
     client_tx: Sender<ClientRequest>,
-    running: Vec<Traversal>,
+    running: Vec<DhtRequest>,
 }
 
 #[derive(Clone)]
@@ -110,33 +108,25 @@ impl Server {
     }
 
     fn submit_refresh(&mut self, target: &NodeId) {
-        let traversal = Box::new(BootstrapTraversal::new(
-            target,
-            &self.own_id,
-            &mut self.table,
-        ));
-        self.running.push(Traversal::Bootstrap(traversal));
+        let request = DhtRequest::new_bootstrap(target, &self.own_id, &mut self.table);
+        self.running.push(request);
     }
 
     fn submit_ping(&mut self, id: &NodeId, addr: &SocketAddr) {
-        let t = Box::new(PingTraversal::new(&self.own_id, id, addr));
-        self.running.push(Traversal::Ping(t));
+        let request = DhtRequest::new_ping(&self.own_id, id, addr);
+        self.running.push(request);
     }
 
     async fn refresh(&mut self, target: &NodeId) {
-        let mut traversal = Box::new(BootstrapTraversal::new(
-            target,
-            &self.own_id,
-            &mut self.table,
-        ));
+        let mut request = DhtRequest::new_bootstrap(target, &self.own_id, &mut self.table);
 
         loop {
-            if traversal.invoke(&mut self.rpc).await {
-                traversal.done();
+            if request.invoke(&mut self.rpc).await {
+                request.done();
                 break;
             }
 
-            traversal.prune(&mut self.table);
+            request.prune(&mut self.table);
 
             let (msg, addr) = match self.rpc.recv_timeout(Duration::from_secs(1)).await {
                 Ok(Some(x)) => x,
@@ -148,7 +138,7 @@ impl Server {
             };
 
             if let Msg::Response(resp) = msg {
-                traversal.handle_reply(&resp, &addr, &mut self.table);
+                request.handle_reply(&resp, &addr, &mut self.table);
             }
         }
 
@@ -160,23 +150,13 @@ impl Server {
     }
 
     pub fn submit_get_peers(&mut self, info_hash: &NodeId, tx: PeerSender) {
-        let traversal = Box::new(GetPeersTraversal::new(
-            info_hash,
-            &self.own_id,
-            tx,
-            &mut self.table,
-        ));
-        self.running.push(Traversal::GetPeers(traversal));
+        let request = DhtRequest::new_get_peers(info_hash, &self.own_id, tx, &mut self.table);
+        self.running.push(request);
     }
 
     pub fn submit_announce(&mut self, info_hash: &NodeId, tx: PeerSender) {
-        let traversal = Box::new(AnnounceTraversal::new(
-            info_hash,
-            &self.own_id,
-            tx,
-            &mut self.table,
-        ));
-        self.running.push(Traversal::Announce(traversal));
+        let request = DhtRequest::new_announce(info_hash, &self.own_id, tx, &mut self.table);
+        self.running.push(request);
     }
 
     /// Check for client requests.

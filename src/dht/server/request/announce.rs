@@ -2,25 +2,25 @@ use crate::dht::bucket::Bucket;
 use crate::dht::id::NodeId;
 use crate::dht::msg::recv::Response;
 use crate::dht::msg::send::AnnouncePeer;
-use crate::dht::server::traversal::GetPeersTraversal;
-use crate::dht::server::traversal::Status;
+use crate::dht::server::request::GetPeersRequest;
+use crate::dht::server::request::Status;
 use crate::dht::server::{PeerSender, RpcMgr};
 use crate::dht::table::RoutingTable;
 use std::net::SocketAddr;
 
-pub struct AnnounceTraversal {
-    inner: GetPeersTraversal,
+pub struct AnnounceRequest {
+    inner: GetPeersRequest,
 }
 
-impl AnnounceTraversal {
-    pub fn new(
+impl AnnounceRequest {
+    pub(super) fn new(
         info_hash: &NodeId,
         own_id: &NodeId,
         tx: PeerSender,
         table: &mut RoutingTable,
     ) -> Self {
         Self {
-            inner: GetPeersTraversal::new(info_hash, own_id, tx, table),
+            inner: GetPeersRequest::new(info_hash, own_id, tx, table),
         }
     }
 

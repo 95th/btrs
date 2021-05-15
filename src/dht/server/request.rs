@@ -10,18 +10,20 @@ mod bootstrap;
 mod get_peers;
 mod ping;
 
-pub use announce::AnnounceTraversal;
-pub use bootstrap::BootstrapTraversal;
-pub use get_peers::GetPeersTraversal;
-pub use ping::PingTraversal;
+pub use announce::AnnounceRequest;
+pub use bootstrap::BootstrapRequest;
+pub use get_peers::GetPeersRequest;
+pub use ping::PingRequest;
 
-pub struct TraversalNode {
+use super::PeerSender;
+
+pub struct DhtNode {
     id: NodeId,
     addr: SocketAddr,
     status: Status,
 }
 
-impl TraversalNode {
+impl DhtNode {
     fn new(c: &ContactRef) -> Self {
         Self {
             id: *c.id,
@@ -41,14 +43,40 @@ bitflags::bitflags! {
     }
 }
 
-pub enum Traversal {
-    Bootstrap(Box<BootstrapTraversal>),
-    GetPeers(Box<GetPeersTraversal>),
-    Announce(Box<AnnounceTraversal>),
-    Ping(Box<PingTraversal>),
+pub enum DhtRequest {
+    Bootstrap(Box<BootstrapRequest>),
+    GetPeers(Box<GetPeersRequest>),
+    Announce(Box<AnnounceRequest>),
+    Ping(Box<PingRequest>),
 }
 
-impl Traversal {
+impl DhtRequest {
+    pub fn new_bootstrap(target: &NodeId, own_id: &NodeId, table: &mut RoutingTable) -> Self {
+        Self::Bootstrap(Box::new(BootstrapRequest::new(target, own_id, table)))
+    }
+
+    pub fn new_get_peers(
+        info_hash: &NodeId,
+        own_id: &NodeId,
+        tx: PeerSender,
+        table: &mut RoutingTable,
+    ) -> Self {
+        Self::GetPeers(Box::new(GetPeersRequest::new(info_hash, own_id, tx, table)))
+    }
+
+    pub fn new_announce(
+        info_hash: &NodeId,
+        own_id: &NodeId,
+        tx: PeerSender,
+        table: &mut RoutingTable,
+    ) -> Self {
+        Self::Announce(Box::new(AnnounceRequest::new(info_hash, own_id, tx, table)))
+    }
+
+    pub fn new_ping(own_id: &NodeId, id: &NodeId, addr: &SocketAddr) -> Self {
+        Self::Ping(Box::new(PingRequest::new(own_id, id, addr)))
+    }
+
     pub fn prune(&mut self, table: &mut RoutingTable) {
         match self {
             Self::Bootstrap(t) => t.prune(table),
@@ -59,9 +87,9 @@ impl Traversal {
     }
 
     /// Handle an incoming response and return `true` if it
-    /// was handled in this traversal.
+    /// was handled in this request.
     /// Returning `false` means that the response didn't belong
-    /// to this traversal.
+    /// to this request.
     pub fn handle_reply(
         &mut self,
         resp: &Response,

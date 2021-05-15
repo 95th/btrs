@@ -2,17 +2,17 @@ use crate::dht::bucket::Bucket;
 use crate::dht::id::NodeId;
 use crate::dht::msg::recv::Response;
 use crate::dht::msg::send::GetPeers;
-use crate::dht::server::traversal::{Status, TraversalNode};
+use crate::dht::server::request::{DhtNode, Status};
 use crate::dht::server::{PeerSender, RpcMgr, Transactions};
 use crate::dht::table::RoutingTable;
 use ben::Decoder;
 use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
 
-pub struct GetPeersTraversal {
+pub struct GetPeersRequest {
     pub info_hash: NodeId,
     pub own_id: NodeId,
-    pub nodes: Vec<TraversalNode>,
+    pub nodes: Vec<DhtNode>,
     pub tokens: HashMap<SocketAddr, Vec<u8>>,
     peers: HashSet<SocketAddr>,
     txns: Transactions,
@@ -20,8 +20,8 @@ pub struct GetPeersTraversal {
     branch_factor: u8,
 }
 
-impl GetPeersTraversal {
-    pub fn new(
+impl GetPeersRequest {
+    pub(super) fn new(
         info_hash: &NodeId,
         own_id: &NodeId,
         tx: PeerSender,
@@ -32,12 +32,12 @@ impl GetPeersTraversal {
 
         let mut nodes = vec![];
         for c in closest {
-            nodes.push(TraversalNode::new(&c));
+            nodes.push(DhtNode::new(&c));
         }
 
         if nodes.len() < 3 {
             for node in &table.router_nodes {
-                nodes.push(TraversalNode {
+                nodes.push(DhtNode {
                     id: NodeId::new(),
                     addr: *node,
                     status: Status::INITIAL | Status::NO_ID,
@@ -58,7 +58,7 @@ impl GetPeersTraversal {
     }
 
     pub fn prune(&mut self, table: &mut RoutingTable) {
-        log::trace!("Prune GET_PEERS traversal");
+        log::trace!("Prune GET_PEERS request");
         let nodes = &mut self.nodes;
         self.txns.prune_with(table, |id| {
             if let Some(node) = nodes.iter_mut().find(|node| &node.id == id) {
@@ -93,11 +93,11 @@ impl GetPeersTraversal {
             return false;
         }
 
-        log::trace!("Handle GET_PEERS traversal response");
+        log::trace!("Handle GET_PEERS response");
 
         let result = table.read_nodes_with(resp, |c| {
             if !self.nodes.iter().any(|n| &n.id == c.id) {
-                self.nodes.push(TraversalNode::new(c));
+                self.nodes.push(DhtNode::new(c));
             }
         });
 
@@ -141,7 +141,7 @@ impl GetPeersTraversal {
     }
 
     pub async fn invoke(&mut self, rpc: &mut RpcMgr) -> bool {
-        log::trace!("Invoke GET_PEERS traversal");
+        log::trace!("Invoke GET_PEERS request");
         let mut outstanding = 0;
         let mut alive = 0;
 
