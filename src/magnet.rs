@@ -244,8 +244,8 @@ mod parser {
             for (key, value) in url.query_pairs() {
                 match &key[..] {
                     TORRENT_ID => {
-                        if value.starts_with(INFOHASH_PREFIX) {
-                            let info_hash = build_info_hash(&value[INFOHASH_PREFIX.len()..])?;
+                        if let Some(ih_str) = value.strip_prefix(INFOHASH_PREFIX) {
+                            let info_hash = build_info_hash(ih_str)?;
 
                             if has_ih && info_hash != magnet.info_hash {
                                 anyhow::bail!("Multiple infohashes found");
