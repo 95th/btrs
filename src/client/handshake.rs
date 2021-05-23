@@ -34,9 +34,9 @@ impl<'a, C: AsyncStream> Handshake<'a, C> {
     ) -> Self {
         Self {
             conn,
-            peer_id,
-            info_hash,
             extensions,
+            info_hash,
+            peer_id,
         }
     }
 
