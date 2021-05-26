@@ -50,7 +50,7 @@ impl<'a> RpcMgr<'a> {
 
     pub async fn handle_response(
         &mut self,
-        msg: Msg<'_, '_>,
+        msg: Msg<'_>,
         addr: SocketAddr,
         table: &mut RoutingTable,
         running: &mut Slab<DhtTraversal>,

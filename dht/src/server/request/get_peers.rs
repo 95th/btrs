@@ -32,7 +32,7 @@ impl DhtGetPeers {
 
     pub fn handle_response(
         &mut self,
-        resp: &Response<'_, '_>,
+        resp: &Response<'_>,
         addr: &SocketAddr,
         table: &mut RoutingTable,
         rpc: &mut RpcMgr<'_>,

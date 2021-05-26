@@ -5,31 +5,31 @@ use ben::{Decode, Decoder};
 use std::convert::TryInto;
 
 #[derive(Debug)]
-pub struct Query<'a, 'p> {
+pub struct Query<'a> {
     pub txn_id: TxnId,
-    pub args: Dict<'a, 'p>,
+    pub args: Dict<'a, 'a>,
     pub id: &'a NodeId,
     pub kind: QueryKind,
 }
 
 #[derive(Debug)]
-pub struct Response<'a, 'p> {
+pub struct Response<'a> {
     pub txn_id: TxnId,
-    pub body: Dict<'a, 'p>,
+    pub body: Dict<'a, 'a>,
     pub id: &'a NodeId,
 }
 
 #[derive(Debug)]
-pub struct ErrorResponse<'a, 'p> {
+pub struct ErrorResponse<'a> {
     pub txn_id: TxnId,
-    pub list: Option<List<'a, 'p>>,
+    pub list: Option<List<'a, 'a>>,
 }
 
 #[derive(Debug)]
-pub enum Msg<'a, 'p> {
-    Query(Query<'a, 'p>),
-    Response(Response<'a, 'p>),
-    Error(ErrorResponse<'a, 'p>),
+pub enum Msg<'a> {
+    Query(Query<'a>),
+    Response(Response<'a>),
+    Error(ErrorResponse<'a>),
 }
 
 #[derive(Debug, Clone, Copy, PartialOrd, PartialEq)]
@@ -49,8 +49,8 @@ macro_rules! check {
     };
 }
 
-impl<'a, 'p> Decode<'a, 'p> for Msg<'a, 'p> {
-    fn decode(decoder: Decoder<'a, 'p>) -> ben::Result<Self> {
+impl<'a> Decode<'a, 'a> for Msg<'a> {
+    fn decode(decoder: Decoder<'a, 'a>) -> ben::Result<Self> {
         use ben::Error::Other;
 
         let dict = check!(decoder.into_dict(), "Not a dict");
