@@ -1,5 +1,5 @@
-use crate::dht::contact::{Contact, ContactRef};
-use crate::dht::id::NodeId;
+use crate::contact::{Contact, ContactRef};
+use crate::id::NodeId;
 use std::time::{Duration, Instant};
 
 #[derive(Debug, PartialEq)]

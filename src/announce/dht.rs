@@ -1,7 +1,7 @@
-use crate::dht::id::NodeId;
-use crate::dht::Dht;
 use crate::metainfo::InfoHash;
 use crate::peer::Peer;
+use dht::id::NodeId;
+use dht::Dht;
 use std::time::Instant;
 use tokio::net::lookup_host;
 
@@ -15,8 +15,8 @@ impl DhtTracker {
         let mut dht_routers = vec![];
         dht_routers.extend(lookup_host("dht.libtorrent.org:25401").await?);
 
-        let mut dht = Dht::new(6881, dht_routers).await?;
-        dht.bootstrap().await?;
+        let (dht, server) = Dht::new(6881, dht_routers);
+        tokio::spawn(server.run());
 
         Ok(Self {
             dht,
@@ -30,7 +30,7 @@ impl DhtTracker {
         log::debug!("Announcing to DHT");
         let start = Instant::now();
 
-        let peers = self.dht.announce(&NodeId(*info_hash.as_ref())).await?;
+        let peers = self.dht.announce(NodeId(*info_hash.as_ref())).await?;
 
         let took = Instant::now() - start;
         log::debug!(

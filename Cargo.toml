@@ -4,6 +4,9 @@ version = "0.1.0"
 authors = ["Gurwinder Singh <vargwin@gmail.com>"]
 edition = "2018"
 
+[workspace]
+members = ["dht"]
+
 [dependencies]
 url = "2.2.0"
 data-encoding = "2.3.1"
@@ -20,7 +23,4 @@ clap = "2.33.0"
 byteorder = "1.4.2"
 anyhow = "1.0.38"
 bitflags = "1.2.1"
-
-[[bin]]
-name = "dht"
-path = "src/dht/main.rs"
+dht = { path = "./dht" }

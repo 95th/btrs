@@ -1,4 +1,4 @@
-use crate::dht::id::NodeId;
+use crate::{id::NodeId, util::to_ipv6};
 use ben::{Encode, Encoder};
 use std::net::SocketAddr;
 
@@ -134,7 +134,7 @@ impl<'a> Iterator for CompactNodes<'a> {
             self.buf = &self.buf[26..];
             Some(ContactRef {
                 id,
-                addr: SocketAddr::from((*addr, port)),
+                addr: to_ipv6(SocketAddr::from((*addr, port))),
             })
         }
     }

@@ -1,6 +1,10 @@
-use crate::dht::bucket::{Bucket, BucketResult};
-use crate::dht::contact::{Contact, ContactRef, ContactStatus};
-use crate::dht::id::NodeId;
+use crate::contact::{Contact, ContactRef, ContactStatus};
+use crate::id::NodeId;
+use crate::util::to_ipv6;
+use crate::{
+    bucket::{Bucket, BucketResult},
+    server::ClientRequest,
+};
 use std::collections::HashSet;
 use std::net::SocketAddr;
 use std::time::Instant;
@@ -12,21 +16,16 @@ pub struct RoutingTable {
     pub router_nodes: HashSet<SocketAddr>,
 }
 
-pub enum Refresh {
-    Single(NodeId, SocketAddr),
-    Full(NodeId),
-}
-
 impl RoutingTable {
     pub fn new(own_id: NodeId, router_nodes: Vec<SocketAddr>) -> Self {
         Self {
             own_id,
             buckets: vec![Bucket::new()],
-            router_nodes: router_nodes.into_iter().collect(),
+            router_nodes: router_nodes.into_iter().map(to_ipv6).collect(),
         }
     }
 
-    pub fn next_refresh(&mut self) -> Option<Refresh> {
+    pub fn next_refresh(&mut self) -> Option<ClientRequest> {
         let bucket_no = self.buckets.iter().position(|b| b.need_refresh())?;
 
         let bucket = &mut self.buckets[bucket_no];
@@ -40,10 +39,13 @@ impl RoutingTable {
             .max_by_key(|c| c.fail_count())?;
 
         if bucket.is_full() {
-            Some(Refresh::Single(c.id, c.addr))
+            Some(ClientRequest::Ping {
+                id: c.id,
+                addr: c.addr,
+            })
         } else {
             let id = NodeId::gen_lz(bucket_no);
-            Some(Refresh::Full(id))
+            Some(ClientRequest::Bootstrap { target: id })
         }
     }
 
