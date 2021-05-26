@@ -5,7 +5,7 @@ authors = ["Gurwinder Singh <vargwin@gmail.com>"]
 edition = "2018"
 
 [workspace]
-members = ["dht"]
+members = ["dht", "ben"]
 
 [dependencies]
 url = "2.2.0"
@@ -18,9 +18,9 @@ rand = "0.8.2"
 log = { version = "0.4.13", features = ["release_max_level_off"] }
 percent-encoding = "2.1.0"
 env_logger = "0.8.2"
-ben = "0.2.0"
 clap = "2.33.0"
 byteorder = "1.4.2"
 anyhow = "1.0.38"
 bitflags = "1.2.1"
 dht = { path = "./dht" }
+ben = { path = "./ben" }

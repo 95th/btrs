@@ -61,6 +61,13 @@ checksum = "904dfeac50f3cdaba28fc6f57fdcddb75f49ed61346676a78c4ffe55877802fd"
 [[package]]
 name = "ben"
 version = "0.2.0"
+dependencies = [
+ "itoa",
+]
+
+[[package]]
+name = "ben"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "383ee022222f22d03dcf8ffbae2d408f7ca33d5e1a092fdf86f87e2422027907"
 dependencies = [
@@ -78,7 +85,7 @@ name = "btrs"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "ben",
+ "ben 0.2.0",
  "bitflags",
  "byteorder",
  "clap",
@@ -167,7 +174,7 @@ name = "dht"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "ben",
+ "ben 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "bitflags",
  "byteorder",
  "data-encoding",
