@@ -39,24 +39,40 @@ pub enum ClientRequest {
     },
     Bootstrap {
         target: NodeId,
+        sender: oneshot::Sender<()>,
     },
 }
 
 pub struct Dht {
     tx: mpsc::Sender<ClientRequest>,
+    id: NodeId,
 }
 
 impl Dht {
     pub fn new(port: u16, router_nodes: Vec<SocketAddr>) -> (Self, DhtServer) {
         let (tx, rx) = mpsc::channel::<ClientRequest>(200);
+        let id = NodeId::gen();
         let server = DhtServer {
             port,
             router_nodes,
             tx: tx.clone(),
             rx,
+            id,
         };
 
-        (Self { tx }, server)
+        (Self { tx, id }, server)
+    }
+
+    pub async fn bootstrap(&mut self) -> anyhow::Result<()> {
+        let (tx, rx) = oneshot::channel();
+        self.tx
+            .send(ClientRequest::Bootstrap {
+                target: self.id,
+                sender: tx,
+            })
+            .await?;
+
+        Ok(rx.await?)
     }
 
     pub async fn get_peers(&mut self, info_hash: NodeId) -> anyhow::Result<HashSet<SocketAddr>> {
@@ -85,6 +101,7 @@ impl Dht {
 }
 
 pub struct DhtServer {
+    id: NodeId,
     port: u16,
     router_nodes: Vec<SocketAddr>,
     tx: mpsc::Sender<ClientRequest>,
@@ -101,9 +118,8 @@ impl DhtServer {
             }
         };
 
-        let id = NodeId::gen();
-        let table = &mut RoutingTable::new(id, self.router_nodes);
-        let rpc = &mut RpcMgr::new(id, &udp);
+        let table = &mut RoutingTable::new(self.id, self.router_nodes);
+        let rpc = &mut RpcMgr::new(self.id, &udp);
         let parser = &mut Parser::new();
         let running = &mut Slab::new();
 
@@ -115,11 +131,6 @@ impl DhtServer {
 
         let mut tx = self.tx;
         let mut rx = self.rx;
-
-        // Bootstrap on ourselves
-        tx.send(ClientRequest::Bootstrap { target: id })
-            .await
-            .unwrap();
 
         loop {
             select! {
@@ -174,8 +185,8 @@ impl DhtServer {
                             let t = DhtGetPeers::new(&info_hash, table, sender, entry.key());
                             DhtTraversal::GetPeers(t)
                         },
-                        ClientRequest::Bootstrap { target } => {
-                            let t = DhtBootstrap::new(&target, table, entry.key());
+                        ClientRequest::Bootstrap { target, sender } => {
+                            let t = DhtBootstrap::new(&target, table, entry.key(), sender);
                             DhtTraversal::Bootstrap(t)
                         },
                         ClientRequest::Announce { info_hash, sender } => {

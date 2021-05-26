@@ -33,7 +33,7 @@ impl DhtAnnounce {
         resp: &Response<'_, '_>,
         addr: &SocketAddr,
         table: &mut RoutingTable,
-        rpc: &mut RpcMgr,
+        rpc: &mut RpcMgr<'_>,
         has_id: bool,
     ) {
         log::trace!("Handle ANNOUNCE response");

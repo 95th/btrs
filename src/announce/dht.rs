@@ -15,8 +15,10 @@ impl DhtTracker {
         let mut dht_routers = vec![];
         dht_routers.extend(lookup_host("dht.libtorrent.org:25401").await?);
 
-        let (dht, server) = Dht::new(6881, dht_routers);
+        let (mut dht, server) = Dht::new(6881, dht_routers);
         tokio::spawn(server.run());
+
+        dht.bootstrap().await?;
 
         Ok(Self {
             dht,

@@ -4,18 +4,26 @@ use crate::msg::send::FindNode;
 use crate::server::RpcMgr;
 use crate::table::RoutingTable;
 use ben::Encode;
+use futures::channel::oneshot;
 use std::net::SocketAddr;
 
 use super::traversal::Traversal;
 
 pub struct DhtBootstrap {
     traversal: Traversal,
+    sender: oneshot::Sender<()>,
 }
 
 impl DhtBootstrap {
-    pub fn new(target: &NodeId, table: &mut RoutingTable, traversal_id: usize) -> Self {
+    pub fn new(
+        target: &NodeId,
+        table: &mut RoutingTable,
+        traversal_id: usize,
+        sender: oneshot::Sender<()>,
+    ) -> Self {
         Self {
             traversal: Traversal::new(target, table, traversal_id),
+            sender,
         }
     }
 
@@ -53,5 +61,7 @@ impl DhtBootstrap {
             .await
     }
 
-    pub fn done(self) {}
+    pub fn done(self) {
+        let _ = self.sender.send(());
+    }
 }

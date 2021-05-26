@@ -46,7 +46,7 @@ impl DhtTraversal {
         resp: &Response<'_, '_>,
         addr: &SocketAddr,
         table: &mut RoutingTable,
-        rpc: &mut RpcMgr,
+        rpc: &mut RpcMgr<'_>,
         has_id: bool,
     ) {
         match self {
