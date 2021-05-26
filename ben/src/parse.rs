@@ -44,9 +44,9 @@ impl Parser {
     }
 
     /// Parse a bencoded slice and returns the parsed object
-    pub fn parse<'a, 'p, T>(&'p mut self, buf: &'a [u8]) -> Result<T>
+    pub fn parse<'a, T>(&'a mut self, buf: &'a [u8]) -> Result<T>
     where
-        T: Decode<'a, 'p>,
+        T: Decode<'a>,
     {
         let (dec, len) = self.parse_prefix_impl(buf)?;
         if len == buf.len() {
@@ -63,16 +63,16 @@ impl Parser {
     /// number of bytes processed.
     ///
     /// It's useful when there is trailing data after the bencoded bytes.
-    pub fn parse_prefix<'a, 'p, T>(&'p mut self, buf: &'a [u8]) -> Result<(T, usize)>
+    pub fn parse_prefix<'a, T>(&'a mut self, buf: &'a [u8]) -> Result<(T, usize)>
     where
-        T: Decode<'a, 'p>,
+        T: Decode<'a>,
     {
         let (dec, pos) = self.parse_prefix_impl(buf)?;
         let t = T::decode(dec)?;
         Ok((t, pos))
     }
 
-    fn parse_prefix_impl<'a, 'p>(&'p mut self, buf: &'a [u8]) -> Result<(Decoder<'a, 'p>, usize)> {
+    fn parse_prefix_impl<'a>(&'a mut self, buf: &'a [u8]) -> Result<(Decoder<'a>, usize)> {
         if buf.is_empty() {
             return Err(Error::Eof);
         }
@@ -89,23 +89,23 @@ impl Parser {
 
         state.parse_object()?;
         let pos = state.pos;
-        let d = Decoder::new(buf, &self.tokens).ok_or_else(|| Error::Eof)?;
+        let d = Decoder::new(buf, &self.tokens).ok_or(Error::Eof)?;
         Ok((d, pos))
     }
 }
 
-struct State<'a, 't> {
+struct State<'a> {
     buf: &'a [u8],
     pos: usize,
-    tokens: &'t mut Vec<Token>,
+    tokens: &'a mut Vec<Token>,
     token_limit: usize,
     depth_limit: usize,
     current_depth: usize,
 }
 
-impl<'a, 't> State<'a, 't> {
+impl<'a> State<'a> {
     fn peek_char(&self) -> Result<u8> {
-        self.buf.get(self.pos).copied().ok_or_else(|| Error::Eof)
+        self.buf.get(self.pos).copied().ok_or(Error::Eof)
     }
 
     fn next_char(&mut self) -> Result<u8> {

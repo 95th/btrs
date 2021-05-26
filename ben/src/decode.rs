@@ -3,18 +3,18 @@ use crate::token::{Token, TokenKind};
 use std::fmt;
 
 /// Decode to given type using provided `Decoder` object
-pub trait Decode<'a, 'p>: Sized {
-    fn decode(decoder: Decoder<'a, 'p>) -> Result<Self>;
+pub trait Decode<'a>: Sized {
+    fn decode(decoder: Decoder<'a>) -> Result<Self>;
 }
 
-impl<'a, 'p> Decode<'a, 'p> for Decoder<'a, 'p> {
-    fn decode(decoder: Decoder<'a, 'p>) -> Result<Self> {
+impl<'a> Decode<'a> for Decoder<'a> {
+    fn decode(decoder: Decoder<'a>) -> Result<Self> {
         Ok(decoder)
     }
 }
 
-impl<'a, 'p> Decode<'a, 'p> for List<'a, 'p> {
-    fn decode(decoder: Decoder<'a, 'p>) -> Result<Self> {
+impl<'a> Decode<'a> for List<'a> {
+    fn decode(decoder: Decoder<'a>) -> Result<Self> {
         match decoder.into_list() {
             Some(dict) => Ok(dict),
             None => Err(Error::TypeMismatch("Not a list")),
@@ -22,8 +22,8 @@ impl<'a, 'p> Decode<'a, 'p> for List<'a, 'p> {
     }
 }
 
-impl<'a, 'p> Decode<'a, 'p> for Dict<'a, 'p> {
-    fn decode(decoder: Decoder<'a, 'p>) -> Result<Self> {
+impl<'a> Decode<'a> for Dict<'a> {
+    fn decode(decoder: Decoder<'a>) -> Result<Self> {
         match decoder.into_dict() {
             Some(dict) => Ok(dict),
             None => Err(Error::TypeMismatch("Not a dictionary")),
@@ -31,8 +31,8 @@ impl<'a, 'p> Decode<'a, 'p> for Dict<'a, 'p> {
     }
 }
 
-impl<'a, 'p> Decode<'a, 'p> for &'a [u8] {
-    fn decode(decoder: Decoder<'a, 'p>) -> Result<Self> {
+impl<'a> Decode<'a> for &'a [u8] {
+    fn decode(decoder: Decoder<'a>) -> Result<Self> {
         match decoder.as_bytes() {
             Some(val) => Ok(val),
             None => Err(Error::TypeMismatch("Not a byte string")),
@@ -40,8 +40,8 @@ impl<'a, 'p> Decode<'a, 'p> for &'a [u8] {
     }
 }
 
-impl<'a, 'p> Decode<'a, 'p> for Vec<u8> {
-    fn decode(decoder: Decoder<'a, 'p>) -> Result<Self> {
+impl<'a> Decode<'a> for Vec<u8> {
+    fn decode(decoder: Decoder<'a>) -> Result<Self> {
         match decoder.as_bytes() {
             Some(val) => Ok(val.to_vec()),
             None => Err(Error::TypeMismatch("Not a byte string")),
@@ -49,8 +49,8 @@ impl<'a, 'p> Decode<'a, 'p> for Vec<u8> {
     }
 }
 
-impl<'a, 'p> Decode<'a, 'p> for &'a str {
-    fn decode(decoder: Decoder<'a, 'p>) -> Result<Self> {
+impl<'a> Decode<'a> for &'a str {
+    fn decode(decoder: Decoder<'a>) -> Result<Self> {
         match decoder.as_str() {
             Some(val) => Ok(val),
             None => Err(Error::TypeMismatch("Not a UTF-8 string")),
@@ -58,8 +58,8 @@ impl<'a, 'p> Decode<'a, 'p> for &'a str {
     }
 }
 
-impl<'a, 'p> Decode<'a, 'p> for i64 {
-    fn decode(decoder: Decoder<'a, 'p>) -> Result<Self> {
+impl<'a> Decode<'a> for i64 {
+    fn decode(decoder: Decoder<'a>) -> Result<Self> {
         match decoder.as_int() {
             Some(val) => Ok(val),
             None => Err(Error::TypeMismatch("Not a integer")),
@@ -67,8 +67,8 @@ impl<'a, 'p> Decode<'a, 'p> for i64 {
     }
 }
 
-impl<'a, 'p> Decode<'a, 'p> for String {
-    fn decode(decoder: Decoder<'a, 'p>) -> Result<Self> {
+impl<'a> Decode<'a> for String {
+    fn decode(decoder: Decoder<'a>) -> Result<Self> {
         match decoder.as_str() {
             Some(val) => Ok(String::from(val)),
             None => Err(Error::TypeMismatch("Not a UTF-8 string")),
@@ -78,13 +78,13 @@ impl<'a, 'p> Decode<'a, 'p> for String {
 
 #[derive(PartialEq)]
 #[repr(C)]
-pub struct Decoder<'a, 'p> {
+pub struct Decoder<'a> {
     pub(crate) buf: &'a [u8],
-    pub(crate) token: &'p Token,
-    pub(crate) rest: &'p [Token],
+    pub(crate) token: &'a Token,
+    pub(crate) rest: &'a [Token],
 }
 
-impl fmt::Debug for Decoder<'_, '_> {
+impl fmt::Debug for Decoder<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.token.kind {
             TokenKind::Int => write!(f, "{}", self.as_int().unwrap()),
@@ -98,8 +98,8 @@ impl fmt::Debug for Decoder<'_, '_> {
     }
 }
 
-impl<'a, 'p> Decoder<'a, 'p> {
-    pub(crate) fn new(buf: &'a [u8], tokens: &'p [Token]) -> Option<Self> {
+impl<'a> Decoder<'a> {
+    pub(crate) fn new(buf: &'a [u8], tokens: &'a [Token]) -> Option<Self> {
         if let [token, rest @ ..] = tokens {
             Some(Decoder { buf, token, rest })
         } else {
@@ -164,7 +164,7 @@ impl<'a, 'p> Decoder<'a, 'p> {
     /// assert_eq!(b"a", list.get_bytes(0).unwrap());
     /// assert_eq!(b"bc", list.get_bytes(1).unwrap());
     /// ```
-    pub fn into_list(self) -> Option<List<'a, 'p>> {
+    pub fn into_list(self) -> Option<List<'a>> {
         if self.is_list() {
             Some(List {
                 buf: self.buf,
@@ -192,7 +192,7 @@ impl<'a, 'p> Decoder<'a, 'p> {
     /// assert_eq!(b"a", list.get_bytes(0).unwrap());
     /// assert_eq!(b"bc", list.get_bytes(1).unwrap());
     /// ```
-    pub fn as_list(&self) -> Option<&List<'a, 'p>> {
+    pub fn as_list(&self) -> Option<&List<'a>> {
         if self.is_list() {
             // Safety: Objects with exact same layout
             let list = unsafe { &*(self as *const Decoder as *const List) };
@@ -217,7 +217,7 @@ impl<'a, 'p> Decoder<'a, 'p> {
     /// let dict = decoder.into_dict().unwrap();
     /// assert_eq!(b"bc", dict.get_bytes("a").unwrap());
     /// ```
-    pub fn into_dict(self) -> Option<Dict<'a, 'p>> {
+    pub fn into_dict(self) -> Option<Dict<'a>> {
         if self.is_dict() {
             Some(Dict {
                 buf: self.buf,
@@ -244,7 +244,7 @@ impl<'a, 'p> Decoder<'a, 'p> {
     /// let dict = decoder.as_dict().unwrap();
     /// assert_eq!(b"bc", dict.get_bytes("a").unwrap());
     /// ```
-    pub fn as_dict(&self) -> Option<&Dict<'a, 'p>> {
+    pub fn as_dict(&self) -> Option<&Dict<'a>> {
         if self.is_dict() {
             // Safety: Objects with exact same layout
             let dict = unsafe { &*(self as *const Decoder as *const Dict) };
@@ -362,30 +362,30 @@ impl<'a, 'p> Decoder<'a, 'p> {
 
 /// A bencode list
 #[repr(C)]
-pub struct List<'a, 'p> {
+pub struct List<'a> {
     buf: &'a [u8],
-    token: &'p Token,
-    rest: &'p [Token],
+    token: &'a Token,
+    rest: &'a [Token],
 }
 
-impl fmt::Debug for List<'_, '_> {
+impl fmt::Debug for List<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_list().entries(self.iter()).finish()
     }
 }
 
-impl<'a, 'p> IntoIterator for List<'a, 'p> {
-    type Item = Decoder<'a, 'p>;
-    type IntoIter = ListIter<'a, 'p>;
+impl<'a> IntoIterator for List<'a> {
+    type Item = Decoder<'a>;
+    type IntoIter = ListIter<'a>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.iter()
     }
 }
 
-impl<'a, 'p> List<'a, 'p> {
+impl<'a> List<'a> {
     /// Gets an iterator over the entries of the list
-    pub fn iter(&self) -> ListIter<'a, 'p> {
+    pub fn iter(&self) -> ListIter<'a> {
         ListIter {
             buf: self.buf,
             tokens: self.rest,
@@ -414,17 +414,17 @@ impl<'a, 'p> List<'a, 'p> {
     }
 
     /// Returns the `Decoder` at the given index.
-    pub fn get(&self, i: usize) -> Option<Decoder<'a, 'p>> {
+    pub fn get(&self, i: usize) -> Option<Decoder<'a>> {
         self.iter().nth(i)
     }
 
     /// Returns the `Dict` at the given index.
-    pub fn get_dict(&self, i: usize) -> Option<Dict<'a, 'p>> {
+    pub fn get_dict(&self, i: usize) -> Option<Dict<'a>> {
         self.get(i)?.into_dict()
     }
 
     /// Returns the `List` at the given index.
-    pub fn get_list(&self, i: usize) -> Option<List<'a, 'p>> {
+    pub fn get_list(&self, i: usize) -> Option<List<'a>> {
         self.get(i)?.into_list()
     }
 
@@ -459,16 +459,16 @@ impl<'a, 'p> List<'a, 'p> {
     }
 }
 
-pub struct ListIter<'a, 'p> {
+pub struct ListIter<'a> {
     buf: &'a [u8],
-    tokens: &'p [Token],
+    tokens: &'a [Token],
     total: usize,
     index: usize,
     pos: usize,
 }
 
-impl<'a, 'p> Iterator for ListIter<'a, 'p> {
-    type Item = Decoder<'a, 'p>;
+impl<'a> Iterator for ListIter<'a> {
+    type Item = Decoder<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.pos >= self.total {
@@ -488,30 +488,30 @@ impl<'a, 'p> Iterator for ListIter<'a, 'p> {
 
 /// A bencode dictionary
 #[repr(C)]
-pub struct Dict<'a, 'p> {
+pub struct Dict<'a> {
     buf: &'a [u8],
-    token: &'p Token,
-    rest: &'p [Token],
+    token: &'a Token,
+    rest: &'a [Token],
 }
 
-impl fmt::Debug for Dict<'_, '_> {
+impl fmt::Debug for Dict<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_map().entries(self.iter()).finish()
     }
 }
 
-impl<'a, 'p> IntoIterator for Dict<'a, 'p> {
-    type Item = (Decoder<'a, 'p>, Decoder<'a, 'p>);
-    type IntoIter = DictIter<'a, 'p>;
+impl<'a> IntoIterator for Dict<'a> {
+    type Item = (Decoder<'a>, Decoder<'a>);
+    type IntoIter = DictIter<'a>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.iter()
     }
 }
 
-impl<'a, 'p> Dict<'a, 'p> {
+impl<'a> Dict<'a> {
     /// Gets an iterator over the entries of the dictionary.
-    pub fn iter(&self) -> DictIter<'a, 'p> {
+    pub fn iter(&self) -> DictIter<'a> {
         DictIter {
             buf: self.buf,
             tokens: self.rest,
@@ -540,7 +540,7 @@ impl<'a, 'p> Dict<'a, 'p> {
     }
 
     /// Returns the `Decoder` for the given key.
-    pub fn get(&self, key: &str) -> Option<Decoder<'a, 'p>> {
+    pub fn get(&self, key: &str) -> Option<Decoder<'a>> {
         self.iter().find_map(|(k, v)| {
             if k.as_raw_bytes() == key.as_bytes() {
                 Some(v)
@@ -551,12 +551,12 @@ impl<'a, 'p> Dict<'a, 'p> {
     }
 
     /// Returns the `Dict` for the given key.
-    pub fn get_dict(&self, key: &str) -> Option<Dict<'a, 'p>> {
+    pub fn get_dict(&self, key: &str) -> Option<Dict<'a>> {
         self.get(key)?.into_dict()
     }
 
     /// Returns the `List` for the given key.
-    pub fn get_list(&self, key: &str) -> Option<List<'a, 'p>> {
+    pub fn get_list(&self, key: &str) -> Option<List<'a>> {
         self.get(key)?.into_list()
     }
 
@@ -591,16 +591,16 @@ impl<'a, 'p> Dict<'a, 'p> {
     }
 }
 
-pub struct DictIter<'a, 'p> {
+pub struct DictIter<'a> {
     buf: &'a [u8],
-    tokens: &'p [Token],
+    tokens: &'a [Token],
     total: usize,
     index: usize,
     pos: usize,
 }
 
-impl<'a, 'p> Iterator for DictIter<'a, 'p> {
-    type Item = (Decoder<'a, 'p>, Decoder<'a, 'p>);
+impl<'a> Iterator for DictIter<'a> {
+    type Item = (Decoder<'a>, Decoder<'a>);
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.pos >= self.total {

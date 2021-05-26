@@ -66,15 +66,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ben"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "383ee022222f22d03dcf8ffbae2d408f7ca33d5e1a092fdf86f87e2422027907"
-dependencies = [
- "itoa",
-]
-
-[[package]]
 name = "bitflags"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -85,7 +76,7 @@ name = "btrs"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "ben 0.2.0",
+ "ben",
  "bitflags",
  "byteorder",
  "clap",
@@ -174,7 +165,7 @@ name = "dht"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "ben 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "ben",
  "bitflags",
  "byteorder",
  "data-encoding",

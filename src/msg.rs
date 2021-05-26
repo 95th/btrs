@@ -236,12 +236,12 @@ impl Message {
         }
     }
 
-    pub async fn read_ext<'a, 'p, R>(
+    pub async fn read_ext<'a, R>(
         &self,
         rdr: &mut R,
         buf: &'a mut Vec<u8>,
-        parser: &'p mut Parser,
-    ) -> anyhow::Result<ExtendedMessage<'a, 'p>>
+        parser: &'a mut Parser,
+    ) -> anyhow::Result<ExtendedMessage<'a>>
     where
         R: AsyncRead + Unpin,
     {
@@ -260,9 +260,9 @@ impl Message {
     }
 }
 
-pub struct ExtendedMessage<'a, 'p> {
+pub struct ExtendedMessage<'a> {
     pub id: u8,
-    pub value: Decoder<'a, 'p>,
+    pub value: Decoder<'a>,
     pub rest: &'a [u8],
 }
 
@@ -272,8 +272,8 @@ mod msg_type {
     pub const REJECT: i64 = 2;
 }
 
-impl<'a, 'p> ExtendedMessage<'a, 'p> {
-    pub fn parse(data: &'a [u8], parser: &'p mut Parser) -> anyhow::Result<Self> {
+impl<'a> ExtendedMessage<'a> {
+    pub fn parse(data: &'a [u8], parser: &'a mut Parser) -> anyhow::Result<Self> {
         let id = data[0];
         let (value, i) = parser.parse_prefix::<Decoder>(&data[1..])?;
         log::debug!("ext header len: {}", value.as_raw_bytes().len());
@@ -287,7 +287,7 @@ impl<'a, 'p> ExtendedMessage<'a, 'p> {
         self.id == 0
     }
 
-    pub fn body(&self) -> &Decoder<'_, '_> {
+    pub fn body(&self) -> &Decoder<'_> {
         &self.value
     }
 

@@ -7,7 +7,7 @@ use std::convert::TryInto;
 #[derive(Debug)]
 pub struct Query<'a> {
     pub txn_id: TxnId,
-    pub args: Dict<'a, 'a>,
+    pub args: Dict<'a>,
     pub id: &'a NodeId,
     pub kind: QueryKind,
 }
@@ -15,14 +15,14 @@ pub struct Query<'a> {
 #[derive(Debug)]
 pub struct Response<'a> {
     pub txn_id: TxnId,
-    pub body: Dict<'a, 'a>,
+    pub body: Dict<'a>,
     pub id: &'a NodeId,
 }
 
 #[derive(Debug)]
 pub struct ErrorResponse<'a> {
     pub txn_id: TxnId,
-    pub list: Option<List<'a, 'a>>,
+    pub list: Option<List<'a>>,
 }
 
 #[derive(Debug)]
@@ -49,8 +49,8 @@ macro_rules! check {
     };
 }
 
-impl<'a> Decode<'a, 'a> for Msg<'a> {
-    fn decode(decoder: Decoder<'a, 'a>) -> ben::Result<Self> {
+impl<'a> Decode<'a> for Msg<'a> {
+    fn decode(decoder: Decoder<'a>) -> ben::Result<Self> {
         use ben::Error::Other;
 
         let dict = check!(decoder.into_dict(), "Not a dict");
@@ -103,7 +103,7 @@ impl<'a> Decode<'a, 'a> for Msg<'a> {
     }
 }
 
-fn extract_id<'a>(dict: &Dict<'a, '_>) -> ben::Result<&'a NodeId> {
+fn extract_id<'a>(dict: &Dict<'a>) -> ben::Result<&'a NodeId> {
     let id = check!(dict.get_bytes("id"), "ID is required");
     if id.len() == 20 {
         let ptr = id.as_ptr() as *const NodeId;
