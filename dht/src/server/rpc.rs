@@ -58,7 +58,7 @@ impl<'a> RpcMgr<'a> {
         table: &mut RoutingTable,
         running: &mut Slab<DhtTraversal>,
     ) {
-        log::debug!("Received msg: {:?}", msg);
+        log::trace!("Received msg: {:?}", msg);
 
         match msg {
             Msg::Response(r) => self.handle_ok(r, addr, table, running).await,
