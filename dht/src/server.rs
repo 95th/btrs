@@ -126,7 +126,9 @@ impl DhtServer {
         let recv_buf: &mut [u8] = &mut [0; 1024];
         let timed_out = &mut Vec::new();
 
-        let mut prune_txn = time::interval(Duration::from_secs(1));
+        const TXN_TIMEOUT: Duration = Duration::from_secs(1);
+
+        let mut prune_txn = time::interval(TXN_TIMEOUT);
         let mut table_refresh = time::interval(Duration::from_secs(60));
 
         let mut tx = self.tx;
@@ -136,7 +138,11 @@ impl DhtServer {
             select! {
                 // Clear timed-out transactions
                 _ = prune_txn.tick().fuse() => {
-                    rpc.check_timeouts(table, running, timed_out).await;
+                    if running.is_empty() {
+                        prune_txn = time::interval(Duration::from_secs(86_400)); // Sleep for a day
+                    } else {
+                        rpc.check_timeouts(table, running, timed_out).await;
+                    }
                 }
 
                 // Refresh table buckets
@@ -202,6 +208,9 @@ impl DhtServer {
                     let done = t.add_requests(rpc).await;
                     if !done {
                         entry.insert(t);
+                        if prune_txn.period() != TXN_TIMEOUT {
+                            prune_txn = time::interval(TXN_TIMEOUT);
+                        }
                     }
                 },
                 complete => break,

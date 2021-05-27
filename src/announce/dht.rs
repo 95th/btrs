@@ -2,6 +2,7 @@ use crate::metainfo::InfoHash;
 use crate::peer::Peer;
 use dht::id::NodeId;
 use dht::Dht;
+use std::time::Duration;
 use std::time::Instant;
 use tokio::net::lookup_host;
 
@@ -41,6 +42,7 @@ impl DhtTracker {
             peers.len()
         );
 
+        self.next_announce = Instant::now() + Duration::from_secs(15 * 60);
         Ok(peers.into_iter().map(|a| a.into()).collect())
     }
 }
