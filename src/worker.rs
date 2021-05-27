@@ -8,11 +8,13 @@ use crate::{
     torrent::Torrent,
     work::{Piece, PieceIter, WorkQueue},
 };
-use futures::{channel::mpsc::Sender, future::poll_fn, stream::FuturesUnordered, Stream};
-use std::{
-    collections::{HashSet, VecDeque},
-    task::Poll,
+use futures::{
+    channel::mpsc::{self, Sender},
+    select,
+    stream::{self, FuturesUnordered},
+    SinkExt, StreamExt,
 };
+use std::collections::{HashSet, VecDeque};
 
 const SHA_1: usize = 20;
 
@@ -62,7 +64,7 @@ impl<'a> TorrentWorker<'a> {
         let trackers = &mut self.trackers;
 
         let mut new_dht;
-        let mut dht = match &mut self.dht_tracker {
+        let dht = match &mut self.dht_tracker {
             Some(dht) => Some(&mut **dht),
             None => match DhtTracker::new().await {
                 Ok(d) => {
@@ -78,140 +80,145 @@ impl<'a> TorrentWorker<'a> {
 
         let pending_downloads = FuturesUnordered::new();
         let pending_trackers = FuturesUnordered::new();
-        let pending_dht_trackers = FuturesUnordered::new();
 
         futures::pin_mut!(pending_downloads);
         futures::pin_mut!(pending_trackers);
-        futures::pin_mut!(pending_dht_trackers);
+
+        let dht_tracker = stream::unfold(dht, |dht| async {
+            let dht = dht?;
+            let peers = dht.announce(info_hash).await;
+            Some((peers, Some(dht)))
+        })
+        .fuse();
+
+        futures::pin_mut!(dht_tracker);
 
         // TODO: Make this configurable
         let max_connections = 10;
         let mut connected: Vec<Peer> = vec![];
         let mut failed: Vec<Peer> = vec![];
 
-        let future = poll_fn(|cx| {
-            loop {
-                // No remaining pieces are left and no pending downloads
-                if work.borrow().is_empty() && pending_downloads.is_empty() {
-                    break;
-                }
+        let (mut add_conn_tx, mut add_conn_rx) = mpsc::channel(10);
 
-                if let Some(dht) = dht.take() {
-                    pending_dht_trackers.push(async move {
-                        let peers = dht.announce(info_hash).await;
-                        (peers, dht)
-                    });
-                }
+        // Add initial connections
+        if !all_peers.is_empty() || !all_peers6.is_empty() {
+            add_conn_tx.send(()).await.unwrap();
+        }
 
-                // Announce
-                while let Some(mut tracker) = trackers.pop_front() {
-                    pending_trackers.push(async move {
-                        let resp = tracker.announce(info_hash, peer_id).await;
-                        (resp, tracker)
-                    });
-                }
+        loop {
+            select! {
+                // Add new download connections
+                _ = add_conn_rx.next() => {
+                    while connected.len() < max_connections {
+                        let maybe_peer = all_peers
+                            .iter()
+                            .chain(all_peers6.iter())
+                            .find(|p| !connected.contains(p) && !failed.contains(p));
 
-                // Add new peer to download
-                while connected.len() < max_connections {
-                    let maybe_peer = all_peers
-                        .iter()
-                        .chain(all_peers6.iter())
-                        .find(|p| !connected.contains(p) && !failed.contains(p));
+                        if let Some(peer) = maybe_peer {
+                            let dl = {
+                                let peer = peer.clone();
+                                let piece_tx = piece_tx.clone();
+                                async move {
+                                    let f = async {
+                                        let mut client = timeout(Client::new_tcp(peer.addr), 3).await?;
+                                        client.handshake(info_hash, peer_id).await?;
+                                        let mut dl = Download::new(client, work, piece_tx).await?;
+                                        dl.start().await
+                                    };
+                                    f.await.map_err(|e| (e, peer))
+                                }
+                            };
+                            pending_downloads.push(dl);
+                            connected.push(peer.clone());
 
-                    if let Some(peer) = maybe_peer {
-                        let dl = {
-                            let peer = peer.clone();
-                            let piece_tx = piece_tx.clone();
-                            async move {
-                                let f = async {
-                                    let mut client = timeout(Client::new_tcp(peer.addr), 3).await?;
-                                    client.handshake(info_hash, peer_id).await?;
-                                    let mut download =
-                                        Download::new(client, work, piece_tx).await?;
-                                    download.start().await
-                                };
-                                f.await.map_err(|e| (e, peer))
-                            }
-                        };
-                        pending_downloads.push(dl);
-                        connected.push(peer.clone());
-
-                        log::trace!(
-                            "{} active connections, {} pending trackers, {} pending downloads",
-                            connected.len(),
-                            pending_trackers.len(),
-                            pending_downloads.len()
-                        );
-                    } else {
-                        break;
-                    }
-                }
-
-                let mut tracker_pending = false;
-
-                match pending_trackers.as_mut().poll_next(cx) {
-                    Poll::Ready(Some((resp, tracker))) => {
-                        match resp {
-                            Ok(resp) => {
-                                trackers.push_back(tracker);
-
-                                all_peers.extend(resp.peers);
-                                all_peers6.extend(resp.peers6);
-
-                                // We don't want to connect failed peers again
-                                all_peers.retain(|p| !failed.contains(p));
-                                all_peers6.retain(|p| !failed.contains(p));
-                            }
-                            Err(e) => log::warn!("Announce error: {}", e),
+                            log::trace!(
+                                "{} active connections, {} pending trackers, {} pending downloads",
+                                connected.len(),
+                                pending_trackers.len(),
+                                pending_downloads.len()
+                            );
+                        } else {
+                            break;
                         }
                     }
-                    Poll::Ready(None) => {}
-                    Poll::Pending => tracker_pending = true,
                 }
 
-                match pending_dht_trackers.as_mut().poll_next(cx) {
-                    Poll::Ready(Some((resp, tracker))) => {
-                        match resp {
-                            Ok(peers) => {
-                                dht.replace(tracker);
-                                all_peers.extend(peers);
-
-                                // We don't want to connect failed peers again
-                                all_peers.retain(|p| !failed.contains(p));
-                                all_peers6.retain(|p| !failed.contains(p));
-                            }
-                            Err(e) => log::warn!("DHT announce error: {}", e),
-                        }
-                    }
-                    Poll::Ready(None) => {}
-                    Poll::Pending => tracker_pending = true,
-                }
-
-                match futures::ready!(pending_downloads.as_mut().poll_next(cx)) {
-                    Some(result) => {
-                        if let Err((e, peer)) = result {
+                // Check running downloads
+                maybe_result = pending_downloads.next() => {
+                    match maybe_result {
+                        Some(Ok(())) => {},
+                        Some(Err((e, peer))) => {
                             log::warn!("Error occurred for peer {} : {}", peer.addr, e);
                             match connected.iter().position(|p| *p == peer) {
                                 Some(pos) => {
                                     connected.swap_remove(pos);
                                     failed.push(peer);
+                                    add_conn_tx.send(()).await.unwrap();
                                 }
                                 None => debug_assert!(false, "peer should be in `connected` list"),
                             }
                         }
+                        None => {
+                            if work.borrow().is_empty() {
+                                break;
+                            }
+                        },
                     }
-                    None => {
-                        if tracker_pending {
-                            return Poll::Pending;
-                        } else if trackers.is_empty() && pending_trackers.is_empty() {
-                            break;
+                }
+
+                // Check DHT Tracker announce
+                peers = dht_tracker.next() => {
+                    match peers {
+                        Some(Ok(peers)) => {
+                            all_peers.extend(peers);
+
+                            // We don't want to connect failed peers again
+                            all_peers.retain(|p| !failed.contains(p));
+                            all_peers6.retain(|p| !failed.contains(p));
+                            add_conn_tx.send(()).await.unwrap();
+                        }
+                        Some(Err(e)) => log::warn!("DHT announce error: {}", e),
+                        None => {
+                            log::debug!("DHT Tracker is done");
                         }
                     }
                 }
-            }
-            Poll::Ready(())
-        });
 
-        future.await
+                // Check other tracker announce
+                resp = pending_trackers.next() => {
+                    let resp = match resp {
+                        Some((resp, tracker)) => {
+                            trackers.push_back(tracker);
+                            resp
+                        },
+                        None => {
+                            log::debug!("Trackers are all done");
+                            continue;
+                        }
+                    };
+
+                    while let Some(mut tracker) = trackers.pop_front() {
+                        pending_trackers.push(async move {
+                            let resp = tracker.announce(info_hash, peer_id).await;
+                            (resp, tracker)
+                        });
+                    }
+
+                    match resp {
+                        Ok(resp) => {
+                            all_peers.extend(resp.peers);
+                            all_peers6.extend(resp.peers6);
+
+                            // We don't want to connect failed peers again
+                            all_peers.retain(|p| !failed.contains(p));
+                            all_peers6.retain(|p| !failed.contains(p));
+                            add_conn_tx.send(()).await.unwrap();
+                        }
+                       Err(e) => log::warn!("Announce error: {}", e),
+                    }
+                }
+            }
+        }
     }
 }
