@@ -3,7 +3,10 @@ use tokio::net::UdpSocket;
 
 use crate::{
     id::NodeId,
-    msg::{recv::Msg, TxnId},
+    msg::{
+        recv::{ErrorResponse, Msg, Response},
+        TxnId,
+    },
     table::RoutingTable,
 };
 use hashbrown::HashMap;
@@ -57,69 +60,80 @@ impl<'a> RpcMgr<'a> {
     ) {
         log::debug!("Received msg: {:?}", msg);
 
-        let resp = match msg {
-            Msg::Response(x) => x,
-            Msg::Error(e) => {
-                match self.txns.remove(e.txn_id) {
-                    Some(req) => {
-                        log::warn!("Error response from {}: {:?}", addr, e);
-                        if req.has_id {
-                            table.failed(&req.id);
-                        }
+        match msg {
+            Msg::Response(r) => self.handle_ok(r, addr, table, running).await,
+            Msg::Error(e) => self.handle_error(e, addr, table, running).await,
+            x => log::warn!("Unhandled msg: {:?}", x),
+        }
+    }
 
-                        let t = &mut running[req.traversal_id];
-                        t.set_failed(&req.id, &addr);
-                        let done = t.add_requests(self).await;
-                        if done {
-                            running.remove(req.traversal_id).done();
-                        }
-                    }
-                    None => {
-                        log::warn!("Response for unrecognized txn: {:?}", e.txn_id);
-                    }
-                }
-                return;
-            }
-            x => {
-                log::warn!("Unhandled msg: {:?}", x);
-                return;
-            }
-        };
-
+    async fn handle_ok(
+        &mut self,
+        resp: Response<'_>,
+        addr: SocketAddr,
+        table: &mut RoutingTable,
+        running: &mut Slab<DhtTraversal>,
+    ) {
         let req = match self.txns.remove(resp.txn_id) {
-            Some(req) => {
-                if req.has_id && &req.id == resp.id {
-                    table.heard_from(&req.id);
-                } else if req.has_id {
-                    log::warn!(
-                        "ID mismatch from {}, Expected: {:?}, Actual: {:?}",
-                        addr,
-                        &req.id,
-                        &resp.id
-                    );
-                    table.failed(&req.id);
-
-                    let t = &mut running[req.traversal_id];
-                    t.set_failed(&req.id, &addr);
-                    let done = t.add_requests(self).await;
-                    if done {
-                        running.remove(req.traversal_id).done();
-                    }
-                    return;
-                }
-                req
-            }
+            Some(req) => req,
             None => {
                 log::warn!("Response for unrecognized txn: {:?}", resp.txn_id);
                 return;
             }
         };
 
-        let t = &mut running[req.traversal_id];
-        t.handle_response(&resp, &addr, table, self, req.has_id);
-        let done = t.add_requests(self).await;
-        if done {
-            running.remove(req.traversal_id).done();
+        if req.has_id && &req.id == resp.id {
+            table.heard_from(&req.id);
+        } else if req.has_id {
+            log::warn!(
+                "ID mismatch from {}, Expected: {:?}, Actual: {:?}",
+                addr,
+                &req.id,
+                &resp.id
+            );
+            table.failed(&req.id);
+
+            if let Some(t) = running.get_mut(req.traversal_id) {
+                t.set_failed(&req.id, &addr);
+                let done = t.add_requests(self).await;
+                if done {
+                    running.remove(req.traversal_id).done();
+                }
+            }
+            return;
+        }
+
+        if let Some(t) = running.get_mut(req.traversal_id) {
+            t.handle_response(&resp, &addr, table, self, req.has_id);
+            let done = t.add_requests(self).await;
+            if done {
+                running.remove(req.traversal_id).done();
+            }
+        }
+    }
+
+    async fn handle_error(
+        &mut self,
+        error: ErrorResponse<'_>,
+        addr: SocketAddr,
+        table: &mut RoutingTable,
+        running: &mut Slab<DhtTraversal>,
+    ) {
+        if let Some(req) = self.txns.remove(error.txn_id) {
+            log::warn!("Error response from {}: {:?}", addr, error);
+            if req.has_id {
+                table.failed(&req.id);
+            }
+
+            if let Some(t) = running.get_mut(req.traversal_id) {
+                t.set_failed(&req.id, &addr);
+                let done = t.add_requests(self).await;
+                if done {
+                    running.remove(req.traversal_id).done();
+                }
+            }
+        } else {
+            log::warn!("Response for unrecognized txn: {:?}", error.txn_id);
         }
     }
 
@@ -150,11 +164,12 @@ impl<'a> RpcMgr<'a> {
                 table.failed(&req.id);
             }
 
-            let t = &mut running[req.traversal_id];
-            t.set_failed(&req.id, &req.addr);
-            let done = t.add_requests(self).await;
-            if done {
-                running.remove(req.traversal_id).done();
+            if let Some(t) = running.get_mut(req.traversal_id) {
+                t.set_failed(&req.id, &req.addr);
+                let done = t.add_requests(self).await;
+                if done {
+                    running.remove(req.traversal_id).done();
+                }
             }
         }
 

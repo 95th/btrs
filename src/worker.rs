@@ -177,7 +177,10 @@ impl<'a> TorrentWorker<'a> {
                             all_peers6.retain(|p| !failed.contains(p));
                             add_conn_tx.send(()).await.unwrap();
                         }
-                        Some(Err(e)) => log::warn!("DHT announce error: {}", e),
+                        Some(Err(e)) => {
+                            log::warn!("DHT announce error: {}", e);
+                            break;
+                        },
                         None => {
                             log::debug!("DHT Tracker is done");
                         }
