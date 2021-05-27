@@ -1,3 +1,4 @@
+use btrs::avg::SlidingAvg;
 use btrs::bitfield::BitField;
 use btrs::magnet::MagnetUri;
 use btrs::peer;
@@ -6,9 +7,12 @@ use btrs::torrent::{Torrent, TorrentFile};
 use btrs::work::Piece;
 use clap::{App, Arg};
 use futures::channel::mpsc;
+use futures::select;
+use futures::FutureExt;
 use futures::StreamExt;
 use std::fs;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use tokio::time;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> anyhow::Result<()> {
@@ -83,28 +87,37 @@ async fn write_to_file(
     let mut storage = StorageWriter::new(&mut file, piece_len);
     let mut bitfield = BitField::new(num_pieces);
     let mut downloaded = 0;
-    let mut tick = Instant::now();
 
-    while let Some(piece) = piece_rx.next().await {
-        let index = piece.index as usize;
-        match bitfield.get(index) {
-            Some(true) => log::error!("Duplicate piece downloaded: {}", index),
-            None => log::error!("Unexpected piece downloaded: {}", index),
-            _ => {}
-        }
+    let mut interval = time::interval(Duration::from_secs(1));
+    let mut avg = SlidingAvg::new(10);
 
-        storage.insert(piece).unwrap();
-        bitfield.set(index, true);
+    loop {
+        select! {
+            // Save a piece to storage
+            piece = piece_rx.next() => {
+                let piece = match piece {
+                    Some(p) => p,
+                    None => break,
+                };
+                let index = piece.index as usize;
+                match bitfield.get(index) {
+                    Some(true) => log::error!("Duplicate piece downloaded: {}", index),
+                    None => log::error!("Unexpected piece downloaded: {}", index),
+                    _ => {}
+                }
 
-        downloaded += piece_len;
-        let now = Instant::now();
-        if now - tick >= Duration::from_secs(1) {
-            println!(
-                "{} kBps",
-                downloaded / 1000 / (now - tick).as_secs() as usize
-            );
-            downloaded = 0;
-            tick = now;
+                storage.insert(piece).unwrap();
+                bitfield.set(index, true);
+
+                downloaded += piece_len;
+            }
+
+            // Print download speed
+            _ = interval.tick().fuse() => {
+                avg.add_sample((downloaded / 1000) as i32);
+                println!("{} kBps", avg.mean());
+                downloaded = 0;
+            }
         }
     }
     println!("All pieces downloaded: {}", bitfield.all_true());
