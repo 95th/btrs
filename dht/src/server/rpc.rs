@@ -114,26 +114,29 @@ impl<'a> RpcMgr<'a> {
 
     async fn handle_error(
         &mut self,
-        error: ErrorResponse<'_>,
+        err: ErrorResponse<'_>,
         addr: SocketAddr,
         table: &mut RoutingTable,
         running: &mut Slab<DhtTraversal>,
     ) {
-        if let Some(req) = self.txns.remove(error.txn_id) {
-            log::warn!("Error response from {}: {:?}", addr, error);
-            if req.has_id {
-                table.failed(&req.id);
+        let req = match self.txns.remove(err.txn_id) {
+            Some(req) => req,
+            None => {
+                log::warn!("Response for unrecognized txn: {:?}", err.txn_id);
+                return;
             }
+        };
 
-            if let Some(t) = running.get_mut(req.traversal_id) {
-                t.set_failed(&req.id, &addr);
-                let done = t.add_requests(self).await;
-                if done {
-                    running.remove(req.traversal_id).done();
-                }
+        if req.has_id {
+            table.failed(&req.id);
+        }
+
+        if let Some(t) = running.get_mut(req.traversal_id) {
+            t.set_failed(&req.id, &addr);
+            let done = t.add_requests(self).await;
+            if done {
+                running.remove(req.traversal_id).done();
             }
-        } else {
-            log::warn!("Response for unrecognized txn: {:?}", error.txn_id);
         }
     }
 
