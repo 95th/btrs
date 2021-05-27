@@ -36,7 +36,7 @@ macro_rules! thin_wrapper {
 thin_wrapper!(PeerId, [u8; 20]);
 thin_wrapper!(Extensions, [u8; 8]);
 
-#[derive(Clone)]
+#[derive(Copy, Clone)]
 pub struct Peer {
     pub addr: SocketAddr,
 }

@@ -95,8 +95,9 @@ impl<'a> TorrentWorker<'a> {
 
         // TODO: Make this configurable
         let max_connections = 10;
-        let mut connected: Vec<Peer> = vec![];
-        let mut failed: Vec<Peer> = vec![];
+        let mut connected = HashSet::new();
+        let mut failed = HashSet::new();
+        let mut to_connect = Vec::with_capacity(10);
 
         let (mut add_conn_tx, mut add_conn_rx) = mpsc::channel(10);
 
@@ -109,37 +110,36 @@ impl<'a> TorrentWorker<'a> {
             select! {
                 // Add new download connections
                 _ = add_conn_rx.next() => {
-                    while connected.len() < max_connections {
-                        let maybe_peer = all_peers
-                            .iter()
-                            .chain(all_peers6.iter())
-                            .find(|p| !connected.contains(p) && !failed.contains(p));
+                    if connected.len() < max_connections {
+                        to_connect.extend(
+                            all_peers
+                                .iter()
+                                .chain(all_peers6.iter())
+                                .filter(|&p| !connected.contains(p) && !failed.contains(p))
+                                .take(max_connections - connected.len())
+                                .copied(),
+                        );
 
-                        if let Some(peer) = maybe_peer {
-                            let dl = {
-                                let peer = peer.clone();
-                                let piece_tx = piece_tx.clone();
-                                async move {
-                                    let f = async {
-                                        let mut client = timeout(Client::new_tcp(peer.addr), 3).await?;
-                                        client.handshake(info_hash, peer_id).await?;
-                                        let mut dl = Download::new(client, work, piece_tx).await?;
-                                        dl.start().await
-                                    };
-                                    f.await.map_err(|e| (e, peer))
-                                }
-                            };
-                            pending_downloads.push(dl);
-                            connected.push(peer.clone());
+                        for peer in to_connect.drain(..) {
+                            let piece_tx = piece_tx.clone();
+                            pending_downloads.push(async move {
+                                let f = async {
+                                    let mut client = timeout(Client::new_tcp(peer.addr), 3).await?;
+                                    client.handshake(info_hash, peer_id).await?;
+                                    let mut dl = Download::new(client, work, piece_tx).await?;
+                                    dl.start().await
+                                };
+                                f.await.map_err(|e| (e, peer))
+                            });
 
-                            log::trace!(
+                            connected.insert(peer);
+
+                            log::debug!(
                                 "{} active connections, {} pending trackers, {} pending downloads",
                                 connected.len(),
                                 pending_trackers.len(),
                                 pending_downloads.len()
                             );
-                        } else {
-                            break;
                         }
                     }
                 }
@@ -150,13 +150,12 @@ impl<'a> TorrentWorker<'a> {
                         Some(Ok(())) => {},
                         Some(Err((e, peer))) => {
                             log::warn!("Error occurred for peer {} : {}", peer.addr, e);
-                            match connected.iter().position(|p| *p == peer) {
-                                Some(pos) => {
-                                    connected.swap_remove(pos);
-                                    failed.push(peer);
-                                    add_conn_tx.send(()).await.unwrap();
-                                }
-                                None => debug_assert!(false, "peer should be in `connected` list"),
+
+                            if connected.remove(&peer) {
+                                failed.insert(peer);
+                                add_conn_tx.send(()).await.unwrap();
+                            } else {
+                                debug_assert!(false, "peer should be in `connected` list")
                             }
                         }
                         None => {
