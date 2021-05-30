@@ -1,17 +1,19 @@
+use ben::{Decoder, Encoder, Parser};
 use slab::Slab;
 use tokio::net::UdpSocket;
 
 use crate::{
+    bucket::Bucket,
     id::NodeId,
     msg::{
-        recv::{ErrorResponse, Msg, Response},
+        recv::{ErrorResponse, Msg, Query, QueryKind, Response},
         TxnId,
     },
     table::RoutingTable,
 };
 use hashbrown::HashMap;
 use std::{
-    net::SocketAddr,
+    net::{IpAddr, SocketAddr},
     time::{Duration, Instant},
 };
 
@@ -63,7 +65,7 @@ impl<'a> RpcMgr<'a> {
         match msg {
             Msg::Response(r) => self.handle_ok(r, addr, table, running).await,
             Msg::Error(e) => self.handle_error(e, addr, table, running).await,
-            x => log::warn!("Unhandled msg: {:?}", x),
+            Msg::Query(q) => self.handle_query(q, addr, table).await,
         }
     }
 
@@ -137,6 +139,64 @@ impl<'a> RpcMgr<'a> {
             if done {
                 running.remove(req.traversal_id).done();
             }
+        }
+    }
+
+    async fn handle_query(&mut self, query: Query<'_>, addr: SocketAddr, table: &mut RoutingTable) {
+        table.heard_from(query.id);
+
+        self.buf.clear();
+        let mut dict = self.buf.add_dict();
+        match addr.ip() {
+            IpAddr::V4(a) => dict.add("ip", &a.octets()),
+            IpAddr::V6(a) => dict.add("ip", &a.octets()),
+        }
+
+        let mut r = dict.add_dict("r");
+        r.add("id", &self.own_id);
+
+        match query.kind {
+            QueryKind::Ping => {
+                // Nothing else to add
+            }
+            QueryKind::FindNode | QueryKind::GetPeers => {
+                let info_hash = match query.args.get_bytes("info_hash") {
+                    Some(ih) if ih.len() == 20 => unsafe { &*(ih.as_ptr() as *const NodeId) },
+                    _ => {
+                        log::warn!("Valid info_hash not found in GET_PEERS query");
+                        return;
+                    }
+                };
+
+                let mut out = Vec::with_capacity(8);
+                table.find_closest(info_hash, &mut out, Bucket::MAX_LEN);
+
+                let nodes = &mut Vec::with_capacity(256);
+                for c in out {
+                    c.write_compact(nodes);
+                }
+                r.add("nodes", &nodes[..]);
+            }
+            QueryKind::AnnouncePeer => {
+                log::warn!("Announce peer is not implemented fully");
+            }
+        }
+
+        r.add("p", addr.port() as i64);
+        r.finish();
+
+        dict.add("t", query.txn_id);
+        dict.add("y", "r");
+        dict.finish();
+
+        if log::log_enabled!(log::Level::Debug) {
+            let mut p = Parser::new();
+            let d = p.parse::<Decoder>(&self.buf).unwrap();
+            log::debug!("Sending reply: {:?}", d);
+        }
+
+        if let Err(e) = self.send(addr).await {
+            log::warn!("Error in replying to query: {}", e);
         }
     }
 

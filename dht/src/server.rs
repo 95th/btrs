@@ -173,7 +173,7 @@ impl DhtServer {
                         }
                     };
 
-                   rpc.handle_response(msg, addr, table, running).await;
+                    rpc.handle_response(msg, addr, table, running).await;
                 },
 
                 // Send requests

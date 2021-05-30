@@ -1,4 +1,7 @@
-use crate::{id::NodeId, util::to_ipv6};
+use crate::{
+    id::NodeId,
+    util::{self, to_ipv6},
+};
 use ben::{Encode, Encoder};
 use std::net::SocketAddr;
 
@@ -24,6 +27,11 @@ pub struct ContactRef<'a> {
 impl ContactRef<'_> {
     pub fn as_owned(&self) -> Contact {
         Contact::new(*self.id, self.addr)
+    }
+
+    pub fn write_compact(&self, buf: &mut Vec<u8>) {
+        buf.extend(&self.id[..]);
+        util::write_addr(buf, &self.addr);
     }
 }
 
