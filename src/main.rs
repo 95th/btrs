@@ -1,4 +1,3 @@
-use btrs::avg::SlidingAvg;
 use btrs::bitfield::BitField;
 use btrs::magnet::MagnetUri;
 use btrs::peer;
@@ -7,12 +6,8 @@ use btrs::torrent::{Torrent, TorrentFile};
 use btrs::work::Piece;
 use clap::{App, Arg};
 use futures::channel::mpsc;
-use futures::select;
-use futures::FutureExt;
 use futures::StreamExt;
 use std::fs;
-use std::time::Duration;
-use tokio::time;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> anyhow::Result<()> {
@@ -86,39 +81,18 @@ async fn write_to_file(
         .unwrap();
     let mut storage = StorageWriter::new(&mut file, piece_len);
     let mut bitfield = BitField::new(num_pieces);
-    let mut downloaded = 0;
 
-    let mut interval = time::interval(Duration::from_secs(1));
-    let mut avg = SlidingAvg::new(10);
-
-    loop {
-        select! {
-            // Save a piece to storage
-            piece = piece_rx.next() => {
-                let piece = match piece {
-                    Some(p) => p,
-                    None => break,
-                };
-                let index = piece.index as usize;
-                match bitfield.get(index) {
-                    Some(true) => log::error!("Duplicate piece downloaded: {}", index),
-                    None => log::error!("Unexpected piece downloaded: {}", index),
-                    _ => {}
-                }
-
-                storage.insert(piece).unwrap();
-                bitfield.set(index, true);
-
-                downloaded += piece_len;
-            }
-
-            // Print download speed
-            _ = interval.tick().fuse() => {
-                avg.add_sample((downloaded / 1000) as i32);
-                println!("{} kBps", avg.mean());
-                downloaded = 0;
-            }
+    // Save a piece to storage {
+    while let Some(piece) = piece_rx.next().await {
+        let index = piece.index as usize;
+        match bitfield.get(index) {
+            Some(true) => log::error!("Duplicate piece downloaded: {}", index),
+            None => log::error!("Unexpected piece downloaded: {}", index),
+            _ => {}
         }
+
+        storage.insert(piece).unwrap();
+        bitfield.set(index, true);
     }
     println!("All pieces downloaded: {}", bitfield.all_true());
     println!("File downloaded; size: {}", file.metadata().unwrap().len());

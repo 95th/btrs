@@ -206,6 +206,10 @@ impl<'a> RpcMgr<'a> {
         running: &mut Slab<DhtTraversal>,
         timed_out: &mut Vec<(TxnId, Request)>,
     ) {
+        if self.txns.pending.is_empty() {
+            return;
+        }
+
         let before = self.txns.pending.len();
         let cutoff = Instant::now() - self.txns.timeout;
 

@@ -1,5 +1,6 @@
 use crate::{
     announce::{DhtTracker, Tracker},
+    avg::SlidingAvg,
     client::Client,
     download::Download,
     future::timeout,
@@ -12,9 +13,10 @@ use futures::{
     channel::mpsc::{self, Sender},
     select,
     stream::{self, FuturesUnordered},
-    SinkExt, StreamExt,
+    FutureExt, SinkExt, StreamExt,
 };
-use std::collections::{HashSet, VecDeque};
+use std::{cell::Cell, collections::{HashSet, VecDeque}, rc::Rc, time::Duration};
+use tokio::time;
 
 const SHA_1: usize = 20;
 
@@ -106,6 +108,10 @@ impl<'a> TorrentWorker<'a> {
             add_conn_tx.send(()).await.unwrap();
         }
 
+        let mut print_speed_interval = time::interval(Duration::from_secs(1));
+        let mut avg = SlidingAvg::new(10);
+        let downloaded = Rc::new(Cell::new(0));
+
         loop {
             select! {
                 // Add new download connections
@@ -122,11 +128,12 @@ impl<'a> TorrentWorker<'a> {
 
                         for peer in to_connect.drain(..) {
                             let piece_tx = piece_tx.clone();
+                            let downloaded = downloaded.clone();
                             pending_downloads.push(async move {
                                 let f = async {
                                     let mut client = timeout(Client::new_tcp(peer.addr), 3).await?;
                                     client.handshake(info_hash, peer_id).await?;
-                                    let mut dl = Download::new(client, work, piece_tx).await?;
+                                    let mut dl = Download::new(client, work, piece_tx, downloaded).await?;
                                     dl.start().await
                                 };
                                 f.await.map_err(|e| (e, peer))
@@ -219,6 +226,13 @@ impl<'a> TorrentWorker<'a> {
                         }
                        Err(e) => log::warn!("Announce error: {}", e),
                     }
+                }
+
+                // Print download speed
+                _ = print_speed_interval.tick().fuse() => {
+                    avg.add_sample((downloaded.get() / 1000) as i32);
+                    println!("{} kBps", downloaded.get() / 1000);
+                    downloaded.set(0);
                 }
             }
         }

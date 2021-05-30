@@ -6,7 +6,9 @@ use crate::work::{Piece, PieceInfo, WorkQueue};
 use anyhow::Context;
 use futures::channel::mpsc::Sender;
 use futures::SinkExt;
+use std::cell::Cell;
 use std::collections::HashMap;
+use std::rc::Rc;
 use std::time::Instant;
 use tokio::io::AsyncWriteExt;
 
@@ -48,6 +50,9 @@ pub struct Download<'w, 'p, C> {
 
     /// Block download rate
     rate: SlidingAvg,
+
+    /// Downloaded bytes
+    downloaded: Rc<Cell<usize>>,
 }
 
 impl<C> Drop for Download<'_, '_, C> {
@@ -64,6 +69,7 @@ impl<'w, 'p, C: AsyncStream> Download<'w, 'p, C> {
         mut client: Client<C>,
         work: &'w WorkQueue<'p>,
         piece_tx: Sender<Piece>,
+        downloaded: Rc<Cell<usize>>,
     ) -> anyhow::Result<Download<'w, 'p, C>> {
         client.send_unchoke().await?;
         client.send_interested().await?;
@@ -87,6 +93,7 @@ impl<'w, 'p, C: AsyncStream> Download<'w, 'p, C> {
             last_requested_blocks: 0,
             last_requested: Instant::now(),
             rate: SlidingAvg::new(10),
+            downloaded
         })
     }
 
@@ -128,6 +135,8 @@ impl<'w, 'p, C: AsyncStream> Download<'w, 'p, C> {
 
         msg.read_piece(&mut self.client.conn, &mut p.buf).await?;
         p.downloaded += len;
+        let old = self.downloaded.get();
+        self.downloaded.set(old + len as usize);
         self.backlog -= 1;
         log::trace!("current index {}: {}/{}", index, p.downloaded, p.piece.len);
 
