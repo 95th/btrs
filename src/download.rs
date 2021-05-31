@@ -2,7 +2,7 @@ use crate::avg::SlidingAvg;
 use crate::client::{AsyncStream, Client};
 use crate::future::timeout;
 use crate::msg::Message;
-use crate::work::{Piece, PieceInfo, WorkQueue};
+use crate::work::{Piece, PieceInfo, PieceVerifier, WorkQueue};
 use anyhow::Context;
 use futures::channel::mpsc::Sender;
 use futures::SinkExt;
@@ -16,25 +16,25 @@ const MAX_REQUESTS: u32 = 500;
 const MIN_REQUESTS: u32 = 2;
 const MAX_BLOCK_SIZE: u32 = 0x4000;
 
-struct PieceInProgress<'a> {
-    piece: PieceInfo<'a>,
+struct PieceInProgress {
+    piece: PieceInfo,
     buf: Box<[u8]>,
     downloaded: u32,
     requested: u32,
 }
 
-pub struct Download<'w, 'p, C> {
+pub struct Download<'w, C> {
     /// Peer connection
     client: Client<C>,
 
     /// Common piece queue from where we pick the pieces to download
-    work: &'w WorkQueue<'p>,
+    work: &'w WorkQueue,
 
     /// Channel to send the completed and verified pieces
     piece_tx: Sender<Piece>,
 
     /// In-progress pieces
-    in_progress: HashMap<u32, PieceInProgress<'p>>,
+    in_progress: HashMap<u32, PieceInProgress>,
 
     /// Current pending block requests
     backlog: u32,
@@ -53,9 +53,12 @@ pub struct Download<'w, 'p, C> {
 
     /// Downloaded bytes
     downloaded: Rc<Cell<usize>>,
+
+    /// Piece Verifier
+    piece_verifier: PieceVerifier,
 }
 
-impl<C> Drop for Download<'_, '_, C> {
+impl<C> Drop for Download<'_, C> {
     fn drop(&mut self) {
         // Put any unfinished pieces back in the work queue
         self.work
@@ -64,13 +67,14 @@ impl<C> Drop for Download<'_, '_, C> {
     }
 }
 
-impl<'w, 'p, C: AsyncStream> Download<'w, 'p, C> {
+impl<'w, C: AsyncStream> Download<'w, C> {
     pub async fn new(
         mut client: Client<C>,
-        work: &'w WorkQueue<'p>,
+        work: &'w WorkQueue,
         piece_tx: Sender<Piece>,
         downloaded: Rc<Cell<usize>>,
-    ) -> anyhow::Result<Download<'w, 'p, C>> {
+        piece_verifier: PieceVerifier,
+    ) -> anyhow::Result<Download<'w, C>> {
         client.send_unchoke().await?;
         client.send_interested().await?;
         client.conn.flush().await?;
@@ -93,7 +97,8 @@ impl<'w, 'p, C: AsyncStream> Download<'w, 'p, C> {
             last_requested_blocks: 0,
             last_requested: Instant::now(),
             rate: SlidingAvg::new(10),
-            downloaded
+            downloaded,
+            piece_verifier,
         })
     }
 
@@ -149,9 +154,12 @@ impl<'w, 'p, C: AsyncStream> Download<'w, 'p, C> {
         self.piece_done(p).await
     }
 
-    async fn piece_done(&mut self, state: PieceInProgress<'p>) -> anyhow::Result<()> {
+    async fn piece_done(&mut self, state: PieceInProgress) -> anyhow::Result<()> {
         log::trace!("Piece downloaded: {}", state.piece.index);
-        if !state.piece.check_integrity(&state.buf) {
+        let buf = state.buf.into();
+        let verified = self.piece_verifier.verify(&state.piece, &buf).await;
+
+        if !verified {
             log::error!("Bad piece: Hash mismatch for {}", state.piece.index);
             self.work.borrow_mut().push_back(state.piece);
             return Ok(());
@@ -161,7 +169,7 @@ impl<'w, 'p, C: AsyncStream> Download<'w, 'p, C> {
         self.client.send_have(state.piece.index).await?;
         let piece = Piece {
             index: state.piece.index,
-            buf: state.buf,
+            buf,
         };
         self.piece_tx.send(piece).await?;
         Ok(())

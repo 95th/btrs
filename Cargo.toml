@@ -24,6 +24,7 @@ anyhow = "1.0.38"
 bitflags = "1.2.1"
 dht = { path = "./dht" }
 ben = { path = "./ben" }
+rayon = "1.5.1"
 
 # [profile.release]
 # debug = 1

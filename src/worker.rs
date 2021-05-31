@@ -7,7 +7,7 @@ use crate::{
     metainfo::InfoHash,
     peer::{Peer, PeerId},
     torrent::Torrent,
-    work::{Piece, PieceIter, WorkQueue},
+    work::{Piece, PieceIter, PieceVerifier, WorkQueue},
 };
 use futures::{
     channel::mpsc::{self, Sender},
@@ -15,7 +15,12 @@ use futures::{
     stream::{self, FuturesUnordered},
     FutureExt, SinkExt, StreamExt,
 };
-use std::{cell::Cell, collections::{HashSet, VecDeque}, rc::Rc, time::Duration};
+use std::{
+    cell::Cell,
+    collections::{HashSet, VecDeque},
+    rc::Rc,
+    time::Duration,
+};
 use tokio::time;
 
 const SHA_1: usize = 20;
@@ -23,7 +28,7 @@ const SHA_1: usize = 20;
 pub struct TorrentWorker<'a> {
     peer_id: &'a PeerId,
     info_hash: &'a InfoHash,
-    work: WorkQueue<'a>,
+    work: WorkQueue,
     trackers: VecDeque<Tracker<'a>>,
     peers: &'a mut HashSet<Peer>,
     peers6: &'a mut HashSet<Peer>,
@@ -80,6 +85,8 @@ impl<'a> TorrentWorker<'a> {
             },
         };
 
+        let piece_verifier = PieceVerifier::new(4);
+
         let pending_downloads = FuturesUnordered::new();
         let pending_trackers = FuturesUnordered::new();
 
@@ -129,11 +136,12 @@ impl<'a> TorrentWorker<'a> {
                         for peer in to_connect.drain(..) {
                             let piece_tx = piece_tx.clone();
                             let downloaded = downloaded.clone();
+                            let piece_verifier = piece_verifier.clone();
                             pending_downloads.push(async move {
                                 let f = async {
                                     let mut client = timeout(Client::new_tcp(peer.addr), 3).await?;
                                     client.handshake(info_hash, peer_id).await?;
-                                    let mut dl = Download::new(client, work, piece_tx, downloaded).await?;
+                                    let mut dl = Download::new(client, work, piece_tx, downloaded, piece_verifier).await?;
                                     dl.start().await
                                 };
                                 f.await.map_err(|e| (e, peer))
