@@ -7,7 +7,7 @@ use crate::{
     metainfo::InfoHash,
     peer::{Peer, PeerId},
     torrent::Torrent,
-    work::{Piece, PieceIter, PieceVerifier, WorkQueue},
+    work::{HashKind, Piece, PieceIter, PieceVerifier, WorkQueue},
 };
 use futures::{
     channel::mpsc::{self, Sender},
@@ -22,8 +22,6 @@ use std::{
     time::Duration,
 };
 use tokio::time;
-
-const SHA_1: usize = 20;
 
 pub struct TorrentWorker<'a> {
     peer_id: &'a PeerId,
@@ -43,8 +41,12 @@ impl<'a> TorrentWorker<'a> {
             .map(|url| Tracker::new(url))
             .collect();
 
-        let piece_iter =
-            PieceIter::<SHA_1>::new(&torrent.piece_hashes, torrent.piece_len, torrent.length);
+        let piece_iter = PieceIter::new(
+            &torrent.piece_hashes,
+            HashKind::Sha1,
+            torrent.piece_len,
+            torrent.length,
+        );
         let work = WorkQueue::new(piece_iter.collect());
 
         Self {

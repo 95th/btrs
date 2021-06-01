@@ -6,6 +6,7 @@ use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::VecDeque;
 use std::rc::Rc;
+use std::slice::Chunks;
 use std::sync::Arc;
 
 pub type WorkQueue = RefCell<VecDeque<PieceInfo>>;
@@ -39,7 +40,7 @@ impl PieceVerifier {
         let expected_hash = piece_info.hash.clone();
         let data = data.clone();
         self.pool.spawn(move || {
-            let actual_hash =  Sha1::from(&data).digest().bytes();
+            let actual_hash = Sha1::from(&data).digest().bytes();
             let ok = expected_hash[..] == actual_hash;
             tx.send(ok).unwrap();
         });
@@ -72,44 +73,47 @@ impl Ord for Piece {
     }
 }
 
-pub struct PieceIter<'a, const N: usize> {
-    piece_hashes: &'a [u8],
-    piece_len: usize,
-    length: usize,
-    index: u32,
-    count: u32,
+pub enum HashKind {
+    Sha1 = 20,
 }
 
-impl<'a, const N: usize> PieceIter<'a, N> {
-    pub fn new(piece_hashes: &'a [u8], piece_len: usize, length: usize) -> Self {
+pub struct PieceIter<'a> {
+    chunks: Chunks<'a, u8>,
+    piece_len: u32,
+    length: u32,
+    index: u32,
+}
+
+impl<'a> PieceIter<'a> {
+    pub fn new(
+        piece_hashes: &'a [u8],
+        hash_kind: HashKind,
+        piece_len: usize,
+        length: usize,
+    ) -> Self {
+        let chunks = piece_hashes.chunks(hash_kind as usize);
         Self {
-            piece_hashes,
-            piece_len,
-            length,
+            chunks,
+            piece_len: piece_len as u32,
+            length: length as u32,
             index: 0,
-            count: (piece_hashes.len() / 20) as u32,
         }
     }
 }
 
-impl<'a, const N: usize> Iterator for PieceIter<'a, N> {
+impl<'a> Iterator for PieceIter<'a> {
     type Item = PieceInfo;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.index >= self.count {
-            return None;
-        }
-
-        let hash = self.piece_hashes[self.index as usize * N..][..N].into();
-
-        let piece_len = self.piece_len as u32;
+        let hash = self.chunks.next()?;
+        let piece_len = self.piece_len;
         let start = self.index * piece_len;
-        let len = piece_len.min(self.length as u32 - start);
+        let len = piece_len.min(self.length - start);
 
         let piece = PieceInfo {
             index: self.index,
             len,
-            hash,
+            hash: hash.into(),
         };
 
         self.index += 1;
