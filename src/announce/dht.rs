@@ -9,6 +9,7 @@ use std::time::Instant;
 pub struct DhtTracker {
     dht: Dht,
     next_announce: Instant,
+    bootstapped: bool,
 }
 
 impl Default for DhtTracker {
@@ -30,6 +31,7 @@ impl DhtTracker {
         Self {
             dht,
             next_announce: Instant::now(),
+            bootstapped: false,
         }
     }
 
@@ -38,6 +40,11 @@ impl DhtTracker {
 
         log::debug!("Announcing to DHT");
         let start = Instant::now();
+
+        if !self.bootstapped {
+            self.dht.bootstrap().await?;
+            self.bootstapped = true;
+        }
 
         let peers = self.dht.announce(NodeId(*info_hash.as_ref())).await?;
 

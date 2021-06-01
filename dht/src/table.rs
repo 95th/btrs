@@ -1,3 +1,5 @@
+use futures::channel::oneshot;
+
 use crate::contact::{Contact, ContactRef, ContactStatus};
 use crate::id::NodeId;
 use crate::util::to_ipv6;
@@ -45,7 +47,11 @@ impl RoutingTable {
             })
         } else {
             let id = NodeId::gen_lz(bucket_no);
-            Some(ClientRequest::Bootstrap { target: id })
+            let (tx, _rx) = oneshot::channel();
+            Some(ClientRequest::Bootstrap {
+                target: id,
+                sender: tx,
+            })
         }
     }
 

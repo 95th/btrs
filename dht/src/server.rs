@@ -39,11 +39,13 @@ pub enum ClientRequest {
     },
     Bootstrap {
         target: NodeId,
+        sender: oneshot::Sender<()>,
     },
 }
 
 pub struct Dht {
     tx: mpsc::Sender<ClientRequest>,
+    id: NodeId,
 }
 
 impl Dht {
@@ -58,7 +60,18 @@ impl Dht {
             id,
         };
 
-        (Self { tx }, server)
+        (Self { tx, id }, server)
+    }
+
+    pub async fn bootstrap(&mut self) -> anyhow::Result<()> {
+        let (tx, rx) = oneshot::channel();
+        self.tx
+            .send(ClientRequest::Bootstrap {
+                target: self.id,
+                sender: tx,
+            })
+            .await?;
+        Ok(rx.await?)
     }
 
     pub async fn get_peers(&mut self, info_hash: NodeId) -> anyhow::Result<HashSet<SocketAddr>> {
@@ -121,10 +134,6 @@ impl DhtServer {
         let mut tx = self.tx;
         let mut rx = self.rx;
 
-        tx.send(ClientRequest::Bootstrap { target: self.id })
-            .await
-            .unwrap();
-
         loop {
             select! {
                 // Clear timed-out transactions
@@ -178,8 +187,8 @@ impl DhtServer {
                             let t = DhtGetPeers::new(&info_hash, table, sender, entry.key());
                             DhtTraversal::GetPeers(t)
                         },
-                        ClientRequest::Bootstrap { target } => {
-                            let t = DhtBootstrap::new(&target, table, entry.key());
+                        ClientRequest::Bootstrap { target, sender } => {
+                            let t = DhtBootstrap::new(&target, table, entry.key(), sender);
                             DhtTraversal::Bootstrap(t)
                         },
                         ClientRequest::Announce { info_hash, sender } => {
