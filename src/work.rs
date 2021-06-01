@@ -24,11 +24,11 @@ impl WorkQueue {
         }
     }
 
-    pub fn push_back(&self, info: PieceInfo) {
+    pub fn add_piece(&self, info: PieceInfo) {
         self.pieces.borrow_mut().push_back(info);
     }
 
-    pub fn pop_front(&self) -> Option<PieceInfo> {
+    pub fn remove_piece(&self) -> Option<PieceInfo> {
         self.pieces.borrow_mut().pop_front()
     }
 

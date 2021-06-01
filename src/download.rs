@@ -147,7 +147,7 @@ impl<'w, C: AsyncStream> Download<'w, C> {
 
         if !verified {
             log::error!("Bad piece: Hash mismatch for {}", state.piece.index);
-            self.work.push_back(state.piece);
+            self.work.add_piece(state.piece);
             return Ok(());
         }
 
@@ -168,7 +168,7 @@ impl<'w, C: AsyncStream> Download<'w, C> {
             return;
         }
 
-        if let Some(piece) = self.work.pop_front() {
+        if let Some(piece) = self.work.remove_piece() {
             // Safety: This buffer is sent to the writer task for reading only
             // after being completely written by this download
             let buf = unsafe {
