@@ -2,29 +2,35 @@ use crate::metainfo::InfoHash;
 use crate::peer::Peer;
 use dht::id::NodeId;
 use dht::Dht;
+use std::net::ToSocketAddrs;
 use std::time::Duration;
 use std::time::Instant;
-use tokio::net::lookup_host;
 
 pub struct DhtTracker {
     dht: Dht,
     next_announce: Instant,
 }
 
-impl DhtTracker {
-    pub async fn new() -> anyhow::Result<Self> {
-        let mut dht_routers = vec![];
-        dht_routers.extend(lookup_host("dht.libtorrent.org:25401").await?);
+impl Default for DhtTracker {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
-        let (mut dht, server) = Dht::new(6881, dht_routers);
+impl DhtTracker {
+    pub fn new() -> Self {
+        let dht_routers = "dht.libtorrent.org:25401"
+            .to_socket_addrs()
+            .unwrap()
+            .collect();
+        let (dht, server) = Dht::new(6881, dht_routers);
+
         tokio::spawn(server.run());
 
-        dht.bootstrap().await?;
-
-        Ok(Self {
+        Self {
             dht,
             next_announce: Instant::now(),
-        })
+        }
     }
 
     pub async fn announce(&mut self, info_hash: &InfoHash) -> anyhow::Result<Vec<Peer>> {

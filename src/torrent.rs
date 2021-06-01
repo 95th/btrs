@@ -88,7 +88,7 @@ impl TorrentFile {
             tracker_urls: self.tracker_urls,
             peers: hashset![],
             peers6: hashset![],
-            dht_tracker: None,
+            dht_tracker: DhtTracker::new(),
         }
     }
 }
@@ -103,7 +103,7 @@ pub struct Torrent {
     pub tracker_urls: HashSet<String>,
     pub peers: HashSet<Peer>,
     pub peers6: HashSet<Peer>,
-    pub dht_tracker: Option<DhtTracker>,
+    pub dht_tracker: DhtTracker,
 }
 
 impl Torrent {

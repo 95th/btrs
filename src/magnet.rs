@@ -105,7 +105,7 @@ impl MagnetUri {
     async fn get_peers(
         &self,
         peer_id: &PeerId,
-    ) -> anyhow::Result<(HashSet<Peer>, HashSet<Peer>, Option<DhtTracker>)> {
+    ) -> anyhow::Result<(HashSet<Peer>, HashSet<Peer>, DhtTracker)> {
         log::debug!("Requesting peers");
 
         let mut futs: FuturesUnordered<_> = self
@@ -132,19 +132,16 @@ impl MagnetUri {
 
         log::debug!("Got {} v4 peers and {} v6 peers", peers.len(), peers6.len());
 
-        let mut dht_tracker = None;
+        let mut dht_tracker = DhtTracker::new();
         if peers.is_empty() && peers6.is_empty() {
-            if let Ok(mut dht) = DhtTracker::new().await {
-                if let Ok(p) = dht.announce(&self.info_hash).await {
-                    peers.extend(p);
-                }
-                dht_tracker = Some(dht);
-                log::debug!(
-                    "Got {} v4 peers and {} v6 peers from DHT",
-                    peers.len(),
-                    peers6.len()
-                );
+            if let Ok(p) = dht_tracker.announce(&self.info_hash).await {
+                peers.extend(p);
             }
+            log::debug!(
+                "Got {} v4 peers and {} v6 peers from DHT",
+                peers.len(),
+                peers6.len()
+            );
         }
 
         if peers.is_empty() && peers6.is_empty() {

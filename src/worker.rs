@@ -29,7 +29,7 @@ pub struct TorrentWorker<'a> {
     trackers: VecDeque<Tracker<'a>>,
     peers: &'a mut HashSet<Peer>,
     peers6: &'a mut HashSet<Peer>,
-    dht_tracker: Option<&'a mut DhtTracker>,
+    dht_tracker: &'a mut DhtTracker,
 }
 
 impl<'a> TorrentWorker<'a> {
@@ -55,7 +55,7 @@ impl<'a> TorrentWorker<'a> {
             peers6: &mut torrent.peers6,
             work,
             trackers,
-            dht_tracker: torrent.dht_tracker.as_mut(),
+            dht_tracker: &mut torrent.dht_tracker,
         }
     }
 
@@ -70,23 +70,9 @@ impl<'a> TorrentWorker<'a> {
         let all_peers = &mut *self.peers;
         let all_peers6 = &mut *self.peers6;
         let trackers = &mut self.trackers;
+        let dht_tracker = &mut *self.dht_tracker;
 
         let downloaded = &Cell::new(0);
-
-        let mut new_dht;
-        let dht = match &mut self.dht_tracker {
-            Some(dht) => Some(&mut **dht),
-            None => match DhtTracker::new().await {
-                Ok(d) => {
-                    new_dht = Some(d);
-                    new_dht.as_mut()
-                }
-                Err(e) => {
-                    log::warn!("Dht failed to start: {}", e);
-                    None
-                }
-            },
-        };
 
         let piece_verifier = PieceVerifier::new(4);
         let pending_downloads = FuturesUnordered::new();
@@ -95,10 +81,9 @@ impl<'a> TorrentWorker<'a> {
         futures::pin_mut!(pending_downloads);
         futures::pin_mut!(pending_trackers);
 
-        let dht_tracker = stream::unfold(dht, |dht| async {
-            let dht = dht?;
+        let dht_tracker = stream::unfold(dht_tracker, |dht| async {
             let peers = dht.announce(info_hash).await;
-            Some((peers, Some(dht)))
+            Some((peers, dht))
         })
         .fuse();
 
