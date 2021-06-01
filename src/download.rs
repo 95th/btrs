@@ -8,7 +8,6 @@ use futures::channel::mpsc::Sender;
 use futures::SinkExt;
 use std::cell::Cell;
 use std::collections::HashMap;
-use std::rc::Rc;
 use std::time::Instant;
 use tokio::io::AsyncWriteExt;
 
@@ -52,7 +51,7 @@ pub struct Download<'w, C> {
     rate: SlidingAvg,
 
     /// Downloaded bytes
-    downloaded: Rc<Cell<usize>>,
+    downloaded: &'w Cell<usize>,
 
     /// Piece Verifier
     piece_verifier: PieceVerifier,
@@ -72,7 +71,7 @@ impl<'w, C: AsyncStream> Download<'w, C> {
         mut client: Client<C>,
         work: &'w WorkQueue,
         piece_tx: Sender<Piece>,
-        downloaded: Rc<Cell<usize>>,
+        downloaded: &'w Cell<usize>,
         piece_verifier: PieceVerifier,
     ) -> anyhow::Result<Download<'w, C>> {
         client.send_unchoke().await?;

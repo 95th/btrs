@@ -18,7 +18,6 @@ use futures::{
 use std::{
     cell::Cell,
     collections::{HashSet, VecDeque},
-    rc::Rc,
     time::Duration,
 };
 use tokio::time;
@@ -72,6 +71,8 @@ impl<'a> TorrentWorker<'a> {
         let all_peers6 = &mut *self.peers6;
         let trackers = &mut self.trackers;
 
+        let downloaded = &Cell::new(0);
+
         let mut new_dht;
         let dht = match &mut self.dht_tracker {
             Some(dht) => Some(&mut **dht),
@@ -88,7 +89,6 @@ impl<'a> TorrentWorker<'a> {
         };
 
         let piece_verifier = PieceVerifier::new(4);
-
         let pending_downloads = FuturesUnordered::new();
         let pending_trackers = FuturesUnordered::new();
 
@@ -119,7 +119,6 @@ impl<'a> TorrentWorker<'a> {
 
         let mut print_speed_interval = time::interval(Duration::from_secs(1));
         let mut avg = SlidingAvg::new(10);
-        let downloaded = Rc::new(Cell::new(0));
 
         loop {
             select! {
@@ -137,7 +136,6 @@ impl<'a> TorrentWorker<'a> {
 
                         for peer in to_connect.drain(..) {
                             let piece_tx = piece_tx.clone();
-                            let downloaded = downloaded.clone();
                             let piece_verifier = piece_verifier.clone();
                             pending_downloads.push(async move {
                                 let f = async {
