@@ -6,7 +6,7 @@ use crate::{
     metainfo::InfoHash,
     peer::{Peer, PeerId},
     torrent::Torrent,
-    work::{HashKind, Piece, PieceIter, WorkQueue},
+    work::{Piece, WorkQueue},
 };
 use futures::{
     channel::mpsc::{self, Sender},
@@ -38,13 +38,7 @@ impl<'a> TorrentWorker<'a> {
             .map(|url| Tracker::new(url))
             .collect();
 
-        let piece_iter = PieceIter::new(
-            &torrent.piece_hashes,
-            HashKind::Sha1,
-            torrent.piece_len,
-            torrent.length,
-        );
-        let work = WorkQueue::new(piece_iter.collect());
+        let work = WorkQueue::new(&torrent);
 
         Self {
             peer_id: &torrent.peer_id,

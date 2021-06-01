@@ -9,6 +9,8 @@ use std::collections::VecDeque;
 use std::slice::Chunks;
 use std::sync::Arc;
 
+use crate::torrent::Torrent;
+
 pub struct WorkQueue {
     pieces: RefCell<VecDeque<PieceInfo>>,
     verifier: PieceVerifier,
@@ -16,11 +18,18 @@ pub struct WorkQueue {
 }
 
 impl WorkQueue {
-    pub fn new(pieces: VecDeque<PieceInfo>) -> Self {
+    pub fn new(torrent: &Torrent) -> Self {
+        let piece_iter = PieceIter::new(
+            &torrent.piece_hashes,
+            HashKind::Sha1,
+            torrent.piece_len,
+            torrent.length,
+        );
+
         Self {
-            pieces: RefCell::new(pieces),
+            pieces: RefCell::new(piece_iter.collect()),
             downloaded: Cell::new(0),
-            verifier: PieceVerifier::new(4),
+            verifier: PieceVerifier::new(1),
         }
     }
 
