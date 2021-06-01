@@ -5,7 +5,6 @@ use sha1::Sha1;
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::VecDeque;
-use std::rc::Rc;
 use std::slice::Chunks;
 use std::sync::Arc;
 
@@ -18,20 +17,17 @@ pub struct PieceInfo {
     pub hash: Arc<[u8]>,
 }
 
-#[derive(Clone)]
 pub struct PieceVerifier {
-    pool: Rc<ThreadPool>,
+    pool: ThreadPool,
 }
 
 impl PieceVerifier {
     pub fn new(num_threads: usize) -> Self {
         Self {
-            pool: Rc::new(
-                ThreadPoolBuilder::new()
-                    .num_threads(num_threads)
-                    .build()
-                    .unwrap(),
-            ),
+            pool: ThreadPoolBuilder::new()
+                .num_threads(num_threads)
+                .build()
+                .unwrap(),
         }
     }
 

@@ -74,7 +74,7 @@ impl<'a> TorrentWorker<'a> {
 
         let downloaded = &Cell::new(0);
 
-        let piece_verifier = PieceVerifier::new(4);
+        let piece_verifier = &PieceVerifier::new(4);
         let pending_downloads = FuturesUnordered::new();
         let pending_trackers = FuturesUnordered::new();
 
@@ -121,7 +121,6 @@ impl<'a> TorrentWorker<'a> {
 
                         for peer in to_connect.drain(..) {
                             let piece_tx = piece_tx.clone();
-                            let piece_verifier = piece_verifier.clone();
                             pending_downloads.push(async move {
                                 let f = async {
                                     let mut client = timeout(Client::new_tcp(peer.addr), 3).await?;

@@ -54,7 +54,7 @@ pub struct Download<'w, C> {
     downloaded: &'w Cell<usize>,
 
     /// Piece Verifier
-    piece_verifier: PieceVerifier,
+    piece_verifier: &'w PieceVerifier,
 }
 
 impl<C> Drop for Download<'_, C> {
@@ -72,7 +72,7 @@ impl<'w, C: AsyncStream> Download<'w, C> {
         work: &'w WorkQueue,
         piece_tx: Sender<Piece>,
         downloaded: &'w Cell<usize>,
-        piece_verifier: PieceVerifier,
+        piece_verifier: &'w PieceVerifier,
     ) -> anyhow::Result<Download<'w, C>> {
         client.send_unchoke().await?;
         client.send_interested().await?;

@@ -36,7 +36,7 @@ impl<'a> Tracker<'a> {
             resolved_addr: None,
             next_announce: Instant::now(),
             interval: MIN_TRACKER_INTERVAL,
-            buf: Box::new([0; 2048]),
+            buf: vec![0; 2048].into_boxed_slice(),
         }
     }
 
