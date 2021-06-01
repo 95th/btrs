@@ -1,13 +1,12 @@
 use crate::{
     announce::{DhtTracker, Tracker},
-    avg::SlidingAvg,
     client::Client,
     download::Download,
     future::timeout,
     metainfo::InfoHash,
     peer::{Peer, PeerId},
     torrent::Torrent,
-    work::{HashKind, Piece, PieceIter, PieceVerifier, WorkQueue},
+    work::{HashKind, Piece, PieceIter, WorkQueue},
 };
 use futures::{
     channel::mpsc::{self, Sender},
@@ -16,7 +15,6 @@ use futures::{
     FutureExt, SinkExt, StreamExt,
 };
 use std::{
-    cell::Cell,
     collections::{HashSet, VecDeque},
     time::Duration,
 };
@@ -60,7 +58,7 @@ impl<'a> TorrentWorker<'a> {
     }
 
     pub fn num_pieces(&self) -> usize {
-        self.work.borrow().len()
+        self.work.len()
     }
 
     pub async fn run(&mut self, piece_tx: Sender<Piece>) {
@@ -72,9 +70,6 @@ impl<'a> TorrentWorker<'a> {
         let trackers = &mut self.trackers;
         let dht_tracker = &mut *self.dht_tracker;
 
-        let downloaded = &Cell::new(0);
-
-        let piece_verifier = &PieceVerifier::new(4);
         let pending_downloads = FuturesUnordered::new();
         let pending_trackers = FuturesUnordered::new();
 
@@ -103,7 +98,6 @@ impl<'a> TorrentWorker<'a> {
         }
 
         let mut print_speed_interval = time::interval(Duration::from_secs(1));
-        let mut avg = SlidingAvg::new(10);
 
         loop {
             select! {
@@ -125,7 +119,7 @@ impl<'a> TorrentWorker<'a> {
                                 let f = async {
                                     let mut client = timeout(Client::new_tcp(peer.addr), 3).await?;
                                     client.handshake(info_hash, peer_id).await?;
-                                    let mut dl = Download::new(client, work, piece_tx, downloaded, piece_verifier).await?;
+                                    let mut dl = Download::new(client, work, piece_tx).await?;
                                     dl.start().await
                                 };
                                 f.await.map_err(|e| (e, peer))
@@ -158,7 +152,7 @@ impl<'a> TorrentWorker<'a> {
                             }
                         }
                         None => {
-                            if work.borrow().is_empty() {
+                            if work.is_empty() {
                                 break;
                             }
                         },
@@ -222,9 +216,8 @@ impl<'a> TorrentWorker<'a> {
 
                 // Print download speed
                 _ = print_speed_interval.tick().fuse() => {
-                    avg.add_sample((downloaded.get() / 1000) as i32);
-                    println!("{} kBps", downloaded.get() / 1000);
-                    downloaded.set(0);
+                    let n = work.get_downloaded_and_reset();
+                    println!("{} kBps", n / 1000);
                 }
             }
         }

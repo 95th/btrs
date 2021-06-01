@@ -2,11 +2,10 @@ use crate::avg::SlidingAvg;
 use crate::client::{AsyncStream, Client};
 use crate::future::timeout;
 use crate::msg::Message;
-use crate::work::{Piece, PieceInfo, PieceVerifier, WorkQueue};
+use crate::work::{Piece, PieceInfo, WorkQueue};
 use anyhow::Context;
 use futures::channel::mpsc::Sender;
 use futures::SinkExt;
-use std::cell::Cell;
 use std::collections::HashMap;
 use std::time::Instant;
 use tokio::io::AsyncWriteExt;
@@ -26,7 +25,7 @@ pub struct Download<'w, C> {
     /// Peer connection
     client: Client<C>,
 
-    /// Common piece queue from where we pick the pieces to download
+    /// Common work queue from where we pick the pieces to download
     work: &'w WorkQueue,
 
     /// Channel to send the completed and verified pieces
@@ -49,19 +48,12 @@ pub struct Download<'w, C> {
 
     /// Block download rate
     rate: SlidingAvg,
-
-    /// Downloaded bytes
-    downloaded: &'w Cell<usize>,
-
-    /// Piece Verifier
-    piece_verifier: &'w PieceVerifier,
 }
 
 impl<C> Drop for Download<'_, C> {
     fn drop(&mut self) {
         // Put any unfinished pieces back in the work queue
         self.work
-            .borrow_mut()
             .extend(self.in_progress.drain().map(|(_i, p)| p.piece));
     }
 }
@@ -71,8 +63,6 @@ impl<'w, C: AsyncStream> Download<'w, C> {
         mut client: Client<C>,
         work: &'w WorkQueue,
         piece_tx: Sender<Piece>,
-        downloaded: &'w Cell<usize>,
-        piece_verifier: &'w PieceVerifier,
     ) -> anyhow::Result<Download<'w, C>> {
         client.send_unchoke().await?;
         client.send_interested().await?;
@@ -96,8 +86,6 @@ impl<'w, C: AsyncStream> Download<'w, C> {
             last_requested_blocks: 0,
             last_requested: Instant::now(),
             rate: SlidingAvg::new(10),
-            downloaded,
-            piece_verifier,
         })
     }
 
@@ -139,8 +127,7 @@ impl<'w, C: AsyncStream> Download<'w, C> {
 
         msg.read_piece(&mut self.client.conn, &mut p.buf).await?;
         p.downloaded += len;
-        let old = self.downloaded.get();
-        self.downloaded.set(old + len as usize);
+        self.work.add_downloaded(len as usize);
         self.backlog -= 1;
         log::trace!("current index {}: {}/{}", index, p.downloaded, p.piece.len);
 
@@ -156,11 +143,11 @@ impl<'w, C: AsyncStream> Download<'w, C> {
     async fn piece_done(&mut self, state: PieceInProgress) -> anyhow::Result<()> {
         log::trace!("Piece downloaded: {}", state.piece.index);
         let buf = state.buf.into();
-        let verified = self.piece_verifier.verify(&state.piece, &buf).await;
+        let verified = self.work.verify(&state.piece, &buf).await;
 
         if !verified {
             log::error!("Bad piece: Hash mismatch for {}", state.piece.index);
-            self.work.borrow_mut().push_back(state.piece);
+            self.work.push_back(state.piece);
             return Ok(());
         }
 
@@ -181,7 +168,7 @@ impl<'w, C: AsyncStream> Download<'w, C> {
             return;
         }
 
-        if let Some(piece) = self.work.borrow_mut().pop_front() {
+        if let Some(piece) = self.work.pop_front() {
             // Safety: This buffer is sent to the writer task for reading only
             // after being completely written by this download
             let buf = unsafe {

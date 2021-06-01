@@ -2,13 +2,66 @@ use futures::channel::oneshot;
 use rayon::ThreadPool;
 use rayon::ThreadPoolBuilder;
 use sha1::Sha1;
+use std::cell::Cell;
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::VecDeque;
 use std::slice::Chunks;
 use std::sync::Arc;
 
-pub type WorkQueue = RefCell<VecDeque<PieceInfo>>;
+pub struct WorkQueue {
+    pieces: RefCell<VecDeque<PieceInfo>>,
+    verifier: PieceVerifier,
+    downloaded: Cell<usize>,
+}
+
+impl WorkQueue {
+    pub fn new(pieces: VecDeque<PieceInfo>) -> Self {
+        Self {
+            pieces: RefCell::new(pieces),
+            downloaded: Cell::new(0),
+            verifier: PieceVerifier::new(4),
+        }
+    }
+
+    pub fn push_back(&self, info: PieceInfo) {
+        self.pieces.borrow_mut().push_back(info);
+    }
+
+    pub fn pop_front(&self) -> Option<PieceInfo> {
+        self.pieces.borrow_mut().pop_front()
+    }
+
+    pub fn len(&self) -> usize {
+        self.pieces.borrow().len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.pieces.borrow().is_empty()
+    }
+
+    pub fn extend<I>(&self, iter: I)
+    where
+        I: IntoIterator<Item = PieceInfo>,
+    {
+        self.pieces.borrow_mut().extend(iter);
+    }
+
+    pub async fn verify(&self, piece_info: &PieceInfo, data: &Arc<[u8]>) -> bool {
+        self.verifier.verify(piece_info, data).await
+    }
+
+    pub fn add_downloaded(&self, n: usize) {
+        let old = self.downloaded.get();
+        self.downloaded.set(old + n);
+    }
+
+    pub fn get_downloaded_and_reset(&self) -> usize {
+        let n = self.downloaded.get();
+        self.downloaded.set(0);
+        n
+    }
+}
 
 #[derive(Debug)]
 pub struct PieceInfo {
@@ -31,7 +84,7 @@ impl PieceVerifier {
         }
     }
 
-    pub async fn verify(&self, piece_info: &PieceInfo, data: &Arc<[u8]>) -> bool {
+    async fn verify(&self, piece_info: &PieceInfo, data: &Arc<[u8]>) -> bool {
         let (tx, rx) = oneshot::channel();
         let expected_hash = piece_info.hash.clone();
         let data = data.clone();
