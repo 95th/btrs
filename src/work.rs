@@ -100,7 +100,7 @@ impl PieceVerifier {
         self.pool.spawn(move || {
             let actual_hash = Sha1::from(&data).digest().bytes();
             let ok = expected_hash[..] == actual_hash;
-            tx.send(ok).unwrap();
+            let _ = tx.send(ok);
         });
         rx.await.unwrap()
     }
