@@ -220,11 +220,11 @@ mod tests {
         let mut f = BitField::new(3);
         assert!(f.set(0, true));
         assert!(f.set(2, true));
-        assert_eq!(false, f.all_true());
+        assert!(!f.all_true());
         assert_eq!(2, f.true_count());
 
         assert!(f.set(1, true));
-        assert_eq!(true, f.all_true());
+        assert!(f.all_true());
         assert_eq!(3, f.true_count());
     }
 
@@ -233,11 +233,11 @@ mod tests {
         let mut f = BitField::new(3);
 
         f.set_all(true);
-        assert_eq!(true, f.all_true());
+        assert!(f.all_true());
         assert_eq!(3, f.true_count());
 
         f.set(2, false);
-        assert_eq!(false, f.all_true());
+        assert!(!f.all_true());
         assert_eq!(2, f.true_count());
     }
 
