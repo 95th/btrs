@@ -493,7 +493,7 @@ impl fmt::Debug for Dict<'_> {
 }
 
 impl<'a> IntoIterator for Dict<'a> {
-    type Item = (Decoder<'a>, Decoder<'a>);
+    type Item = (&'a [u8], Decoder<'a>);
     type IntoIter = DictIter<'a>;
 
     fn into_iter(self) -> Self::IntoIter {
@@ -532,13 +532,8 @@ impl<'a> Dict<'a> {
 
     /// Returns the `Decoder` for the given key.
     pub fn get(&self, key: &str) -> Option<Decoder<'a>> {
-        self.iter().find_map(|(k, v)| {
-            if k.as_raw_bytes() == key.as_bytes() {
-                Some(v)
-            } else {
-                None
-            }
-        })
+        self.iter()
+            .find_map(|(k, v)| if k == key.as_bytes() { Some(v) } else { None })
     }
 
     /// Returns the `Dict` for the given key.
@@ -585,7 +580,7 @@ pub struct DictIter<'a> {
 }
 
 impl<'a> Iterator for DictIter<'a> {
-    type Item = (Decoder<'a>, Decoder<'a>);
+    type Item = (&'a [u8], Decoder<'a>);
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.index >= self.end {
@@ -605,7 +600,7 @@ impl<'a> Iterator for DictIter<'a> {
 
         self.index += val.token.next as usize;
 
-        Some((key, val))
+        Some((key.as_raw_bytes(), val))
     }
 }
 
@@ -675,11 +670,11 @@ mod tests {
         let mut iter = dict.iter();
 
         let (k, v) = iter.next().unwrap();
-        assert_eq!(b"a", k.as_raw_bytes());
+        assert_eq!(b"a", k);
         assert_eq!(b"bc", v.as_raw_bytes());
 
         let (k, v) = iter.next().unwrap();
-        assert_eq!(b"def", k.as_raw_bytes());
+        assert_eq!(b"def", k);
         assert_eq!(b"ghij", v.as_raw_bytes());
 
         assert_eq!(None, iter.next());
@@ -693,7 +688,7 @@ mod tests {
         let mut iter = dict.iter();
 
         let (k, v) = iter.next().unwrap();
-        assert_eq!(b"a", k.as_raw_bytes());
+        assert_eq!(b"a", k);
         assert_eq!(b"le", v.as_raw_bytes());
 
         assert_eq!(None, iter.next());
@@ -714,7 +709,7 @@ mod tests {
         let mut iter = dict.as_dict().unwrap().iter();
 
         let (k, v) = iter.next().unwrap();
-        assert_eq!(b"a", k.as_raw_bytes());
+        assert_eq!(b"a", k);
         assert_eq!(b"le", v.as_raw_bytes());
 
         assert_eq!(None, iter.next());
