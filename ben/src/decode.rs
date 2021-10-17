@@ -389,9 +389,8 @@ impl<'a> List<'a> {
         ListIter {
             buf: self.buf,
             tokens: self.rest,
-            total: self.len(),
             index: 0,
-            pos: 0,
+            end: self.token.next as usize - 1,
         }
     }
 
@@ -448,30 +447,24 @@ impl<'a> List<'a> {
         self.get(i)?.as_int()
     }
 
-    /// Returns the number of items
-    pub fn len(&self) -> usize {
-        self.token.children as usize
-    }
-
     /// Returns true if the list is empty
     pub fn is_empty(&self) -> bool {
-        self.len() == 0
+        self.token.next == 1
     }
 }
 
 pub struct ListIter<'a> {
     buf: &'a [u8],
     tokens: &'a [Token],
-    total: usize,
     index: usize,
-    pos: usize,
+    end: usize,
 }
 
 impl<'a> Iterator for ListIter<'a> {
     type Item = Decoder<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.pos >= self.total {
+        if self.index >= self.end {
             return None;
         }
 
@@ -480,7 +473,6 @@ impl<'a> Iterator for ListIter<'a> {
         let decoder = Decoder::new(self.buf, tokens)?;
 
         self.index += decoder.token.next as usize;
-        self.pos += 1;
 
         Some(decoder)
     }
@@ -515,9 +507,8 @@ impl<'a> Dict<'a> {
         DictIter {
             buf: self.buf,
             tokens: self.rest,
-            total: self.len(),
             index: 0,
-            pos: 0,
+            end: self.token.next as usize - 1,
         }
     }
 
@@ -580,30 +571,24 @@ impl<'a> Dict<'a> {
         self.get(key)?.as_int()
     }
 
-    /// Returns the number of entries
-    pub fn len(&self) -> usize {
-        self.token.children as usize
-    }
-
     /// Returns true if the dictionary is empty
     pub fn is_empty(&self) -> bool {
-        self.len() == 0
+        self.token.next == 1
     }
 }
 
 pub struct DictIter<'a> {
     buf: &'a [u8],
     tokens: &'a [Token],
-    total: usize,
     index: usize,
-    pos: usize,
+    end: usize,
 }
 
 impl<'a> Iterator for DictIter<'a> {
     type Item = (Decoder<'a>, Decoder<'a>);
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.pos >= self.total {
+        if self.index >= self.end {
             return None;
         }
 
@@ -619,7 +604,6 @@ impl<'a> Iterator for DictIter<'a> {
         let val = Decoder::new(self.buf, tokens)?;
 
         self.index += val.token.next as usize;
-        self.pos += 1;
 
         Some((key, val))
     }
@@ -835,7 +819,7 @@ mod tests {
         let parser = &mut Parser::new();
         let dict = parser.parse::<Dict>(s).unwrap();
         assert!(!dict.is_empty());
-        assert_eq!(dict.len(), 1);
+        assert_eq!(dict.get_str("a").unwrap(), "b");
     }
 
     #[test]
@@ -844,7 +828,7 @@ mod tests {
         let parser = &mut Parser::new();
         let dict = parser.parse::<Dict>(s).unwrap();
         assert!(!dict.is_empty());
-        assert_eq!(dict.len(), 1);
+        assert_eq!(dict.get("a").unwrap().as_raw_bytes(), b"l1:ad1:al1:aee1:be");
     }
     #[test]
     fn empty_list_len() {
@@ -860,7 +844,8 @@ mod tests {
         let parser = &mut Parser::new();
         let list = parser.parse::<List>(s).unwrap();
         assert!(!list.is_empty());
-        assert_eq!(list.len(), 2);
+        assert_eq!(list.get_str(0).unwrap(), "a");
+        assert_eq!(list.get_str(1).unwrap(), "b");
     }
 
     #[test]
@@ -869,6 +854,8 @@ mod tests {
         let parser = &mut Parser::new();
         let list = parser.parse::<List>(s).unwrap();
         assert!(!list.is_empty());
-        assert_eq!(list.len(), 3);
+        assert_eq!(list.get_str(0).unwrap(), "a");
+        assert_eq!(list.get(1).unwrap().as_raw_bytes(), b"d1:al1:aee");
+        assert_eq!(list.get_str(2).unwrap(), "b");
     }
 }

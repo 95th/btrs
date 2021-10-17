@@ -6,7 +6,6 @@ pub struct Token {
     pub kind: TokenKind,
     pub start: u32,
     pub end: u32,
-    pub children: u32,
     pub next: u32,
 }
 
@@ -17,16 +16,11 @@ impl fmt::Debug for Token {
 }
 
 impl Token {
-    pub fn new(kind: TokenKind, start: u32, end: u32) -> Self {
-        Self::with_size(kind, start, end, 0, 1)
-    }
-
-    pub fn with_size(kind: TokenKind, start: u32, end: u32, children: u32, next: u32) -> Self {
+    pub fn new(kind: TokenKind, start: u32, end: u32, next: u32) -> Self {
         Self {
             kind,
             start,
             end,
-            children,
             next,
         }
     }

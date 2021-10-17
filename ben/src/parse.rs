@@ -78,7 +78,7 @@ impl Parser {
         }
 
         self.tokens.clear();
-        let mut state = State {
+        let mut state = ParserState {
             buf,
             pos: 0,
             tokens: &mut self.tokens,
@@ -94,7 +94,7 @@ impl Parser {
     }
 }
 
-struct State<'a> {
+struct ParserState<'a> {
     buf: &'a [u8],
     pos: usize,
     tokens: &'a mut Vec<Token>,
@@ -103,7 +103,7 @@ struct State<'a> {
     current_depth: usize,
 }
 
-impl<'a> State<'a> {
+impl<'a> ParserState<'a> {
     fn peek_char(&self) -> Result<u8> {
         self.buf.get(self.pos).copied().ok_or(Error::Eof)
     }
@@ -141,11 +141,9 @@ impl<'a> State<'a> {
         // Consume the opening 'd'
         self.next_char()?;
 
-        let mut children = 0;
         while self.peek_char()? != b'e' {
             self.parse_string()?;
             self.parse_object()?;
-            children += 1;
         }
 
         // Consume the closing 'e'
@@ -154,7 +152,6 @@ impl<'a> State<'a> {
         let next = self.tokens.len() - token_pos;
         let token = &mut self.tokens[token_pos];
         token.end = self.pos as u32;
-        token.children = children;
         token.next = next as u32;
 
         Ok(())
@@ -166,10 +163,8 @@ impl<'a> State<'a> {
         // Consume the opening 'l'
         self.next_char()?;
 
-        let mut children = 0;
         while self.peek_char()? != b'e' {
             self.parse_object()?;
-            children += 1;
         }
 
         // Consume the closing 'e'
@@ -178,7 +173,6 @@ impl<'a> State<'a> {
         let next = self.tokens.len() - token_pos;
         let token = &mut self.tokens[token_pos];
         token.end = self.pos as u32;
-        token.children = children;
         token.next = next as u32;
 
         Ok(())
@@ -252,7 +246,7 @@ impl<'a> State<'a> {
                 limit: self.token_limit,
             });
         }
-        let token = Token::new(kind, self.pos as u32, self.pos as u32);
+        let token = Token::new(kind, self.pos as u32, self.pos as u32, 1);
         self.tokens.push(token);
         Ok(self.tokens.len() - 1)
     }
@@ -267,7 +261,7 @@ mod tests {
         let s = b"i12e";
         let mut parser = Parser::new();
         parser.parse::<Decoder>(s).unwrap();
-        assert_eq!(&[Token::new(TokenKind::Int, 1, 3)], &parser.tokens[..]);
+        assert_eq!(&[Token::new(TokenKind::Int, 1, 3, 1)], &parser.tokens[..]);
     }
 
     #[test]
@@ -275,7 +269,10 @@ mod tests {
         let s = b"3:abc";
         let mut parser = Parser::new();
         parser.parse::<Decoder>(s).unwrap();
-        assert_eq!(&[Token::new(TokenKind::ByteStr, 2, 5)], &parser.tokens[..]);
+        assert_eq!(
+            &[Token::new(TokenKind::ByteStr, 2, 5, 1)],
+            &parser.tokens[..]
+        );
     }
 
     #[test]
@@ -305,7 +302,7 @@ mod tests {
         let s = b"de";
         let mut parser = Parser::new();
         parser.parse::<Decoder>(s).unwrap();
-        assert_eq!(&[Token::new(TokenKind::Dict, 0, 2)], &parser.tokens[..]);
+        assert_eq!(&[Token::new(TokenKind::Dict, 0, 2, 1)], &parser.tokens[..]);
     }
 
     #[test]
@@ -336,11 +333,11 @@ mod tests {
         parser.parse::<Decoder>(s).unwrap();
         assert_eq!(
             &[
-                Token::with_size(TokenKind::Dict, 0, 20, 2, 5),
-                Token::with_size(TokenKind::ByteStr, 3, 4, 0, 1),
-                Token::with_size(TokenKind::ByteStr, 6, 8, 0, 1),
-                Token::with_size(TokenKind::ByteStr, 10, 13, 0, 1),
-                Token::with_size(TokenKind::ByteStr, 15, 19, 0, 1)
+                Token::new(TokenKind::Dict, 0, 20, 5),
+                Token::new(TokenKind::ByteStr, 3, 4, 1),
+                Token::new(TokenKind::ByteStr, 6, 8, 1),
+                Token::new(TokenKind::ByteStr, 10, 13, 1),
+                Token::new(TokenKind::ByteStr, 15, 19, 1)
             ],
             &parser.tokens[..]
         );
@@ -353,19 +350,19 @@ mod tests {
         parser.parse::<Decoder>(s).unwrap();
         assert_eq!(
             &[
-                Token::with_size(TokenKind::Dict, 0, 36, 6, 13),
-                Token::with_size(TokenKind::ByteStr, 3, 4, 0, 1),
-                Token::with_size(TokenKind::ByteStr, 6, 7, 0, 1),
-                Token::with_size(TokenKind::ByteStr, 9, 10, 0, 1),
-                Token::with_size(TokenKind::Int, 11, 12, 0, 1),
-                Token::with_size(TokenKind::ByteStr, 15, 16, 0, 1),
-                Token::with_size(TokenKind::ByteStr, 18, 19, 0, 1),
-                Token::with_size(TokenKind::ByteStr, 21, 22, 0, 1),
-                Token::with_size(TokenKind::Dict, 22, 24, 0, 1),
-                Token::with_size(TokenKind::ByteStr, 26, 27, 0, 1),
-                Token::with_size(TokenKind::List, 27, 29, 0, 1),
-                Token::with_size(TokenKind::ByteStr, 31, 32, 0, 1),
-                Token::with_size(TokenKind::ByteStr, 34, 35, 0, 1)
+                Token::new(TokenKind::Dict, 0, 36, 13),
+                Token::new(TokenKind::ByteStr, 3, 4, 1),
+                Token::new(TokenKind::ByteStr, 6, 7, 1),
+                Token::new(TokenKind::ByteStr, 9, 10, 1),
+                Token::new(TokenKind::Int, 11, 12, 1),
+                Token::new(TokenKind::ByteStr, 15, 16, 1),
+                Token::new(TokenKind::ByteStr, 18, 19, 1),
+                Token::new(TokenKind::ByteStr, 21, 22, 1),
+                Token::new(TokenKind::Dict, 22, 24, 1),
+                Token::new(TokenKind::ByteStr, 26, 27, 1),
+                Token::new(TokenKind::List, 27, 29, 1),
+                Token::new(TokenKind::ByteStr, 31, 32, 1),
+                Token::new(TokenKind::ByteStr, 34, 35, 1)
             ],
             &parser.tokens[..]
         );
@@ -376,7 +373,7 @@ mod tests {
         let s = b"le";
         let mut parser = Parser::new();
         parser.parse::<Decoder>(s).unwrap();
-        assert_eq!(&[Token::new(TokenKind::List, 0, 2)], &parser.tokens[..]);
+        assert_eq!(&[Token::new(TokenKind::List, 0, 2, 1)], &parser.tokens[..]);
     }
 
     #[test]
@@ -393,11 +390,11 @@ mod tests {
         parser.parse::<Decoder>(s).unwrap();
         assert_eq!(
             &[
-                Token::with_size(TokenKind::List, 0, 20, 4, 5),
-                Token::new(TokenKind::ByteStr, 3, 4),
-                Token::new(TokenKind::ByteStr, 6, 8,),
-                Token::new(TokenKind::ByteStr, 10, 13,),
-                Token::new(TokenKind::ByteStr, 15, 19,)
+                Token::new(TokenKind::List, 0, 20, 5),
+                Token::new(TokenKind::ByteStr, 3, 4, 1),
+                Token::new(TokenKind::ByteStr, 6, 8, 1),
+                Token::new(TokenKind::ByteStr, 10, 13, 1),
+                Token::new(TokenKind::ByteStr, 15, 19, 1)
             ],
             &parser.tokens[..]
         );
@@ -410,10 +407,10 @@ mod tests {
         parser.parse::<Decoder>(s).unwrap();
         assert_eq!(
             &[
-                Token::with_size(TokenKind::List, 0, 8, 1, 4),
-                Token::with_size(TokenKind::List, 1, 7, 1, 3),
-                Token::with_size(TokenKind::List, 2, 6, 1, 2),
-                Token::with_size(TokenKind::List, 3, 5, 0, 1),
+                Token::new(TokenKind::List, 0, 8, 4),
+                Token::new(TokenKind::List, 1, 7, 3),
+                Token::new(TokenKind::List, 2, 6, 2),
+                Token::new(TokenKind::List, 3, 5, 1),
             ],
             &parser.tokens[..]
         );
@@ -426,14 +423,14 @@ mod tests {
         parser.parse::<Decoder>(s).unwrap();
         assert_eq!(
             &[
-                Token::with_size(TokenKind::List, 0, 19, 1, 8),
-                Token::with_size(TokenKind::Dict, 1, 18, 1, 7),
-                Token::with_size(TokenKind::ByteStr, 4, 5, 0, 1),
-                Token::with_size(TokenKind::List, 5, 17, 1, 5),
-                Token::with_size(TokenKind::Dict, 6, 16, 1, 4),
-                Token::with_size(TokenKind::ByteStr, 9, 11, 0, 1),
-                Token::with_size(TokenKind::List, 11, 15, 1, 2),
-                Token::with_size(TokenKind::List, 12, 14, 0, 1),
+                Token::new(TokenKind::List, 0, 19, 8),
+                Token::new(TokenKind::Dict, 1, 18, 7),
+                Token::new(TokenKind::ByteStr, 4, 5, 1),
+                Token::new(TokenKind::List, 5, 17, 5),
+                Token::new(TokenKind::Dict, 6, 16, 4),
+                Token::new(TokenKind::ByteStr, 9, 11, 1),
+                Token::new(TokenKind::List, 11, 15, 2),
+                Token::new(TokenKind::List, 12, 14, 1),
             ],
             &parser.tokens[..]
         );
@@ -505,10 +502,7 @@ mod tests {
         let s = b"lede";
         let mut parser = Parser::new();
         let (_, len) = parser.parse_prefix::<Decoder>(s).unwrap();
-        assert_eq!(
-            &[Token::with_size(TokenKind::List, 0, 2, 0, 1)],
-            &parser.tokens[..]
-        );
+        assert_eq!(&[Token::new(TokenKind::List, 0, 2, 1)], &parser.tokens[..]);
         assert_eq!(2, len);
     }
 
@@ -517,10 +511,7 @@ mod tests {
         let s = b"lede";
         let mut parser = Parser::new();
         let (_, len) = parser.parse_prefix::<Decoder>(s).unwrap();
-        assert_eq!(
-            &[Token::with_size(TokenKind::List, 0, 2, 0, 1)],
-            &parser.tokens[..]
-        );
+        assert_eq!(&[Token::new(TokenKind::List, 0, 2, 1)], &parser.tokens[..]);
         assert_eq!(2, len);
     }
 
@@ -530,7 +521,7 @@ mod tests {
         let mut parser = Parser::new();
         parser.parse::<Decoder>(s).unwrap();
         assert_eq!(
-            &[Token::with_size(TokenKind::ByteStr, 2, 2, 0, 1)],
+            &[Token::new(TokenKind::ByteStr, 2, 2, 1)],
             &parser.tokens[..]
         );
     }
