@@ -1,4 +1,4 @@
-use dht_proto::{ClientRequest as ProtoRequest, Dht as ProtoDht, Event, NodeId, TaskId};
+use dht_proto::{self as proto, Event, NodeId, TaskId};
 
 use futures::{
     channel::{mpsc, oneshot},
@@ -33,8 +33,8 @@ impl Dht {
         let (tx, rx) = mpsc::channel::<ClientRequest>(200);
         let id = NodeId::gen();
 
-        let mut dht = ProtoDht::new(id, router_nodes, Instant::now());
-        dht.add_request(ProtoRequest::Bootstrap { target: id });
+        let mut dht = proto::Dht::new(id, router_nodes, Instant::now());
+        dht.add_request(proto::ClientRequest::Bootstrap { target: id });
 
         let driver = DhtDriver {
             port,
@@ -74,7 +74,7 @@ impl Dht {
 pub struct DhtDriver {
     port: u16,
     rx: Option<mpsc::Receiver<ClientRequest>>,
-    dht: ProtoDht,
+    dht: proto::Dht,
     pending: HashMap<TaskId, PeerSender>,
 }
 
@@ -150,13 +150,13 @@ impl DhtDriver {
 
                     match request {
                         ClientRequest::Announce { info_hash, sender } => {
-                            let req = ProtoRequest::Announce { info_hash };
+                            let req = proto::ClientRequest::Announce { info_hash };
                             if let Some(id) = self.dht.add_request(req) {
                                 self.pending.insert(id, sender);
                             }
                         },
                         ClientRequest::GetPeers { info_hash, sender } => {
-                            let req = ProtoRequest::GetPeers { info_hash };
+                            let req = proto::ClientRequest::GetPeers { info_hash };
                             if let Some(id) = self.dht.add_request(req) {
                                 self.pending.insert(id, sender);
                             }

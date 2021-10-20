@@ -50,10 +50,6 @@ impl RoutingTable {
         }
     }
 
-    pub fn add_router_node(&mut self, router: SocketAddr) {
-        self.router_nodes.insert(router);
-    }
-
     pub fn add_contact(&mut self, contact: &ContactRef<'_>) -> bool {
         let mut result = self.add_contact_impl(contact);
         loop {
@@ -110,14 +106,17 @@ impl RoutingTable {
         out.truncate(count);
     }
 
+    #[cfg(test)]
     pub fn len(&self) -> usize {
         self.buckets.iter().map(|b| b.live.len()).sum()
     }
 
+    #[cfg(test)]
     pub fn len_extra(&self) -> usize {
         self.buckets.iter().map(|b| b.extra.len()).sum()
     }
 
+    #[cfg(test)]
     pub fn is_empty(&self) -> bool {
         self.buckets.iter().all(|b| b.live.is_empty())
     }
@@ -145,13 +144,14 @@ impl RoutingTable {
     }
 
     fn add_contact_impl(&mut self, contact: &ContactRef<'_>) -> BucketResult {
+        use BucketResult::*;
         if self.router_nodes.contains(&contact.addr) {
-            return BucketResult::Fail;
+            return Fail;
         }
 
         // Don't add ourselves
         if self.own_id == *contact.id {
-            return BucketResult::Fail;
+            return Fail;
         }
 
         let bucket_index = self.find_bucket(contact.id);
@@ -162,12 +162,12 @@ impl RoutingTable {
 
         if let Some(c) = bucket.live.iter_mut().find(|c| c.id == *contact.id) {
             if c.addr != contact.addr {
-                return BucketResult::Fail;
+                return Fail;
             }
 
             c.timeout_count = Some(0);
             bucket.last_updated = Instant::now();
-            return BucketResult::Success;
+            return Success;
         }
 
         let maybe_extra = bucket
@@ -180,7 +180,7 @@ impl RoutingTable {
 
         if let Some((i, c)) = maybe_extra {
             if c.addr != contact.addr {
-                return BucketResult::Fail;
+                return Fail;
             }
 
             c.timeout_count = Some(0);
@@ -193,18 +193,30 @@ impl RoutingTable {
             }
             bucket.live.push(contact);
             bucket.last_updated = Instant::now();
-            return BucketResult::Success;
+            return Success;
         }
 
         if can_split {
-            return BucketResult::RequireSplit;
+            return RequireSplit;
         }
 
         if contact.is_confirmed() {
             let result = bucket.replace_node(&contact);
-            if result != BucketResult::RequireSplit {
+            if result != RequireSplit {
                 return result;
             }
+        }
+
+        // if we can't split, nor replace anything in the live buckets try to insert
+        // into the replacement bucket
+
+        // if we don't have any identified stale nodes in
+        // the bucket, and the bucket is full, we have to
+        // cache this node and wait until some node fails
+        // and then replace it.
+        if let Some(c) = bucket.extra.iter_mut().find(|c| c.addr == contact.addr) {
+            c.set_pinged();
+            return Success;
         }
 
         if bucket.extra.len() >= Bucket::MAX_LEN {
@@ -212,11 +224,7 @@ impl RoutingTable {
                 bucket.extra.remove(i);
             } else {
                 let result = bucket.replace_node(&contact);
-                return if let BucketResult::Success = result {
-                    BucketResult::Success
-                } else {
-                    BucketResult::Fail
-                };
+                return if let Success = result { Success } else { Fail };
             }
         }
 
@@ -225,7 +233,7 @@ impl RoutingTable {
         }
         bucket.extra.push(contact);
         bucket.last_updated = Instant::now();
-        BucketResult::Success
+        Success
     }
 
     fn split_bucket(&mut self) {
@@ -254,7 +262,7 @@ mod tests {
     #[test]
     fn basic() {
         let mut rt = RoutingTable::new(NodeId::all(0), vec![]);
-        assert_eq!(rt.len(), 0);
+        assert!(rt.is_empty());
         assert_eq!(rt.len_extra(), 0);
         assert_eq!(rt.buckets.len(), 1);
 

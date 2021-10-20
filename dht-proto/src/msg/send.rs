@@ -94,31 +94,31 @@ impl Encode for AnnouncePeer<'_> {
     }
 }
 
-pub struct Error {
-    pub kind: ErrorKind,
-    pub description: String,
-}
+// pub struct Error {
+//     pub kind: ErrorKind,
+//     pub description: String,
+// }
 
-pub enum ErrorKind {
-    Generic,
-    Server,
-    Protocol,
-    MethodUnknown,
-}
+// pub enum ErrorKind {
+//     Generic,
+//     Server,
+//     Protocol,
+//     MethodUnknown,
+// }
 
-impl Encode for Error {
-    fn encode<E: Encoder>(&self, enc: &mut E) {
-        use ErrorKind::*;
-        let code = match self.kind {
-            Generic => 201,
-            Server => 202,
-            Protocol => 203,
-            MethodUnknown => 204,
-        };
-        enc.add_int(code);
-        enc.add_str(&self.description);
-    }
-}
+// impl Encode for Error {
+//     fn encode<E: Encoder>(&self, enc: &mut E) {
+//         use ErrorKind::*;
+//         let code = match self.kind {
+//             Generic => 201,
+//             Server => 202,
+//             Protocol => 203,
+//             MethodUnknown => 204,
+//         };
+//         enc.add_int(code);
+//         enc.add_str(&self.description);
+//     }
+// }
 
 #[cfg(test)]
 mod tests {

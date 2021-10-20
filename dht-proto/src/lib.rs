@@ -1,9 +1,9 @@
 mod bucket;
 mod contact;
 mod id;
-pub mod msg;
+mod msg;
 mod server;
-pub mod table;
+mod table;
 mod util;
 
 pub use id::NodeId;
