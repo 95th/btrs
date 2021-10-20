@@ -131,7 +131,7 @@ impl<'a> TorrentWorker<'a> {
                     }
                 }
 
-                // Check running downloads
+                // Check pending downloads
                 maybe_result = pending_downloads.next() => {
                     match maybe_result {
                         Some(Ok(())) => {},

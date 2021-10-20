@@ -65,13 +65,13 @@ impl RpcManager {
         msg: Msg<'_>,
         addr: SocketAddr,
         table: &mut RoutingTable,
-        running: &mut Slab<Box<dyn Task>>,
+        tasks: &mut Slab<Box<dyn Task>>,
     ) {
         log::trace!("Received msg: {:?}", msg);
 
         match msg {
-            Msg::Response(r) => self.handle_ok(r, addr, table, running),
-            Msg::Error(e) => self.handle_error(e, addr, table, running),
+            Msg::Response(r) => self.handle_ok(r, addr, table, tasks),
+            Msg::Error(e) => self.handle_error(e, addr, table, tasks),
             Msg::Query(q) => self.handle_query(q, addr, table),
         }
     }
@@ -81,7 +81,7 @@ impl RpcManager {
         resp: Response<'_>,
         addr: SocketAddr,
         table: &mut RoutingTable,
-        running: &mut Slab<Box<dyn Task>>,
+        tasks: &mut Slab<Box<dyn Task>>,
     ) {
         let req = match self.txns.remove(resp.txn_id) {
             Some(req) => req,
@@ -102,21 +102,21 @@ impl RpcManager {
             );
             table.failed(&req.id);
 
-            if let Some(t) = running.get_mut(req.task_id) {
-                t.set_failed(&req.id, &addr);
-                let done = t.add_requests(self);
+            if let Some(task) = tasks.get_mut(req.task_id) {
+                task.set_failed(&req.id, &addr);
+                let done = task.add_requests(self);
                 if done {
-                    running.remove(req.task_id).done(self);
+                    tasks.remove(req.task_id).done(self);
                 }
             }
             return;
         }
 
-        if let Some(t) = running.get_mut(req.task_id) {
-            t.handle_response(&resp, &addr, table, self, req.has_id);
-            let done = t.add_requests(self);
+        if let Some(task) = tasks.get_mut(req.task_id) {
+            task.handle_response(&resp, &addr, table, self, req.has_id);
+            let done = task.add_requests(self);
             if done {
-                running.remove(req.task_id).done(self);
+                tasks.remove(req.task_id).done(self);
             }
         }
     }
@@ -126,7 +126,7 @@ impl RpcManager {
         err: ErrorResponse<'_>,
         addr: SocketAddr,
         table: &mut RoutingTable,
-        running: &mut Slab<Box<dyn Task>>,
+        tasks: &mut Slab<Box<dyn Task>>,
     ) {
         let req = match self.txns.remove(err.txn_id) {
             Some(req) => req,
@@ -140,11 +140,11 @@ impl RpcManager {
             table.failed(&req.id);
         }
 
-        if let Some(t) = running.get_mut(req.task_id) {
-            t.set_failed(&req.id, &addr);
-            let done = t.add_requests(self);
+        if let Some(task) = tasks.get_mut(req.task_id) {
+            task.set_failed(&req.id, &addr);
+            let done = task.add_requests(self);
             if done {
-                running.remove(req.task_id).done(self);
+                tasks.remove(req.task_id).done(self);
             }
         }
     }
@@ -208,7 +208,7 @@ impl RpcManager {
     pub fn check_timeouts(
         &mut self,
         table: &mut RoutingTable,
-        running: &mut Slab<Box<dyn Task>>,
+        tasks: &mut Slab<Box<dyn Task>>,
         timed_out: &mut Vec<(TxnId, Request)>,
     ) {
         if self.txns.pending.is_empty() {
@@ -221,11 +221,11 @@ impl RpcManager {
         log::debug!(
             "{} pending txns in {} tasks",
             self.txns.pending.len(),
-            running.len()
+            tasks.len()
         );
 
         if self.txns.pending.is_empty() {
-            assert!(running.is_empty());
+            assert!(tasks.is_empty());
         }
 
         timed_out.extend(self.txns.pending.drain_filter(|_, req| req.sent < cutoff));
@@ -236,11 +236,11 @@ impl RpcManager {
                 table.failed(&req.id);
             }
 
-            if let Some(t) = running.get_mut(req.task_id) {
-                t.set_failed(&req.id, &req.addr);
-                let done = t.add_requests(self);
+            if let Some(task) = tasks.get_mut(req.task_id) {
+                task.set_failed(&req.id, &req.addr);
+                let done = task.add_requests(self);
                 if done {
-                    running.remove(req.task_id).done(self);
+                    tasks.remove(req.task_id).done(self);
                 }
             }
         }
