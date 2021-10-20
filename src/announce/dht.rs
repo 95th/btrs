@@ -1,7 +1,7 @@
 use crate::metainfo::InfoHash;
 use crate::peer::Peer;
-use dht::id::NodeId;
 use dht::Dht;
+use dht::NodeId;
 use std::net::ToSocketAddrs;
 use std::time::Duration;
 use std::time::Instant;
@@ -9,7 +9,6 @@ use std::time::Instant;
 pub struct DhtTracker {
     dht: Dht,
     next_announce: Instant,
-    bootstapped: bool,
 }
 
 impl Default for DhtTracker {
@@ -24,14 +23,13 @@ impl DhtTracker {
             .to_socket_addrs()
             .unwrap()
             .collect();
-        let (dht, server) = Dht::new(6881, dht_routers);
+        let (dht, driver) = Dht::new(6881, dht_routers);
 
-        tokio::spawn(server.run());
+        tokio::spawn(driver.run());
 
         Self {
             dht,
             next_announce: Instant::now(),
-            bootstapped: false,
         }
     }
 
@@ -40,11 +38,6 @@ impl DhtTracker {
 
         log::debug!("Announcing to DHT");
         let start = Instant::now();
-
-        if !self.bootstapped {
-            self.dht.bootstrap().await?;
-            self.bootstapped = true;
-        }
 
         let peers = self.dht.announce(NodeId(*info_hash.as_ref())).await?;
 

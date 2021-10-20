@@ -4,22 +4,22 @@ use crate::{
     bucket::Bucket,
     id::NodeId,
     msg::{recv::Response, TxnId},
-    server::rpc::RpcMgr,
+    server::rpc::RpcManager,
     table::RoutingTable,
 };
 
-use super::{DhtNode, Status};
+use super::{DhtNode, Status, TaskId};
 
-pub struct Traversal {
+pub struct BaseTask {
     pub target: NodeId,
     pub nodes: Vec<DhtNode>,
     pub branch_factor: u8,
     pub invoke_count: u8,
-    pub traversal_id: usize,
+    pub task_id: TaskId,
 }
 
-impl Traversal {
-    pub fn new(target: &NodeId, table: &RoutingTable, traversal_id: usize) -> Self {
+impl BaseTask {
+    pub fn new(target: &NodeId, table: &RoutingTable, task_id: TaskId) -> Self {
         let mut closest = Vec::with_capacity(Bucket::MAX_LEN);
         table.find_closest(target, &mut closest, Bucket::MAX_LEN);
 
@@ -43,7 +43,7 @@ impl Traversal {
             nodes,
             branch_factor: 3,
             invoke_count: 0,
-            traversal_id,
+            task_id,
         }
     }
 
@@ -109,9 +109,9 @@ impl Traversal {
         }
     }
 
-    pub async fn add_requests<F>(&mut self, rpc: &mut RpcMgr<'_>, mut write_msg: F) -> bool
+    pub fn add_requests<F>(&mut self, rpc: &mut RpcManager, mut write_msg: F) -> bool
     where
-        F: FnMut(&mut RpcMgr<'_>) -> TxnId,
+        F: FnMut(&mut Vec<u8>, &mut RpcManager) -> TxnId,
     {
         let mut outstanding = 0;
         let mut alive = 0;
@@ -137,21 +137,16 @@ impl Traversal {
                 continue;
             };
 
-            let txn_id = write_msg(rpc);
+            let mut buf = Vec::new();
+            let txn_id = write_msg(&mut buf, rpc);
             log::trace!("Send to {}", n.addr);
 
-            match rpc.send(n.addr).await {
-                Ok(()) => {
-                    n.status.insert(Status::QUERIED);
-                    rpc.txns.insert(txn_id, &n.id, &n.addr, self.traversal_id);
-                    outstanding += 1;
-                    self.invoke_count += 1;
-                }
-                Err(e) => {
-                    log::warn!("{}", e);
-                    n.status.insert(Status::QUERIED | Status::FAILED);
-                }
-            }
+            rpc.transmit(self.task_id, n.id, buf, n.addr);
+            n.status.insert(Status::QUERIED);
+            rpc.txns.insert(txn_id, &n.id, &n.addr, self.task_id);
+
+            outstanding += 1;
+            self.invoke_count += 1;
         }
 
         log::trace!(

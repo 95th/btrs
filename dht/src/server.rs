@@ -1,26 +1,15 @@
-use crate::{
-    contact::{CompactNodes, CompactNodesV6, ContactRef},
-    id::NodeId,
-    msg::recv::{Msg, Response},
-    server::request::{DhtAnnounce, DhtBootstrap, DhtGetPeers, DhtPing, DhtTraversal},
-    table::RoutingTable,
-};
-use ben::Parser;
+use dht_proto::{ClientRequest as ProtoRequest, Dht as ProtoDht, Event, NodeId, TaskId};
+
 use futures::{
     channel::{mpsc, oneshot},
     select, FutureExt, SinkExt, StreamExt,
 };
-use rpc::RpcMgr;
-use slab::Slab;
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     net::{Ipv6Addr, SocketAddr},
-    time::Duration,
+    time::{Duration, Instant},
 };
 use tokio::{net::UdpSocket, time::interval};
-
-mod request;
-mod rpc;
 
 pub type PeerSender = oneshot::Sender<HashSet<SocketAddr>>;
 
@@ -33,45 +22,28 @@ pub enum ClientRequest {
         info_hash: NodeId,
         sender: PeerSender,
     },
-    Ping {
-        id: NodeId,
-        addr: SocketAddr,
-    },
-    Bootstrap {
-        target: NodeId,
-        sender: oneshot::Sender<()>,
-    },
 }
 
 pub struct Dht {
     tx: mpsc::Sender<ClientRequest>,
-    id: NodeId,
 }
 
 impl Dht {
-    pub fn new(port: u16, router_nodes: Vec<SocketAddr>) -> (Self, DhtServer) {
+    pub fn new(port: u16, router_nodes: Vec<SocketAddr>) -> (Self, DhtDriver) {
         let (tx, rx) = mpsc::channel::<ClientRequest>(200);
         let id = NodeId::gen();
-        let server = DhtServer {
+
+        let mut dht = ProtoDht::new(id, router_nodes, Instant::now());
+        dht.add_request(ProtoRequest::Bootstrap { target: id });
+
+        let driver = DhtDriver {
             port,
-            router_nodes,
-            tx: tx.clone(),
-            rx,
-            id,
+            rx: Some(rx),
+            dht,
+            pending: HashMap::new(),
         };
 
-        (Self { tx, id }, server)
-    }
-
-    pub async fn bootstrap(&mut self) -> anyhow::Result<()> {
-        let (tx, rx) = oneshot::channel();
-        self.tx
-            .send(ClientRequest::Bootstrap {
-                target: self.id,
-                sender: tx,
-            })
-            .await?;
-        Ok(rx.await?)
+        (Self { tx }, driver)
     }
 
     pub async fn get_peers(&mut self, info_hash: NodeId) -> anyhow::Result<HashSet<SocketAddr>> {
@@ -99,16 +71,15 @@ impl Dht {
     }
 }
 
-pub struct DhtServer {
-    id: NodeId,
+pub struct DhtDriver {
     port: u16,
-    router_nodes: Vec<SocketAddr>,
-    tx: mpsc::Sender<ClientRequest>,
-    rx: mpsc::Receiver<ClientRequest>,
+    rx: Option<mpsc::Receiver<ClientRequest>>,
+    dht: ProtoDht,
+    pending: HashMap<TaskId, PeerSender>,
 }
 
-impl DhtServer {
-    pub async fn run(self) {
+impl DhtDriver {
+    pub async fn run(mut self) {
         let udp = match UdpSocket::bind((Ipv6Addr::UNSPECIFIED, self.port)).await {
             Ok(x) => x,
             Err(e) => {
@@ -117,37 +88,19 @@ impl DhtServer {
             }
         };
 
-        let table = &mut RoutingTable::new(self.id, self.router_nodes);
-        let rpc = &mut RpcMgr::new(self.id, &udp);
-        let parser = &mut Parser::new();
-        let running = &mut Slab::new();
-
         let recv_buf: &mut [u8] = &mut [0; 1024];
-        let timed_out = &mut Vec::new();
+        let mut rx = self.rx.take().unwrap();
 
-        const ONE_SEC: Duration = Duration::from_secs(1);
-        const ONE_MIN: Duration = Duration::from_secs(60);
+        let mut timer = interval(Duration::from_secs(1));
 
-        let mut prune_txn = interval(ONE_SEC);
-        let mut table_refresh = interval(ONE_MIN);
-
-        let mut tx = self.tx;
-        let mut rx = self.rx;
-
-        loop {
+        // Wait for bootstrapping
+        self.process_events(&udp).await;
+        while !self.dht.is_idle() {
             select! {
-                // Clear timed-out transactions
-                _ = prune_txn.tick().fuse() => {
-                    rpc.check_timeouts(table, running, timed_out).await;
+                time = timer.tick().fuse() => {
+                    self.dht.tick(time.into_std());
+                    self.process_events(&udp).await;
                 },
-
-                // Refresh table buckets
-                _ = table_refresh.tick().fuse() => {
-                    if let Some(refresh) = table.next_refresh() {
-                        log::trace!("Time to refresh the routing table");
-                        tx.send(refresh).await.unwrap();
-                    }
-                }
 
                 // Listen for response
                 resp = udp.recv_from(recv_buf).fuse() => {
@@ -159,17 +112,31 @@ impl DhtServer {
                         },
                     };
 
-                    log::debug!("Got {} bytes from {}", n, addr);
+                    self.dht.receive(&recv_buf[..n], addr);
+                    self.process_events(&udp).await;
+                }
+            }
+        }
 
-                    let msg = match parser.parse::<Msg>(&recv_buf[..n]) {
+        loop {
+            select! {
+                time = timer.tick().fuse() => {
+                    self.dht.tick(time.into_std());
+                    self.process_events(&udp).await;
+                },
+
+                // Listen for response
+                resp = udp.recv_from(recv_buf).fuse() => {
+                    let (n, addr) = match resp {
                         Ok(x) => x,
                         Err(e) => {
-                            log::warn!("Error parsing message from {}: {}", addr, e);
+                            log::warn!("Error: {}", e);
                             continue;
-                        }
+                        },
                     };
 
-                    rpc.handle_response(msg, addr, table, running).await;
+                    self.dht.receive(&recv_buf[..n], addr);
+                    self.process_events(&udp).await;
                 },
 
                 // Send requests
@@ -181,56 +148,50 @@ impl DhtServer {
                         None => break,
                     };
 
-                    let entry = running.vacant_entry();
-                    let mut t = match request {
-                        ClientRequest::GetPeers { info_hash, sender } => {
-                            let t = DhtGetPeers::new(&info_hash, table, sender, entry.key());
-                            DhtTraversal::GetPeers(t)
-                        },
-                        ClientRequest::Bootstrap { target, sender } => {
-                            let t = DhtBootstrap::new(&target, table, entry.key(), sender);
-                            DhtTraversal::Bootstrap(t)
-                        },
+                    match request {
                         ClientRequest::Announce { info_hash, sender } => {
-                            let t = DhtAnnounce::new(&info_hash, table, sender, entry.key());
-                            DhtTraversal::Announce(t)
-                        }
-                        ClientRequest::Ping { id, addr } => {
-                            let t = DhtPing::new(&id, &addr, entry.key());
-                            DhtTraversal::Ping(t)
-                        }
+                            let req = ProtoRequest::Announce { info_hash };
+                            if let Some(id) = self.dht.add_request(req) {
+                                self.pending.insert(id, sender);
+                            }
+                        },
+                        ClientRequest::GetPeers { info_hash, sender } => {
+                            let req = ProtoRequest::GetPeers { info_hash };
+                            if let Some(id) = self.dht.add_request(req) {
+                                self.pending.insert(id, sender);
+                            }
+                        },
                     };
-
-                    let done = t.add_requests(rpc).await;
-                    if !done {
-                        entry.insert(t);
-                    }
+                    self.process_events(&udp).await;
                 },
                 complete => break,
             }
         }
     }
-}
 
-impl RoutingTable {
-    fn read_nodes_with<F>(&mut self, response: &Response, mut f: F) -> anyhow::Result<()>
-    where
-        F: FnMut(&ContactRef),
-    {
-        if let Some(nodes) = response.body.get_bytes("nodes") {
-            for c in CompactNodes::new(nodes)? {
-                self.add_contact(&c);
-                f(&c);
+    async fn process_events(&mut self, socket: &UdpSocket) {
+        while let Some(event) = self.dht.poll() {
+            log::debug!("Received event: {:?}", event);
+            match event {
+                Event::FoundPeers { task_id: id, peers } => {
+                    if let Some(sender) = self.pending.remove(&id) {
+                        let _ = sender.send(peers);
+                    }
+                }
+                Event::Bootstrapped { .. } => {}
+                Event::Transmit {
+                    task_id,
+                    node_id,
+                    data,
+                    target,
+                } => match socket.send_to(&data, target).await {
+                    Ok(n) if n == data.len() => {}
+                    _ => self.dht.set_failed(task_id, &node_id, &target),
+                },
+                Event::Reply { data, target } => {
+                    socket.send_to(&data, target).await.ok();
+                }
             }
         }
-
-        if let Some(nodes6) = response.body.get_bytes("nodes6") {
-            for c in CompactNodesV6::new(nodes6)? {
-                self.add_contact(&c);
-                f(&c);
-            }
-        }
-
-        Ok(())
     }
 }

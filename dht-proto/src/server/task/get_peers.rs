@@ -1,45 +1,45 @@
 use crate::id::NodeId;
 use crate::msg::recv::Response;
 use crate::msg::send::GetPeers;
-use crate::server::PeerSender;
-use crate::server::RpcMgr;
+use crate::server::rpc::Event;
+use crate::server::RpcManager;
 use crate::table::RoutingTable;
 use ben::{Decoder, Encode};
 use std::collections::HashSet;
 use std::net::SocketAddr;
 
-use super::traversal::Traversal;
+use super::base::BaseTask;
+use super::{Task, TaskId};
 
-pub struct DhtGetPeers {
-    pub traversal: Traversal,
+pub struct GetPeersTask {
+    pub base: BaseTask,
     peers: HashSet<SocketAddr>,
-    sender: PeerSender,
 }
 
-impl DhtGetPeers {
-    pub fn new(
-        info_hash: &NodeId,
-        table: &RoutingTable,
-        sender: PeerSender,
-        traversal_id: usize,
-    ) -> Self {
+impl GetPeersTask {
+    pub fn new(info_hash: &NodeId, table: &RoutingTable, task_id: TaskId) -> Self {
         Self {
-            traversal: Traversal::new(info_hash, table, traversal_id),
+            base: BaseTask::new(info_hash, table, task_id),
             peers: HashSet::new(),
-            sender,
         }
     }
+}
 
-    pub fn handle_response(
+impl Task for GetPeersTask {
+    fn id(&self) -> TaskId {
+        self.base.task_id
+    }
+
+    fn handle_response(
         &mut self,
         resp: &Response<'_>,
         addr: &SocketAddr,
         table: &mut RoutingTable,
-        rpc: &mut RpcMgr<'_>,
+        rpc: &mut RpcManager,
         has_id: bool,
     ) {
         log::trace!("Handle GET_PEERS response");
-        self.traversal.handle_response(resp, addr, table, has_id);
+        self.base.handle_response(resp, addr, table, has_id);
 
         if let Some(token) = resp.body.get_bytes("token") {
             rpc.tokens.insert(*addr, token.to_vec());
@@ -51,32 +51,34 @@ impl DhtGetPeers {
         }
     }
 
-    pub fn set_failed(&mut self, id: &NodeId, addr: &SocketAddr) {
-        self.traversal.set_failed(id, addr);
+    fn set_failed(&mut self, id: &NodeId, addr: &SocketAddr) {
+        self.base.set_failed(id, addr);
     }
 
-    pub async fn add_requests(&mut self, rpc: &mut RpcMgr<'_>) -> bool {
+    fn add_requests(&mut self, rpc: &mut RpcManager) -> bool {
         log::trace!("Add GET_PEERS requests");
 
-        let info_hash = self.traversal.target;
-        self.traversal
-            .add_requests(rpc, |rpc| {
-                let msg = GetPeers {
-                    txn_id: rpc.new_txn(),
-                    id: &rpc.own_id,
-                    info_hash: &info_hash,
-                };
+        let info_hash = self.base.target;
+        self.base.add_requests(rpc, |buf, rpc| {
+            let msg = GetPeers {
+                txn_id: rpc.new_txn(),
+                id: &rpc.own_id,
+                info_hash: &info_hash,
+            };
 
-                log::trace!("Send {:?}", msg);
+            log::trace!("Send {:?}", msg);
 
-                msg.encode(&mut rpc.buf);
-                msg.txn_id
-            })
-            .await
+            msg.encode(buf);
+            msg.txn_id
+        })
     }
 
-    pub fn done(self) {
-        self.sender.send(self.peers).unwrap()
+    fn done(&mut self, rpc: &mut RpcManager) {
+        log::info!("Found {} peers", self.peers.len());
+        rpc.add_event(Event::FoundPeers {
+            task_id: self.base.task_id,
+            peers: std::mem::take(&mut self.peers),
+        });
     }
 }
 

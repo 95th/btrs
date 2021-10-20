@@ -2,20 +2,22 @@ use crate::contact::ContactRef;
 use crate::id::NodeId;
 use crate::msg::recv::Response;
 use crate::msg::send::Ping;
-use crate::server::request::{DhtNode, Status};
-use crate::server::RpcMgr;
+use crate::server::task::{DhtNode, Status};
+use crate::server::RpcManager;
 use crate::table::RoutingTable;
 use ben::Encode;
 use std::net::SocketAddr;
 
-pub struct DhtPing {
+use super::{Task, TaskId};
+
+pub struct PingTask {
     node: DhtNode,
     done: bool,
-    traversal_id: usize,
+    task_id: TaskId,
 }
 
-impl DhtPing {
-    pub fn new(id: &NodeId, addr: &SocketAddr, traversal_id: usize) -> Self {
+impl PingTask {
+    pub fn new(id: &NodeId, addr: &SocketAddr, task_id: TaskId) -> Self {
         Self {
             node: DhtNode {
                 id: *id,
@@ -23,22 +25,23 @@ impl DhtPing {
                 status: Status::INITIAL,
             },
             done: false,
-            traversal_id,
+            task_id,
         }
     }
+}
 
-    pub fn set_failed(&mut self, id: &NodeId) {
-        if &self.node.id == id {
-            self.node.status.insert(Status::FAILED);
-        }
-        self.done = true;
+impl Task for PingTask {
+    fn id(&self) -> TaskId {
+        self.task_id
     }
 
-    pub fn handle_response(
+    fn handle_response(
         &mut self,
-        resp: &Response,
+        resp: &Response<'_>,
         addr: &SocketAddr,
         table: &mut RoutingTable,
+        _rpc: &mut RpcManager,
+        _has_id: bool,
     ) {
         log::trace!("Handle PING response");
 
@@ -54,33 +57,33 @@ impl DhtPing {
         self.done = true;
     }
 
-    pub async fn add_requests(&mut self, rpc: &mut RpcMgr<'_>) -> bool {
+    fn set_failed(&mut self, id: &NodeId, _addr: &SocketAddr) {
+        if &self.node.id == id {
+            self.node.status.insert(Status::FAILED);
+        }
+        self.done = true;
+    }
+
+    fn add_requests(&mut self, rpc: &mut RpcManager) -> bool {
         log::trace!("Invoke PING request");
         if self.done {
             return true;
         }
 
         let txn_id = rpc.new_txn();
+
+        let mut buf = Vec::new();
         let msg = Ping {
             txn_id,
             id: &rpc.own_id,
         };
 
-        msg.encode(&mut rpc.buf);
+        msg.encode(&mut buf);
 
-        match rpc.send(self.node.addr).await {
-            Ok(_) => {
-                self.node.status.insert(Status::QUERIED);
-                rpc.txns
-                    .insert(txn_id, &self.node.id, &self.node.addr, self.traversal_id);
-                false
-            }
-            Err(e) => {
-                log::warn!("{}", e);
-                true
-            }
-        }
+        rpc.transmit(self.id(), self.node.id, buf, self.node.addr);
+        self.node.status.insert(Status::QUERIED);
+        rpc.txns
+            .insert(txn_id, &self.node.id, &self.node.addr, self.task_id);
+        false
     }
-
-    pub fn done(self) {}
 }

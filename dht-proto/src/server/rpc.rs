@@ -1,6 +1,5 @@
 use ben::{Decoder, Encoder, Parser};
 use slab::Slab;
-use tokio::net::UdpSocket;
 
 use crate::{
     bucket::Bucket,
@@ -13,30 +12,30 @@ use crate::{
 };
 use hashbrown::HashMap;
 use std::{
+    collections::{HashSet, VecDeque},
+    fmt,
     net::{IpAddr, SocketAddr},
     time::{Duration, Instant},
 };
 
-use super::request::DhtTraversal;
+use super::{task::Task, TaskId};
 
-pub struct RpcMgr<'a> {
-    udp: &'a UdpSocket,
+pub struct RpcManager {
     txn_id: TxnId,
     pub own_id: NodeId,
     pub tokens: HashMap<SocketAddr, Vec<u8>>,
     pub txns: Transactions,
-    pub buf: Vec<u8>,
+    pub events: VecDeque<Event>,
 }
 
-impl<'a> RpcMgr<'a> {
-    pub fn new(own_id: NodeId, udp: &'a UdpSocket) -> Self {
+impl RpcManager {
+    pub fn new(own_id: NodeId) -> Self {
         Self {
-            udp,
             txn_id: TxnId(0),
             own_id,
             tokens: HashMap::new(),
             txns: Transactions::new(),
-            buf: Vec::with_capacity(1024),
+            events: VecDeque::new(),
         }
     }
 
@@ -44,37 +43,45 @@ impl<'a> RpcMgr<'a> {
         self.txn_id.next_id()
     }
 
-    pub async fn send(&mut self, addr: SocketAddr) -> anyhow::Result<()> {
-        let to_write = self.buf.len();
-        let result = self.udp.send_to(&self.buf, addr).await;
-        self.buf.clear();
-        let written = result?;
-        anyhow::ensure!(written == to_write, "Couldn't write the whole message");
-        Ok(())
+    pub fn transmit(&mut self, task_id: TaskId, node_id: NodeId, data: Vec<u8>, addr: SocketAddr) {
+        self.add_event(Event::Transmit {
+            task_id,
+            node_id,
+            data,
+            target: addr,
+        });
     }
 
-    pub async fn handle_response(
+    pub fn reply(&mut self, data: Vec<u8>, addr: SocketAddr) {
+        self.add_event(Event::Reply { data, target: addr });
+    }
+
+    pub fn add_event(&mut self, event: Event) {
+        self.events.push_back(event)
+    }
+
+    pub fn handle_response(
         &mut self,
         msg: Msg<'_>,
         addr: SocketAddr,
         table: &mut RoutingTable,
-        running: &mut Slab<DhtTraversal>,
+        running: &mut Slab<Box<dyn Task>>,
     ) {
         log::trace!("Received msg: {:?}", msg);
 
         match msg {
-            Msg::Response(r) => self.handle_ok(r, addr, table, running).await,
-            Msg::Error(e) => self.handle_error(e, addr, table, running).await,
-            Msg::Query(q) => self.handle_query(q, addr, table).await,
+            Msg::Response(r) => self.handle_ok(r, addr, table, running),
+            Msg::Error(e) => self.handle_error(e, addr, table, running),
+            Msg::Query(q) => self.handle_query(q, addr, table),
         }
     }
 
-    async fn handle_ok(
+    fn handle_ok(
         &mut self,
         resp: Response<'_>,
         addr: SocketAddr,
         table: &mut RoutingTable,
-        running: &mut Slab<DhtTraversal>,
+        running: &mut Slab<Box<dyn Task>>,
     ) {
         let req = match self.txns.remove(resp.txn_id) {
             Some(req) => req,
@@ -95,31 +102,31 @@ impl<'a> RpcMgr<'a> {
             );
             table.failed(&req.id);
 
-            if let Some(t) = running.get_mut(req.traversal_id) {
+            if let Some(t) = running.get_mut(req.task_id) {
                 t.set_failed(&req.id, &addr);
-                let done = t.add_requests(self).await;
+                let done = t.add_requests(self);
                 if done {
-                    running.remove(req.traversal_id).done();
+                    running.remove(req.task_id).done(self);
                 }
             }
             return;
         }
 
-        if let Some(t) = running.get_mut(req.traversal_id) {
+        if let Some(t) = running.get_mut(req.task_id) {
             t.handle_response(&resp, &addr, table, self, req.has_id);
-            let done = t.add_requests(self).await;
+            let done = t.add_requests(self);
             if done {
-                running.remove(req.traversal_id).done();
+                running.remove(req.task_id).done(self);
             }
         }
     }
 
-    async fn handle_error(
+    fn handle_error(
         &mut self,
         err: ErrorResponse<'_>,
         addr: SocketAddr,
         table: &mut RoutingTable,
-        running: &mut Slab<DhtTraversal>,
+        running: &mut Slab<Box<dyn Task>>,
     ) {
         let req = match self.txns.remove(err.txn_id) {
             Some(req) => req,
@@ -133,20 +140,20 @@ impl<'a> RpcMgr<'a> {
             table.failed(&req.id);
         }
 
-        if let Some(t) = running.get_mut(req.traversal_id) {
+        if let Some(t) = running.get_mut(req.task_id) {
             t.set_failed(&req.id, &addr);
-            let done = t.add_requests(self).await;
+            let done = t.add_requests(self);
             if done {
-                running.remove(req.traversal_id).done();
+                running.remove(req.task_id).done(self);
             }
         }
     }
 
-    async fn handle_query(&mut self, query: Query<'_>, addr: SocketAddr, table: &mut RoutingTable) {
+    fn handle_query(&mut self, query: Query<'_>, addr: SocketAddr, table: &mut RoutingTable) {
         table.heard_from(query.id);
 
-        self.buf.clear();
-        let mut dict = self.buf.add_dict();
+        let mut buf = Vec::new();
+        let mut dict = buf.add_dict();
         match addr.ip() {
             IpAddr::V4(a) => dict.add("ip", &a.octets()),
             IpAddr::V6(a) => dict.add("ip", &a.octets()),
@@ -191,19 +198,17 @@ impl<'a> RpcMgr<'a> {
 
         if log::log_enabled!(log::Level::Debug) {
             let mut p = Parser::new();
-            let d = p.parse::<Decoder>(&self.buf).unwrap();
+            let d = p.parse::<Decoder>(&buf).unwrap();
             log::debug!("Sending reply: {:?}", d);
         }
 
-        if let Err(e) = self.send(addr).await {
-            log::warn!("Error in replying to query: {}", e);
-        }
+        self.reply(buf, addr);
     }
 
-    pub async fn check_timeouts(
+    pub fn check_timeouts(
         &mut self,
         table: &mut RoutingTable,
-        running: &mut Slab<DhtTraversal>,
+        running: &mut Slab<Box<dyn Task>>,
         timed_out: &mut Vec<(TxnId, Request)>,
     ) {
         if self.txns.pending.is_empty() {
@@ -214,7 +219,7 @@ impl<'a> RpcMgr<'a> {
         let cutoff = Instant::now() - self.txns.timeout;
 
         log::debug!(
-            "{} pending txns in {} traversals",
+            "{} pending txns in {} tasks",
             self.txns.pending.len(),
             running.len()
         );
@@ -231,11 +236,11 @@ impl<'a> RpcMgr<'a> {
                 table.failed(&req.id);
             }
 
-            if let Some(t) = running.get_mut(req.traversal_id) {
+            if let Some(t) = running.get_mut(req.task_id) {
                 t.set_failed(&req.id, &req.addr);
-                let done = t.add_requests(self).await;
+                let done = t.add_requests(self);
                 if done {
-                    running.remove(req.traversal_id).done();
+                    running.remove(req.task_id).done(self);
                 }
             }
         }
@@ -253,17 +258,17 @@ pub struct Request {
     pub addr: SocketAddr,
     pub sent: Instant,
     pub has_id: bool,
-    pub traversal_id: usize,
+    pub task_id: TaskId,
 }
 
 impl Request {
-    pub fn new(id: &NodeId, addr: &SocketAddr, traversal_id: usize) -> Self {
+    pub fn new(id: &NodeId, addr: &SocketAddr, task_id: TaskId) -> Self {
         Self {
             id: if id.is_zero() { NodeId::gen() } else { *id },
             addr: *addr,
             sent: Instant::now(),
             has_id: !id.is_zero(),
-            traversal_id,
+            task_id,
         }
     }
 }
@@ -285,12 +290,42 @@ impl Transactions {
         }
     }
 
-    pub fn insert(&mut self, txn_id: TxnId, id: &NodeId, addr: &SocketAddr, traversal_id: usize) {
-        self.pending
-            .insert(txn_id, Request::new(id, addr, traversal_id));
+    pub fn insert(&mut self, txn_id: TxnId, id: &NodeId, addr: &SocketAddr, task_id: TaskId) {
+        self.pending.insert(txn_id, Request::new(id, addr, task_id));
     }
 
     pub fn remove(&mut self, txn_id: TxnId) -> Option<Request> {
         self.pending.remove(&txn_id)
+    }
+}
+
+pub enum Event {
+    FoundPeers {
+        task_id: TaskId,
+        peers: HashSet<SocketAddr>,
+    },
+    Bootstrapped {
+        task_id: TaskId,
+    },
+    Transmit {
+        task_id: TaskId,
+        node_id: NodeId,
+        data: Vec<u8>,
+        target: SocketAddr,
+    },
+    Reply {
+        data: Vec<u8>,
+        target: SocketAddr,
+    },
+}
+
+impl fmt::Debug for Event {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::FoundPeers { .. } => f.debug_struct("FoundPeers").finish(),
+            Self::Bootstrapped { .. } => f.debug_struct("Bootstrapped").finish(),
+            Self::Transmit { .. } => f.debug_struct("Transmit").finish(),
+            Self::Reply { .. } => f.debug_struct("Reply").finish(),
+        }
     }
 }

@@ -4,50 +4,51 @@ use crate::bucket::Bucket;
 use crate::id::NodeId;
 use crate::msg::recv::Response;
 use crate::msg::send::AnnouncePeer;
-use crate::server::request::Status;
-use crate::server::PeerSender;
-use crate::server::RpcMgr;
+use crate::server::task::Status;
+use crate::server::RpcManager;
 use crate::table::RoutingTable;
 use std::net::SocketAddr;
 
-use super::DhtGetPeers;
+use super::{GetPeersTask, Task, TaskId};
 
-pub struct DhtAnnounce {
-    inner: DhtGetPeers,
+pub struct AnnounceTask {
+    get_peers: GetPeersTask,
 }
 
-impl DhtAnnounce {
-    pub fn new(
-        info_hash: &NodeId,
-        table: &mut RoutingTable,
-        sender: PeerSender,
-        traversal_id: usize,
-    ) -> Self {
+impl AnnounceTask {
+    pub fn new(info_hash: &NodeId, table: &mut RoutingTable, task_id: TaskId) -> Self {
         Self {
-            inner: DhtGetPeers::new(info_hash, table, sender, traversal_id),
+            get_peers: GetPeersTask::new(info_hash, table, task_id),
         }
     }
+}
 
-    pub fn handle_response(
+impl Task for AnnounceTask {
+    fn id(&self) -> TaskId {
+        self.get_peers.id()
+    }
+
+    fn handle_response(
         &mut self,
         resp: &Response<'_>,
         addr: &SocketAddr,
         table: &mut RoutingTable,
-        rpc: &mut RpcMgr<'_>,
+        rpc: &mut RpcManager,
         has_id: bool,
     ) {
         log::trace!("Handle ANNOUNCE response");
-        self.inner.handle_response(resp, addr, table, rpc, has_id);
+        self.get_peers
+            .handle_response(resp, addr, table, rpc, has_id);
     }
 
-    pub fn set_failed(&mut self, id: &NodeId, addr: &SocketAddr) {
-        self.inner.set_failed(id, addr);
+    fn set_failed(&mut self, id: &NodeId, addr: &SocketAddr) {
+        self.get_peers.set_failed(id, addr);
     }
 
-    pub async fn add_requests(&mut self, rpc: &mut RpcMgr<'_>) -> bool {
+    fn add_requests(&mut self, rpc: &mut RpcManager) -> bool {
         log::trace!("Add ANNOUNCE's GET_PEERS requests");
 
-        let done = self.inner.add_requests(rpc).await;
+        let done = self.get_peers.add_requests(rpc);
         if !done {
             return false;
         }
@@ -55,7 +56,7 @@ impl DhtAnnounce {
         log::trace!("Finished ANNOUNCE's GET_PEERS. Time to announce");
 
         let mut announce_count = 0;
-        for n in &self.inner.traversal.nodes {
+        for n in &self.get_peers.base.nodes {
             if announce_count == Bucket::MAX_LEN {
                 break;
             }
@@ -73,26 +74,21 @@ impl DhtAnnounce {
                 }
             };
 
+            let mut buf = Vec::new();
             let msg = AnnouncePeer {
                 txn_id,
                 id: &rpc.own_id,
-                info_hash: &self.inner.traversal.target,
+                info_hash: &self.get_peers.base.target,
                 port: 0,
                 implied_port: true,
                 token,
             };
 
-            msg.encode(&mut rpc.buf);
+            msg.encode(&mut buf);
 
-            match rpc.send(n.addr).await {
-                Ok(_) => {
-                    log::debug!("Announced to {}", n.addr);
-                    announce_count += 1;
-                }
-                Err(e) => {
-                    log::warn!("Failed to announce to {}: {}", n.addr, e);
-                }
-            }
+            rpc.transmit(self.id(), n.id, buf, n.addr);
+            log::debug!("Announced to {}", n.addr);
+            announce_count += 1;
         }
 
         if announce_count == 0 {
@@ -102,7 +98,7 @@ impl DhtAnnounce {
         true
     }
 
-    pub fn done(self) {
-        self.inner.done()
+    fn done(&mut self, rpc: &mut RpcManager) {
+        self.get_peers.done(rpc)
     }
 }

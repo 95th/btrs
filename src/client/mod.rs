@@ -160,7 +160,7 @@ impl<C: AsyncStream> Client<C> {
         if log::log_enabled!(log::Level::Trace) {
             let mut parser = ben::Parser::new();
             log::trace!(
-                "Send extended message : {:?} ; payload: {:#?}",
+                "Send extended message : {:?} ; payload: {:?}",
                 msg,
                 parser.parse::<Decoder>(&data).unwrap()
             );

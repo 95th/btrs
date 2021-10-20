@@ -5,7 +5,7 @@ authors = ["Gurwinder Singh <vargwin@gmail.com>"]
 edition = "2018"
 
 [workspace]
-members = ["dht", "ben"]
+members = ["dht", "ben", "dht-proto"]
 
 [dependencies]
 url = "2.2.0"
