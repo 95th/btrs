@@ -88,7 +88,7 @@ impl Dht {
         use ClientRequest::*;
 
         let entry = self.tasks.vacant_entry();
-        let tid = entry.key();
+        let tid = TaskId(entry.key());
         let table = &mut self.table;
         let mut t: Box<dyn Task> = match request {
             GetPeers { info_hash } => Box::new(GetPeersTask::new(&info_hash, table, tid)),
@@ -106,8 +106,8 @@ impl Dht {
         }
     }
 
-    pub fn set_failed(&mut self, task_id: usize, id: &NodeId, addr: &SocketAddr) {
-        if let Some(t) = self.tasks.get_mut(task_id) {
+    pub fn set_failed(&mut self, task_id: TaskId, id: &NodeId, addr: &SocketAddr) {
+        if let Some(t) = self.tasks.get_mut(task_id.0) {
             t.set_failed(id, addr);
         }
     }

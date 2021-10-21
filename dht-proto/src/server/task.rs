@@ -34,7 +34,8 @@ pub trait Task: Send {
     fn done(&mut self, _rpc: &mut RpcManager) {}
 }
 
-pub type TaskId = usize;
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct TaskId(pub(crate) usize);
 
 pub struct DhtNode {
     pub id: NodeId,

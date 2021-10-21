@@ -102,21 +102,21 @@ impl RpcManager {
             );
             table.failed(&req.id);
 
-            if let Some(task) = tasks.get_mut(req.task_id) {
+            if let Some(task) = tasks.get_mut(req.task_id.0) {
                 task.set_failed(&req.id, &addr);
                 let done = task.add_requests(self);
                 if done {
-                    tasks.remove(req.task_id).done(self);
+                    tasks.remove(req.task_id.0).done(self);
                 }
             }
             return;
         }
 
-        if let Some(task) = tasks.get_mut(req.task_id) {
+        if let Some(task) = tasks.get_mut(req.task_id.0) {
             task.handle_response(&resp, &addr, table, self, req.has_id);
             let done = task.add_requests(self);
             if done {
-                tasks.remove(req.task_id).done(self);
+                tasks.remove(req.task_id.0).done(self);
             }
         }
     }
@@ -140,11 +140,11 @@ impl RpcManager {
             table.failed(&req.id);
         }
 
-        if let Some(task) = tasks.get_mut(req.task_id) {
+        if let Some(task) = tasks.get_mut(req.task_id.0) {
             task.set_failed(&req.id, &addr);
             let done = task.add_requests(self);
             if done {
-                tasks.remove(req.task_id).done(self);
+                tasks.remove(req.task_id.0).done(self);
             }
         }
     }
@@ -236,11 +236,11 @@ impl RpcManager {
                 table.failed(&req.id);
             }
 
-            if let Some(task) = tasks.get_mut(req.task_id) {
+            if let Some(task) = tasks.get_mut(req.task_id.0) {
                 task.set_failed(&req.id, &req.addr);
                 let done = task.add_requests(self);
                 if done {
-                    tasks.remove(req.task_id).done(self);
+                    tasks.remove(req.task_id.0).done(self);
                 }
             }
         }
