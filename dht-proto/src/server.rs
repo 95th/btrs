@@ -90,18 +90,18 @@ impl Dht {
         let entry = self.tasks.vacant_entry();
         let tid = TaskId(entry.key());
         let table = &mut self.table;
-        let mut t: Box<dyn Task> = match request {
+        let mut task: Box<dyn Task> = match request {
             GetPeers { info_hash } => Box::new(GetPeersTask::new(&info_hash, table, tid)),
             Bootstrap { target } => Box::new(BootstrapTask::new(&target, table, tid)),
             Announce { info_hash } => Box::new(AnnounceTask::new(&info_hash, table, tid)),
             Ping { id, addr } => Box::new(PingTask::new(&id, &addr, tid)),
         };
 
-        let done = t.add_requests(&mut self.rpc);
+        let done = task.add_requests(&mut self.rpc);
         if done {
             None
         } else {
-            entry.insert(t);
+            entry.insert(task);
             Some(tid)
         }
     }

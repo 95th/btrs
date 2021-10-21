@@ -9,7 +9,10 @@ use std::{
     net::{Ipv6Addr, SocketAddr},
     time::{Duration, Instant},
 };
-use tokio::{net::UdpSocket, time::interval};
+use tokio::{
+    net::UdpSocket,
+    time::{interval, Interval},
+};
 
 pub type PeerSender = oneshot::Sender<HashSet<SocketAddr>>;
 
@@ -80,7 +83,7 @@ pub struct DhtDriver {
 
 impl DhtDriver {
     pub async fn run(mut self) {
-        let udp = match UdpSocket::bind((Ipv6Addr::UNSPECIFIED, self.port)).await {
+        let socket = &match UdpSocket::bind((Ipv6Addr::UNSPECIFIED, self.port)).await {
             Ok(x) => x,
             Err(e) => {
                 log::warn!("Cannot open UDP socket: {}", e);
@@ -90,43 +93,19 @@ impl DhtDriver {
 
         let recv_buf: &mut [u8] = &mut [0; 1024];
         let mut rx = self.rx.take().unwrap();
-
         let mut timer = interval(Duration::from_secs(1));
 
-        // Wait for bootstrapping
-        self.process_events(&udp).await;
-        while !self.dht.is_idle() {
-            select! {
-                time = timer.tick().fuse() => {
-                    self.dht.tick(time.into_std());
-                    self.process_events(&udp).await;
-                },
-
-                // Listen for response
-                resp = udp.recv_from(recv_buf).fuse() => {
-                    let (n, addr) = match resp {
-                        Ok(x) => x,
-                        Err(e) => {
-                            log::warn!("Error: {}", e);
-                            continue;
-                        },
-                    };
-
-                    self.dht.receive(&recv_buf[..n], addr);
-                    self.process_events(&udp).await;
-                }
-            }
-        }
+        self.wait_for_bootstrap(socket, recv_buf, &mut timer).await;
 
         loop {
             select! {
                 time = timer.tick().fuse() => {
                     self.dht.tick(time.into_std());
-                    self.process_events(&udp).await;
+                    self.process_events(socket).await;
                 },
 
                 // Listen for response
-                resp = udp.recv_from(recv_buf).fuse() => {
+                resp = socket.recv_from(recv_buf).fuse() => {
                     let (n, addr) = match resp {
                         Ok(x) => x,
                         Err(e) => {
@@ -136,7 +115,7 @@ impl DhtDriver {
                     };
 
                     self.dht.receive(&recv_buf[..n], addr);
-                    self.process_events(&udp).await;
+                    self.process_events(socket).await;
                 },
 
                 // Send requests
@@ -162,9 +141,42 @@ impl DhtDriver {
                             }
                         },
                     };
-                    self.process_events(&udp).await;
+                    self.process_events(socket).await;
                 },
                 complete => break,
+            }
+        }
+    }
+
+    async fn wait_for_bootstrap(
+        &mut self,
+        socket: &UdpSocket,
+        recv_buf: &mut [u8],
+        timer: &mut Interval,
+    ) {
+        self.process_events(socket).await;
+
+        // Wait for bootstrapping
+        while !self.dht.is_idle() {
+            select! {
+                time = timer.tick().fuse() => {
+                    self.dht.tick(time.into_std());
+                    self.process_events(socket).await;
+                },
+
+                // Listen for response
+                resp = socket.recv_from(recv_buf).fuse() => {
+                    let (n, addr) = match resp {
+                        Ok(x) => x,
+                        Err(e) => {
+                            log::warn!("Error: {}", e);
+                            continue;
+                        },
+                    };
+
+                    self.dht.receive(&recv_buf[..n], addr);
+                    self.process_events(socket).await;
+                }
             }
         }
     }
