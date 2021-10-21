@@ -95,7 +95,7 @@ impl DhtDriver {
         let mut rx = self.rx.take().unwrap();
         let mut timer = interval(Duration::from_secs(1));
 
-        self.wait_for_bootstrap(socket, recv_buf, &mut timer).await;
+        self.wait_until_idle(socket, recv_buf, &mut timer).await;
 
         loop {
             select! {
@@ -148,7 +148,7 @@ impl DhtDriver {
         }
     }
 
-    async fn wait_for_bootstrap(
+    async fn wait_until_idle(
         &mut self,
         socket: &UdpSocket,
         recv_buf: &mut [u8],
@@ -156,9 +156,9 @@ impl DhtDriver {
     ) {
         self.process_events(socket).await;
 
-        // Wait for bootstrapping
         while !self.dht.is_idle() {
             select! {
+                // Check timeouts
                 time = timer.tick().fuse() => {
                     self.dht.tick(time.into_std());
                     self.process_events(socket).await;
