@@ -39,7 +39,7 @@ impl<'a> UdpTracker<'a> {
         let socket = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0)).await?;
         let addr = match req.resolved_addr {
             Some(a) => a,
-            None => resolve_addr(&req.url).await?,
+            None => resolve_addr(req.url).await?,
         };
 
         Ok(UdpTracker {

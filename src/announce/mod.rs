@@ -48,7 +48,7 @@ impl<'a> Tracker<'a> {
         tokio::time::sleep_until(self.next_announce.into()).await;
 
         log::trace!("Announce to {}", self.url);
-        let req = AnnounceRequest::new(&self.url, self.resolved_addr, info_hash, peer_id, 6881);
+        let req = AnnounceRequest::new(self.url, self.resolved_addr, info_hash, peer_id, 6881);
         let resp = match timeout(req.announce(&mut self.buf), 3).await {
             Ok(r) => {
                 self.interval = MIN_TRACKER_INTERVAL.max(r.interval);

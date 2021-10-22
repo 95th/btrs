@@ -113,7 +113,7 @@ impl MagnetUri {
             .iter()
             .map(|url| async move {
                 let mut t = Tracker::new(url);
-                t.announce(&self.info_hash, &peer_id).await
+                t.announce(&self.info_hash, peer_id).await
             })
             .collect();
 

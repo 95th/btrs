@@ -38,7 +38,7 @@ impl<'a> TorrentWorker<'a> {
             .map(|url| Tracker::new(url))
             .collect();
 
-        let work = WorkQueue::new(&torrent);
+        let work = WorkQueue::new(torrent);
 
         Self {
             peer_id: &torrent.peer_id,
