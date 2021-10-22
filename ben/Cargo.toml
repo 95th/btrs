@@ -2,7 +2,7 @@
 name = "ben"
 version = "0.2.0"
 authors = ["95th <vargwin@gmail.com>"]
-edition = "2018"
+edition = "2021"
 description = "A minimalistic Bencode parser"
 license = "MIT"
 

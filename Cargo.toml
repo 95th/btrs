@@ -2,7 +2,7 @@
 name = "btrs"
 version = "0.1.0"
 authors = ["Gurwinder Singh <vargwin@gmail.com>"]
-edition = "2018"
+edition = "2021"
 
 [workspace]
 members = ["dht", "ben", "dht-proto"]
