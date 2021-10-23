@@ -345,10 +345,10 @@ mod tests {
         let mut tx = Client::new(Cursor::new(&mut data));
         let mut payload = vec![];
 
-        let mut list = payload.add_list();
-        list.add(1);
-        list.add(2);
-        list.add(3);
+        let mut list = Encoder::new(&mut payload).list();
+        list.push(1);
+        list.push(2);
+        list.push(3);
         list.finish();
 
         tx.send_ext(1, payload).await.unwrap();

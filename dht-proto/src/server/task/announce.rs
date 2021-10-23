@@ -1,4 +1,4 @@
-use ben::Encode;
+use ben::{Encode, Encoder};
 
 use crate::bucket::Bucket;
 use crate::id::NodeId;
@@ -84,7 +84,7 @@ impl Task for AnnounceTask {
                 token,
             };
 
-            msg.encode(&mut buf);
+            msg.encode(Encoder::new(&mut buf));
 
             rpc.transmit(self.id(), n.id, buf, n.addr);
             log::debug!("Announced to {}", n.addr);

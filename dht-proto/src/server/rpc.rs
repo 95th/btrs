@@ -153,14 +153,14 @@ impl RpcManager {
         table.heard_from(query.id);
 
         let mut buf = Vec::new();
-        let mut dict = buf.add_dict();
+        let mut dict = Encoder::new(&mut buf).dict();
         match addr.ip() {
-            IpAddr::V4(a) => dict.add("ip", &a.octets()),
-            IpAddr::V6(a) => dict.add("ip", &a.octets()),
+            IpAddr::V4(a) => dict.insert("ip", &a.octets()),
+            IpAddr::V6(a) => dict.insert("ip", &a.octets()),
         }
 
-        let mut r = dict.add_dict("r");
-        r.add("id", &self.own_id);
+        let mut r = dict.insert_dict("r");
+        r.insert("id", &self.own_id);
 
         match query.kind {
             QueryKind::Ping => {
@@ -182,18 +182,18 @@ impl RpcManager {
                 for c in out {
                     c.write_compact(nodes);
                 }
-                r.add("nodes", &nodes[..]);
+                r.insert("nodes", &nodes[..]);
             }
             QueryKind::AnnouncePeer => {
                 log::warn!("Announce peer is not implemented fully");
             }
         }
 
-        r.add("p", addr.port() as i64);
+        r.insert("p", addr.port() as i64);
         r.finish();
 
-        dict.add("t", query.txn_id);
-        dict.add("y", "r");
+        dict.insert("t", query.txn_id);
+        dict.insert("y", "r");
         dict.finish();
 
         if log::log_enabled!(log::Level::Debug) {

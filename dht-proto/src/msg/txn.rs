@@ -12,7 +12,7 @@ impl TxnId {
 }
 
 impl Encode for TxnId {
-    fn encode<E: Encoder>(&self, enc: &mut E) {
-        enc.add_bytes(&self.0.to_be_bytes()[..]);
+    fn encode(&self, enc: Encoder) {
+        enc.bytes(&self.0.to_be_bytes()[..]);
     }
 }

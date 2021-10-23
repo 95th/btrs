@@ -332,29 +332,29 @@ pub enum MetadataMsg {
 }
 
 impl Encode for MetadataMsg {
-    fn encode<E: Encoder>(&self, encoder: &mut E) {
-        let mut dict = encoder.add_dict();
+    fn encode(&self, enc: Encoder) {
+        let mut dict = enc.dict();
         match *self {
             MetadataMsg::Handshake(id) => {
-                let mut m = dict.add_dict("m");
-                m.add("ut_metadata", i64::from(id));
+                let mut m = dict.insert_dict("m");
+                m.insert("ut_metadata", i64::from(id));
                 m.finish();
 
-                dict.add("p", 6881);
-                dict.add("reqq", 500);
+                dict.insert("p", 6881);
+                dict.insert("reqq", 500);
             }
             MetadataMsg::Request(piece) => {
-                dict.add("msg_type", msg_type::REQUEST);
-                dict.add("piece", piece);
+                dict.insert("msg_type", msg_type::REQUEST);
+                dict.insert("piece", piece);
             }
             MetadataMsg::Reject(piece) => {
-                dict.add("msg_type", msg_type::REJECT);
-                dict.add("piece", piece);
+                dict.insert("msg_type", msg_type::REJECT);
+                dict.insert("piece", piece);
             }
             MetadataMsg::Data(piece, total_size) => {
-                dict.add("msg_type", msg_type::DATA);
-                dict.add("piece", piece);
-                dict.add("total_size", total_size);
+                dict.insert("msg_type", msg_type::DATA);
+                dict.insert("piece", piece);
+                dict.insert("total_size", total_size);
             }
         }
         dict.finish();

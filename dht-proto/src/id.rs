@@ -123,8 +123,8 @@ impl DerefMut for NodeId {
 }
 
 impl Encode for NodeId {
-    fn encode<E: Encoder>(&self, enc: &mut E) {
-        enc.add_bytes(&self[..]);
+    fn encode(&self, enc: Encoder) {
+        enc.bytes(&self[..]);
     }
 }
 

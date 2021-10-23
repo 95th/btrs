@@ -9,16 +9,16 @@ pub struct Ping<'a> {
 }
 
 impl Encode for Ping<'_> {
-    fn encode<E: Encoder>(&self, enc: &mut E) {
-        let mut d = enc.add_dict();
+    fn encode(&self, enc: Encoder) {
+        let mut d = enc.dict();
 
-        let mut a = d.add_dict("a");
-        a.add("id", self.id);
+        let mut a = d.insert_dict("a");
+        a.insert("id", self.id);
         a.finish();
 
-        d.add("q", "ping");
-        d.add("t", self.txn_id);
-        d.add("y", "q");
+        d.insert("q", "ping");
+        d.insert("t", self.txn_id);
+        d.insert("y", "q");
     }
 }
 
@@ -30,17 +30,17 @@ pub struct FindNode<'a> {
 }
 
 impl Encode for FindNode<'_> {
-    fn encode<E: Encoder>(&self, enc: &mut E) {
-        let mut d = enc.add_dict();
+    fn encode(&self, enc: Encoder) {
+        let mut d = enc.dict();
 
-        let mut a = d.add_dict("a");
-        a.add("id", self.id);
-        a.add("target", self.target);
+        let mut a = d.insert_dict("a");
+        a.insert("id", self.id);
+        a.insert("target", self.target);
         a.finish();
 
-        d.add("q", "find_node");
-        d.add("t", self.txn_id);
-        d.add("y", "q");
+        d.insert("q", "find_node");
+        d.insert("t", self.txn_id);
+        d.insert("y", "q");
     }
 }
 
@@ -52,17 +52,17 @@ pub struct GetPeers<'a> {
 }
 
 impl Encode for GetPeers<'_> {
-    fn encode<E: Encoder>(&self, enc: &mut E) {
-        let mut d = enc.add_dict();
+    fn encode(&self, enc: Encoder) {
+        let mut d = enc.dict();
 
-        let mut a = d.add_dict("a");
-        a.add("id", self.id);
-        a.add("info_hash", self.info_hash);
+        let mut a = d.insert_dict("a");
+        a.insert("id", self.id);
+        a.insert("info_hash", self.info_hash);
         a.finish();
 
-        d.add("q", "get_peers");
-        d.add("t", self.txn_id);
-        d.add("y", "q");
+        d.insert("q", "get_peers");
+        d.insert("t", self.txn_id);
+        d.insert("y", "q");
     }
 }
 
@@ -77,20 +77,20 @@ pub struct AnnouncePeer<'a> {
 }
 
 impl Encode for AnnouncePeer<'_> {
-    fn encode<E: Encoder>(&self, enc: &mut E) {
-        let mut d = enc.add_dict();
+    fn encode(&self, enc: Encoder) {
+        let mut d = enc.dict();
 
-        let mut a = d.add_dict("a");
-        a.add("id", self.id);
-        a.add("implied_port", self.implied_port as i64);
-        a.add("info_hash", self.info_hash);
-        a.add("port", self.port as i64);
-        a.add("token", self.token);
+        let mut a = d.insert_dict("a");
+        a.insert("id", self.id);
+        a.insert("implied_port", self.implied_port as i64);
+        a.insert("info_hash", self.info_hash);
+        a.insert("port", self.port as i64);
+        a.insert("token", self.token);
         a.finish();
 
-        d.add("q", "announce_peer");
-        d.add("t", self.txn_id);
-        d.add("y", "q");
+        d.insert("q", "announce_peer");
+        d.insert("t", self.txn_id);
+        d.insert("y", "q");
     }
 }
 
@@ -107,7 +107,7 @@ impl Encode for AnnouncePeer<'_> {
 // }
 
 // impl Encode for Error {
-//     fn encode<E: Encoder>(&self, enc: &mut E) {
+//     fn encode(&self, enc: Encoder) {
 //         use ErrorKind::*;
 //         let code = match self.kind {
 //             Generic => 201,

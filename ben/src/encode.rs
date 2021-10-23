@@ -1,53 +1,90 @@
 use itoa::Buffer;
 use std::collections::BTreeMap;
 
+pub struct Encoder<'a> {
+    buf: &'a mut Vec<u8>,
+}
+
+impl<'a> Encoder<'a> {
+    #[inline(always)]
+    pub fn new(buf: &'a mut Vec<u8>) -> Self {
+        Self { buf }
+    }
+
+    pub fn int(self, value: i64) {
+        self.buf.push(b'i');
+        let mut fmt = Buffer::new();
+        self.buf.extend(fmt.format(value).as_bytes());
+        self.buf.push(b'e');
+    }
+
+    pub fn bytes<I>(self, value: I)
+    where
+        I: AsRef<[u8]>,
+    {
+        let value = value.as_ref();
+        let mut fmt = Buffer::new();
+        self.buf.extend(fmt.format(value.len()).as_bytes());
+        self.buf.push(b':');
+        self.buf.extend(value);
+    }
+
+    pub fn bytes_exact(self, len: usize) -> BytesExact<'a> {
+        let mut fmt = Buffer::new();
+        self.buf.extend(fmt.format(len).as_bytes());
+        self.buf.push(b':');
+        BytesExact {
+            buf: self,
+            expected: len,
+            written: 0,
+        }
+    }
+
+    #[inline]
+    pub fn list(self) -> List<'a> {
+        List::new(self)
+    }
+
+    #[inline]
+    pub fn dict(self) -> Dict<'a> {
+        Dict::new(self)
+    }
+
+    #[inline]
+    pub fn ordered_dict<'k>(self) -> OrderedDict<'a, 'k> {
+        OrderedDict::new(self)
+    }
+
+    #[inline(always)]
+    fn cloned(&mut self) -> Encoder<'_> {
+        Encoder::new(self.buf)
+    }
+
+    #[inline(always)]
+    fn push(&mut self, c: u8) {
+        self.buf.push(c);
+    }
+
+    #[inline(always)]
+    fn extend(&mut self, bytes: &[u8]) {
+        self.buf.extend(bytes);
+    }
+}
+
 /// A trait for objects that can be bencoded.
 ///
 /// Types implementing `Encode` are able to be encoded with an instance of
 /// `Encoder`.
 pub trait Encode {
     /// Feed this value into given `Encoder`.
-    fn encode<E: Encoder>(&self, enc: &mut E);
+    fn encode(&self, enc: Encoder);
 
     /// Encode this value into a vector of bytes.
     fn encode_to_vec(&self) -> Vec<u8> {
-        let mut encoder = vec![];
-        self.encode(&mut encoder);
-        encoder
+        let mut buf = vec![];
+        self.encode(Encoder::new(&mut buf));
+        buf
     }
-}
-
-/// Bencode Encoder trait.
-pub trait Encoder: sealed::Sealed {
-    /// Encode an integer value.
-    fn add_int(&mut self, value: i64);
-
-    /// Encode a byte slice.
-    fn add_bytes(&mut self, value: &[u8]);
-
-    /// Create a new object which accepts exactly 'n' bytes lazily.
-    ///
-    /// The returned object's drop will panic if the total number of
-    /// added bytes is not equal to 'n'.
-    fn add_bytes_exact(&mut self, len: usize) -> BytesExact<'_>;
-
-    /// Encode string slice.
-    fn add_str(&mut self, value: &str);
-
-    /// Create a new `List` in this `Encoder`.
-    fn add_list(&mut self) -> List<'_>;
-
-    /// Create a new `Dict` in this `Encoder`.
-    fn add_dict(&mut self) -> Dict<'_>;
-
-    /// Create a new `OrderedDict` in this `Encoder`.
-    fn add_ordered_dict(&mut self) -> OrderedDict<'_, '_>;
-}
-
-mod sealed {
-    pub trait Sealed {}
-
-    impl Sealed for Vec<u8> {}
 }
 
 /// Add bytes lazily to given encoder.
@@ -55,8 +92,8 @@ mod sealed {
 /// # Panic
 /// Drop will panic if the expected number of bytes
 /// is not equal to actually added bytes.
-pub struct BytesExact<'a> {
-    buf: &'a mut Vec<u8>,
+pub struct BytesExact<'enc> {
+    buf: Encoder<'enc>,
     expected: usize,
     written: usize,
 }
@@ -78,50 +115,58 @@ impl Drop for BytesExact<'_> {
 }
 
 /// Bencode List representation.
-pub struct List<'a> {
-    buf: &'a mut Vec<u8>,
+pub struct List<'enc> {
+    enc: Encoder<'enc>,
 }
 
-impl List<'_> {
+impl<'enc> List<'enc> {
     /// Create a new list
-    fn new(buf: &mut Vec<u8>) -> List<'_> {
-        buf.push(b'l');
-        List { buf }
+    #[inline]
+    fn new(mut enc: Encoder<'enc>) -> List<'_> {
+        enc.push(b'l');
+        List { enc }
     }
 
     /// `Encode` a value in this list.
-    pub fn add<E: Encode>(&mut self, value: E) {
-        value.encode(self.buf);
+    #[inline]
+    pub fn push<E: Encode>(&mut self, value: E) {
+        value.encode(self.enc.cloned());
     }
 
     /// Create a new object which accepts exactly given number of
     /// bytes lazily.
-    pub fn add_bytes_exact(&mut self, len: usize) -> BytesExact<'_> {
-        self.buf.add_bytes_exact(len)
+    #[inline]
+    pub fn push_bytes_exact(&mut self, len: usize) -> BytesExact<'_> {
+        self.enc.cloned().bytes_exact(len)
     }
 
     /// Create a new `List` in this list.
-    pub fn add_list(&mut self) -> List<'_> {
-        self.buf.add_list()
+    #[inline]
+    pub fn push_list(&mut self) -> List<'_> {
+        self.enc.cloned().list()
     }
 
     /// Create a new `Dict` in this list.
-    pub fn add_dict(&mut self) -> Dict<'_> {
-        self.buf.add_dict()
+    #[inline]
+    pub fn push_dict(&mut self) -> Dict<'_> {
+        self.enc.cloned().dict()
     }
 
     /// Create a new `OrderedDict` in this list.
-    pub fn add_ordered_dict(&mut self) -> OrderedDict<'_, '_> {
-        self.buf.add_ordered_dict()
+    #[inline]
+    pub fn push_ordered_dict<'key>(&mut self) -> OrderedDict<'_, 'key> {
+        self.enc.cloned().ordered_dict()
     }
 
     /// Finish building this list.
+    #[inline]
     pub fn finish(self) {}
 }
 
 impl Drop for List<'_> {
+    #[inline]
     fn drop(&mut self) {
-        self.buf.push(b'e');
+        self.enc.push(b'e');
     }
 }
 
@@ -133,61 +178,68 @@ impl Drop for List<'_> {
 ///
 /// If the invariants don't meet in debug mode, the add calls will
 /// panic.
-pub struct Dict<'a> {
-    buf: &'a mut Vec<u8>,
+pub struct Dict<'enc> {
+    enc: Encoder<'enc>,
 
     #[cfg(debug_assertions)]
     last_key: Option<Vec<u8>>,
 }
 
-impl Dict<'_> {
+impl<'enc> Dict<'enc> {
     /// Create a new dict
-    fn new(buf: &mut Vec<u8>) -> Dict<'_> {
-        buf.push(b'd');
+    #[inline]
+    fn new(mut enc: Encoder<'enc>) -> Dict<'enc> {
+        enc.push(b'd');
         Dict {
-            buf,
+            enc,
             #[cfg(debug_assertions)]
             last_key: None,
         }
     }
 
     /// `Encode` the value for given key inside this dictionary.
-    pub fn add<E: Encode>(&mut self, key: &str, value: E) {
-        self.add_key(key);
-        value.encode(self.buf);
+    #[inline]
+    pub fn insert<E: Encode>(&mut self, key: &str, value: E) {
+        self.insert_key(key);
+        value.encode(self.enc.cloned());
     }
 
     /// Create a new object which accepts exactly given number of
     /// bytes lazily.
-    pub fn add_bytes_exact(&mut self, key: &str, len: usize) -> BytesExact<'_> {
-        self.add_key(key);
-        self.buf.add_bytes_exact(len)
+    #[inline]
+    pub fn insert_bytes_exact(&mut self, key: &str, len: usize) -> BytesExact<'_> {
+        self.insert_key(key);
+        self.enc.cloned().bytes_exact(len)
     }
 
     /// Create a new `List` for given key inside this dictionary.
-    pub fn add_list(&mut self, key: &str) -> List<'_> {
-        self.add_key(key);
-        self.buf.add_list()
+    #[inline]
+    pub fn insert_list(&mut self, key: &str) -> List<'_> {
+        self.insert_key(key);
+        self.enc.cloned().list()
     }
 
     /// Create a new `Dict` for given key inside this dictionary.
-    pub fn add_dict(&mut self, key: &str) -> Dict<'_> {
-        self.add_key(key);
-        self.buf.add_dict()
+    #[inline]
+    pub fn insert_dict(&mut self, key: &str) -> Dict<'_> {
+        self.insert_key(key);
+        self.enc.cloned().dict()
     }
 
     /// Create a new `OrderedDict` inside this dictionary.
-    pub fn add_ordered_dict(&mut self, key: &str) -> OrderedDict<'_, '_> {
-        self.add_key(key);
-        self.buf.add_ordered_dict()
+    #[inline]
+    pub fn insert_ordered_dict<'key>(&mut self, key: &str) -> OrderedDict<'_, 'key> {
+        self.insert_key(key);
+        self.enc.cloned().ordered_dict()
     }
 
-    fn add_key(&mut self, key: &str) {
+    fn insert_key(&mut self, key: &str) {
         self.assert_key_ordering(key);
-        self.buf.add_str(key);
+        self.enc.cloned().bytes(key);
     }
 
     #[cfg(debug_assertions)]
+    #[inline]
     fn assert_key_ordering(&mut self, key: &str) {
         let key = key.as_bytes();
         if let Some(last_key) = &mut self.last_key {
@@ -205,180 +257,147 @@ impl Dict<'_> {
     }
 
     #[cfg(not(debug_assertions))]
+    #[inline]
     fn assert_key_ordering(&mut self, _key: &str) {}
 
     /// Finish building this dictionary.
+    #[inline]
     pub fn finish(self) {}
 }
 
 impl Drop for Dict<'_> {
+    #[inline]
     fn drop(&mut self) {
-        self.buf.push(b'e');
+        self.enc.push(b'e');
     }
 }
 
 /// Bencode Ordered Dictionary representation.
 ///
 /// This will maintain keys to be unique and sorted.
-pub struct OrderedDict<'a, 'k> {
-    buf: &'a mut Vec<u8>,
-    entries: BTreeMap<&'k [u8], Vec<u8>>,
+pub struct OrderedDict<'enc, 'key> {
+    enc: Encoder<'enc>,
+    entries: BTreeMap<&'key [u8], Vec<u8>>,
 }
 
-impl<'a, 'k> OrderedDict<'a, 'k> {
+impl<'enc, 'key> OrderedDict<'enc, 'key> {
     /// Create a new dict
-    fn new(buf: &'a mut Vec<u8>) -> OrderedDict<'a, 'k> {
+    #[inline]
+    fn new(enc: Encoder<'enc>) -> OrderedDict<'enc, 'key> {
         OrderedDict {
-            buf,
+            enc,
             entries: BTreeMap::new(),
         }
     }
 
+    /// `Encode` the value for given key inside this dictionary.
+    #[inline]
+    pub fn insert<E: Encode>(&mut self, key: &'key str, value: E) {
+        let mut enc = self.entry(key);
+        value.encode(enc.cloned());
+    }
+
     /// Create a new `List` for given key inside this dictionary.
-    pub fn add_list(&mut self, key: &'k str) -> List<'_> {
-        self.add_key(key).add_list()
+    #[inline]
+    pub fn insert_list(&mut self, key: &'key str) -> List<'_> {
+        self.entry(key).list()
     }
 
     /// Create a new `Dict` for given key inside this dictionary.
-    pub fn add_dict(&mut self, key: &'k str) -> Dict<'_> {
-        self.add_key(key).add_dict()
+    #[inline]
+    pub fn insert_dict(&mut self, key: &'key str) -> Dict<'_> {
+        self.entry(key).dict()
     }
 
     /// Create a new `OrderedDict` inside this dictionary.
-    pub fn add_ordered_dict(&mut self, key: &'k str) -> OrderedDict<'_, '_> {
-        self.add_key(key).add_ordered_dict()
+    #[inline]
+    pub fn insert_ordered_dict(&mut self, key: &'key str) -> OrderedDict<'_, 'key> {
+        self.entry(key).ordered_dict()
     }
 
-    /// `Encode` the value for given key inside this dictionary.
-    pub fn add<E: Encode>(&mut self, key: &'k str, value: E) {
-        let buf = self.add_key(key);
-        value.encode(buf);
-    }
-
-    fn add_key(&mut self, key: &'k str) -> &mut Vec<u8> {
+    fn entry(&mut self, key: &'key str) -> Encoder<'_> {
         let buf = self.entries.entry(key.as_bytes()).or_insert_with(Vec::new);
         buf.clear();
-        buf
+        Encoder::new(buf)
     }
 
     /// Finish building this dictionary.
+    #[inline]
     pub fn finish(self) {}
 }
 
 impl Drop for OrderedDict<'_, '_> {
     fn drop(&mut self) {
-        self.buf.push(b'd');
+        self.enc.push(b'd');
         for (k, v) in &self.entries {
-            self.buf.add_bytes(k);
-            self.buf.extend(v);
+            self.enc.cloned().bytes(k);
+            self.enc.extend(v);
         }
-        self.buf.push(b'e');
-    }
-}
-
-impl Encoder for Vec<u8> {
-    #[inline]
-    fn add_int(&mut self, value: i64) {
-        self.push(b'i');
-        let mut buf = Buffer::new();
-        self.extend(buf.format(value).as_bytes());
-        self.push(b'e');
-    }
-
-    #[inline]
-    fn add_bytes(&mut self, value: &[u8]) {
-        let mut buf = Buffer::new();
-        self.extend(buf.format(value.len()).as_bytes());
-        self.push(b':');
-        self.extend(value);
-    }
-
-    #[inline]
-    fn add_bytes_exact(&mut self, len: usize) -> BytesExact<'_> {
-        let mut buf = Buffer::new();
-        self.extend(buf.format(len).as_bytes());
-        self.push(b':');
-        BytesExact {
-            buf: self,
-            expected: len,
-            written: 0,
-        }
-    }
-
-    #[inline]
-    fn add_str(&mut self, value: &str) {
-        self.add_bytes(value.as_bytes());
-    }
-
-    #[inline]
-    fn add_list(&mut self) -> List<'_> {
-        List::new(self)
-    }
-
-    #[inline]
-    fn add_dict(&mut self) -> Dict<'_> {
-        Dict::new(self)
-    }
-
-    #[inline]
-    fn add_ordered_dict(&mut self) -> OrderedDict<'_, '_> {
-        OrderedDict::new(self)
+        self.enc.push(b'e');
     }
 }
 
 impl<T: Encode> Encode for &T {
-    fn encode<E: Encoder>(&self, enc: &mut E) {
+    #[inline]
+    fn encode(&self, enc: Encoder) {
         (&**self).encode(enc);
     }
 }
 
 impl<T: Encode> Encode for Box<T> {
-    fn encode<E: Encoder>(&self, enc: &mut E) {
+    #[inline]
+    fn encode(&self, enc: Encoder) {
         (&**self).encode(enc);
     }
 }
 
 impl<T: Encode> Encode for Vec<T> {
-    fn encode<E: Encoder>(&self, enc: &mut E) {
-        let mut list = enc.add_list();
+    #[inline]
+    fn encode(&self, enc: Encoder) {
+        let mut list = enc.list();
         for t in self {
-            list.add(t);
+            list.push(t);
         }
         list.finish();
     }
 }
 
 impl<T: Encode> Encode for [T] {
-    fn encode<E: Encoder>(&self, enc: &mut E) {
-        let mut list = enc.add_list();
+    #[inline]
+    fn encode(&self, enc: Encoder) {
+        let mut list = enc.list();
         for t in self {
-            list.add(t);
+            list.push(t);
         }
         list.finish();
     }
 }
 
 impl Encode for &[u8] {
-    fn encode<E: Encoder>(&self, enc: &mut E) {
-        enc.add_bytes(self);
+    #[inline]
+    fn encode(&self, enc: Encoder) {
+        enc.bytes(self);
     }
 }
 
 impl Encode for &str {
-    fn encode<E: Encoder>(&self, enc: &mut E) {
-        enc.add_str(self);
+    #[inline]
+    fn encode(&self, enc: Encoder) {
+        enc.bytes(self);
     }
 }
 
 impl Encode for String {
-    fn encode<E: Encoder>(&self, enc: &mut E) {
-        enc.add_str(self);
+    #[inline]
+    fn encode(&self, enc: Encoder) {
+        enc.bytes(self);
     }
 }
 
 impl Encode for i64 {
-    fn encode<E: Encoder>(&self, enc: &mut E) {
-        enc.add_int(*self);
+    #[inline]
+    fn encode(&self, enc: Encoder) {
+        enc.int(*self);
     }
 }
 
@@ -386,8 +405,9 @@ macro_rules! impl_arr {
     ( $($len: expr),+ ) => {
         $(
             impl Encode for [u8; $len] {
-                fn encode<E: Encoder>(&self, enc: &mut E) {
-                    enc.add_bytes(&self[..]);
+                #[inline]
+                fn encode(&self, enc: Encoder) {
+                    enc.bytes(&self[..]);
                 }
             }
         )+
@@ -405,91 +425,91 @@ mod tests {
 
     #[test]
     fn encode_int() {
-        let mut e = vec![];
-        e.add_int(10);
-        assert_eq!(b"i10e", &e[..]);
+        let buf = &mut vec![];
+        Encoder::new(buf).int(10);
+        assert_eq!(b"i10e", &buf[..]);
     }
 
     #[test]
     fn encode_str() {
-        let mut e = vec![];
-        e.add_str("1000");
-        assert_eq!(b"4:1000", &e[..]);
+        let buf = &mut vec![];
+        Encoder::new(buf).bytes("1000");
+        assert_eq!(b"4:1000", &buf[..]);
     }
 
     #[test]
     fn encode_dict() {
-        let mut e = vec![];
-        let mut dict = e.add_dict();
-        dict.add("Hello", "World");
+        let buf = &mut vec![];
+        let mut dict = Encoder::new(buf).dict();
+        dict.insert("Hello", "World");
         dict.finish();
-        assert_eq!(b"d5:Hello5:Worlde", &e[..]);
+        assert_eq!(b"d5:Hello5:Worlde", &buf[..]);
     }
 
     #[test]
     fn encode_dict_drop() {
-        let mut e = vec![];
-        let mut dict = e.add_dict();
-        dict.add("Hello", "World");
+        let buf = &mut vec![];
+        let mut dict = Encoder::new(buf).dict();
+        dict.insert("Hello", "World");
         drop(dict);
-        assert_eq!(b"d5:Hello5:Worlde", &e[..]);
+        assert_eq!(b"d5:Hello5:Worlde", &buf[..]);
     }
 
     #[test]
     fn encode_dict_ordered() {
-        let mut e = vec![];
-        let mut dict = e.add_ordered_dict();
-        dict.add("b", "World");
-        dict.add("a", 100);
-        dict.add_list("d").add("a");
-        dict.add_dict("c").add("b", "x");
+        let buf = &mut vec![];
+        let mut dict = Encoder::new(buf).ordered_dict();
+        dict.insert("b", "World");
+        dict.insert("a", 100);
+        dict.insert_list("d").push("a");
+        dict.insert_dict("c").insert("b", "x");
         dict.finish();
-        assert_eq!(&b"d1:ai100e1:b5:World1:cd1:b1:xe1:dl1:aee"[..], &e[..]);
+        assert_eq!(&b"d1:ai100e1:b5:World1:cd1:b1:xe1:dl1:aee"[..], &buf[..]);
     }
 
     #[test]
     fn encode_dict_ordered_drop() {
-        let mut e = vec![];
-        let mut dict = e.add_ordered_dict();
-        dict.add("b", "World");
-        dict.add("a", 100);
-        dict.add_list("d").add("a");
-        dict.add_dict("c").add("b", "x");
+        let buf = &mut vec![];
+        let mut dict = Encoder::new(buf).ordered_dict();
+        dict.insert("b", "World");
+        dict.insert("a", 100);
+        dict.insert_list("d").push("a");
+        dict.insert_dict("c").insert("b", "x");
         drop(dict);
-        assert_eq!(&b"d1:ai100e1:b5:World1:cd1:b1:xe1:dl1:aee"[..], &e[..]);
+        assert_eq!(&b"d1:ai100e1:b5:World1:cd1:b1:xe1:dl1:aee"[..], &buf[..]);
     }
 
     #[test]
     fn encode_dict_ordered_duplicate_keys() {
-        let mut e = vec![];
-        let mut dict = e.add_ordered_dict();
-        dict.add("b", "World");
-        dict.add("a", "Foo");
-        dict.add("a", "Hello");
+        let buf = &mut vec![];
+        let mut dict = Encoder::new(buf).ordered_dict();
+        dict.insert("b", "World");
+        dict.insert("a", "Foo");
+        dict.insert("a", "Hello");
         dict.finish();
-        assert_eq!(&b"d1:a5:Hello1:b5:Worlde"[..], &e[..]);
+        assert_eq!(&b"d1:a5:Hello1:b5:Worlde"[..], &buf[..]);
     }
 
     #[test]
     fn encode_list() {
-        let mut e = vec![];
-        let mut list = e.add_list();
-        list.add("Hello");
-        list.add("World");
-        list.add(123);
+        let buf = &mut vec![];
+        let mut list = Encoder::new(buf).list();
+        list.push("Hello");
+        list.push("World");
+        list.push(123);
         list.finish();
-        assert_eq!(b"l5:Hello5:Worldi123ee", &e[..]);
+        assert_eq!(b"l5:Hello5:Worldi123ee", &buf[..]);
     }
 
     #[test]
     fn encode_list_drop() {
-        let mut e = vec![];
-        let mut list = e.add_list();
-        list.add("Hello");
-        list.add("World");
-        list.add(123);
+        let buf = &mut vec![];
+        let mut list = Encoder::new(buf).list();
+        list.push("Hello");
+        list.push("World");
+        list.push(123);
         drop(list);
-        assert_eq!(b"l5:Hello5:Worldi123ee", &e[..]);
+        assert_eq!(b"l5:Hello5:Worldi123ee", &buf[..]);
     }
 
     #[test]
@@ -500,49 +520,48 @@ mod tests {
         }
 
         impl Encode for T {
-            fn encode<E: Encoder>(&self, encoder: &mut E) {
+            fn encode(&self, enc: Encoder) {
+                let mut dict = enc.dict();
                 match *self {
                     Self::A(a, b) => {
-                        let mut dict = encoder.add_dict();
-                        dict.add("0", i64::from(a));
-                        dict.add("1", i64::from(b));
+                        dict.insert("0", i64::from(a));
+                        dict.insert("1", i64::from(b));
                     }
                     Self::B { x, y } => {
-                        let mut dict = encoder.add_dict();
-                        dict.add("x", i64::from(x));
-                        dict.add("y", y);
+                        dict.insert("x", i64::from(x));
+                        dict.insert("y", y);
                     }
                 }
             }
         }
 
-        let mut e = vec![];
-        let mut list = e.add_list();
-        list.add(T::A(1, 2));
-        list.add(T::B {
+        let buf = &mut vec![];
+        let mut list = Encoder::new(buf).list();
+        list.push(T::A(1, 2));
+        list.push(T::B {
             x: 1,
             y: "Hello world",
         });
 
         drop(list);
-        assert_eq!(&b"ld1:0i1e1:1i2eed1:xi1e1:y11:Hello worldee"[..], &e[..]);
+        assert_eq!(&b"ld1:0i1e1:1i2eed1:xi1e1:y11:Hello worldee"[..], &buf[..]);
     }
 
     #[test]
     fn encode_add_bytes2_ok() {
-        let mut e = vec![];
-        let mut bytes = e.add_bytes_exact(4);
+        let buf = &mut vec![];
+        let mut bytes = Encoder::new(buf).bytes_exact(4);
         bytes.add(&[0; 2]);
         bytes.add(&[0; 2]);
         drop(bytes);
-        assert_eq!(&b"4:\x00\x00\x00\x00"[..], &e[..]);
+        assert_eq!(&b"4:\x00\x00\x00\x00"[..], &buf[..]);
     }
 
     #[test]
     #[should_panic]
     fn encode_add_bytes2_panic() {
-        let mut e = vec![];
-        let mut bytes = e.add_bytes_exact(4);
+        let buf = &mut vec![];
+        let mut bytes = Encoder::new(buf).bytes_exact(4);
         bytes.add(&[0; 100]);
     }
 
@@ -553,29 +572,29 @@ mod tests {
         #[test]
         #[should_panic(expected = "Keys must be sorted")]
         fn encode_dict_unordered() {
-            let mut e = vec![];
-            let mut dict = e.add_dict();
-            dict.add("b", "Hello");
-            dict.add("a", "World");
+            let buf = &mut vec![];
+            let mut dict = Encoder::new(buf).dict();
+            dict.insert("b", "Hello");
+            dict.insert("a", "World");
         }
 
         #[test]
         #[should_panic(expected = "Keys must be unique")]
         fn encode_dict_duplicate() {
-            let mut e = vec![];
-            let mut dict = e.add_dict();
-            dict.add("a", "Hello");
-            dict.add("a", "World");
+            let buf = &mut vec![];
+            let mut dict = Encoder::new(buf).dict();
+            dict.insert("a", "Hello");
+            dict.insert("a", "World");
         }
 
         #[test]
         fn encode_dict_sorted() {
-            let mut e = vec![];
-            let mut dict = e.add_dict();
-            dict.add("a", "Hello");
-            dict.add("b", "World");
+            let buf = &mut vec![];
+            let mut dict = Encoder::new(buf).dict();
+            dict.insert("a", "Hello");
+            dict.insert("b", "World");
             dict.finish();
-            assert_eq!(b"d1:a5:Hello1:b5:Worlde", &e[..]);
+            assert_eq!(b"d1:a5:Hello1:b5:Worlde", &buf[..]);
         }
     }
 }
