@@ -177,8 +177,9 @@ impl<C: AsyncStream> Client<C> {
 
 #[cfg(test)]
 mod tests {
+    use ben::ListEncoder;
+
     use super::*;
-    use ben::Encoder;
     use std::io::Cursor;
 
     #[tokio::test]
@@ -345,7 +346,7 @@ mod tests {
         let mut tx = Client::new(Cursor::new(&mut data));
         let mut payload = vec![];
 
-        let mut list = Encoder::new(&mut payload).list();
+        let mut list = ListEncoder::new(&mut payload);
         list.push(1);
         list.push(2);
         list.push(3);

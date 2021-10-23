@@ -1,4 +1,4 @@
-use ben::{Decoder, Encoder, Parser};
+use ben::{Decoder, DictEncoder, Parser};
 use slab::Slab;
 
 use crate::{
@@ -153,7 +153,7 @@ impl RpcManager {
         table.heard_from(query.id);
 
         let mut buf = Vec::new();
-        let mut dict = Encoder::new(&mut buf).dict();
+        let mut dict = DictEncoder::new(&mut buf);
         match addr.ip() {
             IpAddr::V4(a) => dict.insert("ip", &a.octets()),
             IpAddr::V6(a) => dict.insert("ip", &a.octets()),

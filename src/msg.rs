@@ -1,5 +1,5 @@
 use anyhow::Context;
-use ben::{Decoder, Encode, Encoder, Parser};
+use ben::{Decoder, DictEncoder, Encode, Parser};
 use std::io;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
@@ -332,8 +332,8 @@ pub enum MetadataMsg {
 }
 
 impl Encode for MetadataMsg {
-    fn encode(&self, enc: Encoder) {
-        let mut dict = enc.dict();
+    fn encode(&self, buf: &mut Vec<u8>) {
+        let mut dict = DictEncoder::new(buf);
         match *self {
             MetadataMsg::Handshake(id) => {
                 let mut m = dict.insert_dict("m");

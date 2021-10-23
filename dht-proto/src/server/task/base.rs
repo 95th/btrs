@@ -1,7 +1,5 @@
 use std::net::SocketAddr;
 
-use ben::Encoder;
-
 use crate::{
     bucket::Bucket,
     id::NodeId,
@@ -113,7 +111,7 @@ impl BaseTask {
 
     pub fn add_requests<F>(&mut self, rpc: &mut RpcManager, mut write_msg: F) -> bool
     where
-        F: FnMut(Encoder, &mut RpcManager) -> TxnId,
+        F: FnMut(&mut Vec<u8>, &mut RpcManager) -> TxnId,
     {
         let mut outstanding = 0;
         let mut alive = 0;
@@ -140,7 +138,7 @@ impl BaseTask {
             };
 
             let mut buf = Vec::new();
-            let txn_id = write_msg(Encoder::new(&mut buf), rpc);
+            let txn_id = write_msg(&mut buf, rpc);
             log::trace!("Send to {}", n.addr);
 
             rpc.transmit(self.task_id, n.id, buf, n.addr);

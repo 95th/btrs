@@ -1,6 +1,7 @@
 use crate::id::NodeId;
 use crate::msg::TxnId;
-use ben::{Encode, Encoder};
+use ben::DictEncoder;
+use ben::Encode;
 
 #[derive(Debug)]
 pub struct Ping<'a> {
@@ -9,8 +10,8 @@ pub struct Ping<'a> {
 }
 
 impl Encode for Ping<'_> {
-    fn encode(&self, enc: Encoder) {
-        let mut d = enc.dict();
+    fn encode(&self, buf: &mut Vec<u8>) {
+        let mut d = DictEncoder::new(buf);
 
         let mut a = d.insert_dict("a");
         a.insert("id", self.id);
@@ -30,8 +31,8 @@ pub struct FindNode<'a> {
 }
 
 impl Encode for FindNode<'_> {
-    fn encode(&self, enc: Encoder) {
-        let mut d = enc.dict();
+    fn encode(&self, buf: &mut Vec<u8>) {
+        let mut d = DictEncoder::new(buf);
 
         let mut a = d.insert_dict("a");
         a.insert("id", self.id);
@@ -52,8 +53,8 @@ pub struct GetPeers<'a> {
 }
 
 impl Encode for GetPeers<'_> {
-    fn encode(&self, enc: Encoder) {
-        let mut d = enc.dict();
+    fn encode(&self, buf: &mut Vec<u8>) {
+        let mut d = DictEncoder::new(buf);
 
         let mut a = d.insert_dict("a");
         a.insert("id", self.id);
@@ -77,8 +78,8 @@ pub struct AnnouncePeer<'a> {
 }
 
 impl Encode for AnnouncePeer<'_> {
-    fn encode(&self, enc: Encoder) {
-        let mut d = enc.dict();
+    fn encode(&self, buf: &mut Vec<u8>) {
+        let mut d = DictEncoder::new(buf);
 
         let mut a = d.insert_dict("a");
         a.insert("id", self.id);
@@ -107,7 +108,7 @@ impl Encode for AnnouncePeer<'_> {
 // }
 
 // impl Encode for Error {
-//     fn encode(&self, enc: Encoder) {
+//     fn encode(&self, buf: &mut Vec<u8>) {
 //         use ErrorKind::*;
 //         let code = match self.kind {
 //             Generic => 201,

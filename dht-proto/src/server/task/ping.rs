@@ -5,7 +5,7 @@ use crate::msg::send::Ping;
 use crate::server::task::{DhtNode, Status};
 use crate::server::RpcManager;
 use crate::table::RoutingTable;
-use ben::{Encode, Encoder};
+use ben::Encode;
 use std::net::SocketAddr;
 
 use super::{Task, TaskId};
@@ -78,7 +78,7 @@ impl Task for PingTask {
             id: &rpc.own_id,
         };
 
-        msg.encode(Encoder::new(&mut buf));
+        msg.encode(&mut buf);
 
         rpc.transmit(self.id(), self.node.id, buf, self.node.addr);
         self.node.status.insert(Status::QUERIED);

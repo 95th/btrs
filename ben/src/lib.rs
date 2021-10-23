@@ -3,12 +3,14 @@
 //! unneccessary allocations.
 
 pub mod decode;
-pub mod encode;
+mod encode;
 mod error;
 mod parse;
 mod token;
 
 pub use decode::{Decode, Decoder};
-pub use encode::{Encode, Encoder};
+pub use encode::{
+    write_bytes, write_int, DictEncoder, Encode, ExactBytesEncoder, ListEncoder, SortedDictEncoder,
+};
 pub use error::{Error, Result};
 pub use parse::Parser;

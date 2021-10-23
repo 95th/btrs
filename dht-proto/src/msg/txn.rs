@@ -1,4 +1,4 @@
-use ben::{Encode, Encoder};
+use ben::Encode;
 
 #[derive(Debug, Copy, Clone, PartialEq, PartialOrd, Eq, Ord, Hash)]
 pub struct TxnId(pub u16);
@@ -12,7 +12,7 @@ impl TxnId {
 }
 
 impl Encode for TxnId {
-    fn encode(&self, enc: Encoder) {
-        enc.bytes(&self.0.to_be_bytes()[..]);
+    fn encode(&self, buf: &mut Vec<u8>) {
+        ben::write_bytes(buf, &self.0.to_be_bytes()[..]);
     }
 }

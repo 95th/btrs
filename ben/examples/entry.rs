@@ -1,9 +1,10 @@
 use ben::decode::List;
-use ben::{Encoder, Parser};
+use ben::ListEncoder;
+use ben::Parser;
 
 fn main() {
     let mut v = vec![];
-    let mut list = Encoder::new(&mut v).list();
+    let mut list = ListEncoder::new(&mut v);
     list.push(100);
     list.push("hello");
 

@@ -1,4 +1,4 @@
-use ben::{Encode, Encoder};
+use ben::Encode;
 use data_encoding::HEXUPPER_PERMISSIVE as hex_decoder;
 use rand::distributions::uniform::{SampleBorrow, SampleUniform, UniformSampler};
 use rand::Rng;
@@ -123,8 +123,8 @@ impl DerefMut for NodeId {
 }
 
 impl Encode for NodeId {
-    fn encode(&self, enc: Encoder) {
-        enc.bytes(&self[..]);
+    fn encode(&self, buf: &mut Vec<u8>) {
+        ben::write_bytes(buf, &self[..]);
     }
 }
 
