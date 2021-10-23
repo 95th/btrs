@@ -55,10 +55,10 @@ impl DhtNode {
 
 bitflags::bitflags! {
     pub struct Status: u8 {
-        const INITIAL   = 0x01;
-        const ALIVE     = 0x02;
-        const FAILED    = 0x04;
-        const NO_ID     = 0x08;
-        const QUERIED   = 0x10;
+        const INITIAL   = 1 << 0;
+        const ALIVE     = 1 << 1;
+        const FAILED    = 1 << 2;
+        const NO_ID     = 1 << 3;
+        const QUERIED   = 1 << 4;
     }
 }

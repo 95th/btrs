@@ -7,14 +7,14 @@ use std::net::SocketAddr;
 
 bitflags::bitflags! {
     pub struct ContactStatus: u8 {
-        const QUERIED       = 0b0000_0001;
-        const INITIAL       = 0b0000_0010;
-        const NO_ID         = 0b0000_0100;
-        const SHORT_TIMEOUT = 0b0000_1000;
-        const FAILED        = 0b0001_0000;
-        const IPV6_ADDRESS  = 0b0010_0000;
-        const ALIVE         = 0b0100_0000;
-        const DONE          = 0b1000_0000;
+        const QUERIED       = 1 << 0;
+        const INITIAL       = 1 << 1;
+        const NO_ID         = 1 << 2;
+        const SHORT_TIMEOUT = 1 << 3;
+        const FAILED        = 1 << 4;
+        const IPV6_ADDRESS  = 1 << 5;
+        const ALIVE         = 1 << 6;
+        const DONE          = 1 << 7;
     }
 }
 
