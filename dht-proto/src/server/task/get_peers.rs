@@ -86,9 +86,9 @@ fn decode_peer(d: Decoder) -> Option<SocketAddr> {
     if let Some(b) = d.as_bytes() {
         if b.len() == 6 {
             unsafe {
-                let ip = *(b.as_ptr() as *const [u8; 4]);
-                let port = *(b.as_ptr().add(4) as *const [u8; 2]);
-                let port = u16::from_be_bytes(port);
+                let p = b.as_ptr();
+                let ip = *p.cast::<[u8; 4]>();
+                let port = u16::from_be_bytes(*p.add(4).cast());
                 return Some((ip, port).into());
             }
         } else {

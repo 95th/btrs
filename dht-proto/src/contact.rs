@@ -135,9 +135,9 @@ impl<'a> Iterator for CompactNodes<'a> {
 
         unsafe {
             let p = self.buf.as_ptr();
-            let id = &*(p as *const NodeId);
-            let addr = &*(p.add(20) as *const [u8; 4]);
-            let port = u16::from_be_bytes(*(p.add(24) as *const [u8; 2]));
+            let id = &*p.cast::<NodeId>();
+            let addr = &*p.add(20).cast::<[u8; 4]>();
+            let port = u16::from_be_bytes(*p.add(36).cast());
 
             self.buf = &self.buf[26..];
             Some(ContactRef {
@@ -175,9 +175,9 @@ impl<'a> Iterator for CompactNodesV6<'a> {
 
         unsafe {
             let p = self.buf.as_ptr();
-            let id = &*(p as *const NodeId);
-            let addr = &*(p.add(20) as *const [u8; 16]);
-            let port = u16::from_be_bytes(*(p.add(36) as *const [u8; 2]));
+            let id = &*p.cast::<NodeId>();
+            let addr = &*p.add(20).cast::<[u8; 16]>();
+            let port = u16::from_be_bytes(*p.add(36).cast());
 
             self.buf = &self.buf[38..];
             Some(ContactRef {

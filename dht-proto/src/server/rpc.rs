@@ -168,7 +168,7 @@ impl RpcManager {
             }
             QueryKind::FindNode | QueryKind::GetPeers => {
                 let info_hash = match query.args.get_bytes("info_hash") {
-                    Some(ih) if ih.len() == 20 => unsafe { &*(ih.as_ptr() as *const NodeId) },
+                    Some(ih) if ih.len() == 20 => unsafe { &*ih.as_ptr().cast() },
                     _ => {
                         log::warn!("Valid info_hash not found in GET_PEERS query");
                         return;

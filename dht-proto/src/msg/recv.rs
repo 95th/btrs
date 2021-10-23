@@ -106,7 +106,7 @@ impl<'a> Decode<'a> for Msg<'a> {
 fn extract_id<'a>(dict: &Dict<'a>) -> ben::Result<&'a NodeId> {
     let id = check!(dict.get_bytes("id"), "ID is required");
     if id.len() == 20 {
-        let ptr = id.as_ptr() as *const NodeId;
+        let ptr = id.as_ptr().cast();
         unsafe { Ok(&*ptr) }
     } else {
         Err(ben::Error::Other("ID must be 20 bytes long"))

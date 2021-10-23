@@ -195,7 +195,8 @@ impl<'a> Decoder<'a> {
     pub fn as_list(&self) -> Option<&List<'a>> {
         if self.is_list() {
             // Safety: Objects with exact same layout
-            let list = unsafe { &*(self as *const Decoder as *const List) };
+            let p = self as *const Decoder;
+            let list = unsafe { &*p.cast() };
             Some(list)
         } else {
             None
@@ -247,7 +248,8 @@ impl<'a> Decoder<'a> {
     pub fn as_dict(&self) -> Option<&Dict<'a>> {
         if self.is_dict() {
             // Safety: Objects with exact same layout
-            let dict = unsafe { &*(self as *const Decoder as *const Dict) };
+            let p = self as *const Decoder;
+            let dict = unsafe { &*p.cast() };
             Some(dict)
         } else {
             None
