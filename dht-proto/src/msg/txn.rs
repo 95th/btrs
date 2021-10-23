@@ -13,6 +13,6 @@ impl TxnId {
 
 impl Encode for TxnId {
     fn encode(&self, buf: &mut Vec<u8>) {
-        ben::write_bytes(buf, &self.0.to_be_bytes()[..]);
+        ben::write_bytes(buf, self.0.to_be_bytes());
     }
 }
