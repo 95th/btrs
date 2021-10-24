@@ -21,7 +21,7 @@ use std::{
 use super::{task::Task, TaskId};
 
 pub struct RpcManager {
-    txn_id: TxnId,
+    pub(crate) txn_id: TxnId,
     pub own_id: NodeId,
     pub tokens: HashMap<SocketAddr, Vec<u8>>,
     pub txns: Transactions,
@@ -320,6 +320,7 @@ impl Transactions {
     }
 }
 
+#[derive(Debug, PartialEq, Eq)]
 pub enum Event {
     FoundPeers {
         task_id: TaskId,
@@ -340,7 +341,7 @@ pub enum Event {
     },
 }
 
-impl fmt::Debug for Event {
+impl fmt::Display for Event {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::FoundPeers { .. } => f.debug_struct("FoundPeers").finish(),

@@ -40,13 +40,13 @@ impl RoutingTable {
         bucket.reset_timer(now);
         log::trace!("Refresh bucket: {}", bucket_no);
 
-        let c = bucket
-            .live
-            .iter()
-            .chain(bucket.extra.iter())
-            .max_by_key(|c| c.fail_count())?;
-
         if bucket.is_full() {
+            let c = bucket
+                .live
+                .iter()
+                .chain(bucket.extra.iter())
+                .max_by_key(|c| c.fail_count())?;
+
             Some(ClientRequest::Ping {
                 id: c.id,
                 addr: c.addr,

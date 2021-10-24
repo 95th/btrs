@@ -150,3 +150,245 @@ impl RoutingTable {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::{collections::HashSet, time::Duration};
+
+    use ben::{DictEncoder, Encode};
+
+    use crate::msg::{
+        recv::QueryKind,
+        send::{FindNode, GetPeers},
+    };
+
+    use super::*;
+
+    #[test]
+    fn idle_by_default() {
+        let now = Instant::now();
+        let mut dht = Dht::new(NodeId::gen(), vec![], now);
+        assert!(dht.is_idle());
+        assert_eq!(None, dht.poll_event());
+    }
+
+    #[test]
+    fn bootstrap_without_router_fails() {
+        let now = Instant::now();
+        let id = NodeId::gen();
+        let mut dht = Dht::new(id, vec![], now);
+        let task_id = dht.add_request(ClientRequest::Bootstrap { target: id }, now);
+        assert_eq!(None, task_id);
+    }
+
+    #[test]
+    fn bootstrap() {
+        let now = Instant::now();
+        let id = NodeId::gen();
+        let router = SocketAddr::from(([0u8; 16], 0));
+
+        let mut dht = Dht::new(id, vec![router], now);
+        let txn_id = dht.rpc.txn_id;
+        let task_id = dht
+            .add_request(ClientRequest::Bootstrap { target: id }, now)
+            .unwrap();
+
+        let event = dht.poll_event().unwrap();
+
+        let find_node = FindNode {
+            txn_id,
+            id: &id,
+            target: &id,
+        };
+
+        assert_eq!(
+            event,
+            Event::Transmit {
+                task_id,
+                node_id: NodeId::new(),
+                data: find_node.encode_to_vec(),
+                target: router,
+            }
+        );
+
+        let buf = &mut vec![];
+        let mut dict = DictEncoder::new(buf);
+        dict.insert("ip", [0u8; 16]);
+        let mut r = dict.insert_dict("r");
+        r.insert("id", &id);
+        r.insert("nodes", "");
+        r.insert("p", 0);
+        r.finish();
+
+        dict.insert("t", txn_id);
+        dict.insert("y", "r");
+        dict.finish();
+
+        dht.receive(buf, router, now);
+
+        assert_eq!(Event::Bootstrapped { task_id }, dht.poll_event().unwrap());
+        assert!(dht.is_idle());
+        assert_eq!(None, dht.poll_event());
+    }
+
+    #[test]
+    fn bootstrap_timeout() {
+        let mut now = Instant::now();
+        let id = NodeId::gen();
+        let router = SocketAddr::from(([0u8; 16], 0));
+
+        let mut dht = Dht::new(id, vec![router], now);
+        let task_id = dht
+            .add_request(ClientRequest::Bootstrap { target: id }, now)
+            .unwrap();
+
+        // Discard the transmit event
+        dht.poll_event().unwrap();
+
+        // 100 secs elapsed
+        now += Duration::from_secs(100);
+
+        dht.tick(now);
+
+        assert_eq!(Event::Bootstrapped { task_id }, dht.poll_event().unwrap());
+        assert!(dht.is_idle());
+        assert_eq!(None, dht.poll_event());
+    }
+
+    #[test]
+    fn get_peers() {
+        let now = Instant::now();
+        let id = NodeId::gen();
+        let info_hash = NodeId::gen();
+        let router = SocketAddr::from(([0u8; 16], 0));
+
+        let mut dht = Dht::new(id, vec![router], now);
+        let txn_id = dht.rpc.txn_id;
+        let task_id = dht
+            .add_request(ClientRequest::GetPeers { info_hash }, now)
+            .unwrap();
+
+        let event = dht.poll_event().unwrap();
+
+        let find_node = GetPeers {
+            txn_id,
+            id: &id,
+            info_hash: &info_hash,
+        };
+
+        assert_eq!(
+            event,
+            Event::Transmit {
+                task_id,
+                node_id: NodeId::new(),
+                data: find_node.encode_to_vec(),
+                target: router,
+            }
+        );
+
+        let buf = &mut vec![];
+        let mut dict = DictEncoder::new(buf);
+        dict.insert("ip", [0u8; 16]);
+        let mut r = dict.insert_dict("r");
+        r.insert("id", &id);
+        r.insert("nodes", "");
+        r.insert("p", 0);
+        r.insert("token", "hello");
+
+        let mut values = r.insert_list("values");
+        values.push([1, 2, 1, 2, 0, 2]);
+        values.finish();
+
+        r.finish();
+
+        dict.insert("t", txn_id);
+        dict.insert("y", "r");
+        dict.finish();
+
+        dht.receive(buf, router, now);
+
+        assert_eq!(dht.rpc.tokens.get(&router).unwrap(), b"hello");
+
+        assert_eq!(
+            Event::FoundPeers {
+                task_id,
+                peers: [SocketAddr::from(([1, 2, 1, 2], 2))].into_iter().collect()
+            },
+            dht.poll_event().unwrap()
+        );
+        assert!(dht.is_idle());
+        assert_eq!(None, dht.poll_event());
+    }
+
+    #[test]
+    fn get_peers_timeout() {
+        let mut now = Instant::now();
+        let id = NodeId::gen();
+        let info_hash = NodeId::gen();
+        let router = SocketAddr::from(([0u8; 16], 0));
+
+        let mut dht = Dht::new(id, vec![router], now);
+        let task_id = dht
+            .add_request(ClientRequest::GetPeers { info_hash }, now)
+            .unwrap();
+
+        // Discard the Transmit event
+        dht.poll_event().unwrap();
+
+        // 100 secs elapsed
+        now += Duration::from_secs(100);
+
+        dht.tick(now);
+
+        assert_eq!(
+            Event::FoundPeers {
+                task_id,
+                peers: HashSet::new()
+            },
+            dht.poll_event().unwrap()
+        );
+        assert!(dht.is_idle());
+        assert_eq!(None, dht.poll_event());
+    }
+
+    #[test]
+    fn require_table_refresh() {
+        let mut now = Instant::now();
+        let id = NodeId::gen();
+        let router = SocketAddr::from(([0u8; 16], 0));
+
+        let mut dht = Dht::new(id, vec![router], now);
+
+        // 20 mins elapsed
+        now += Duration::from_secs(20 * 60);
+        dht.tick(now);
+
+        assert_eq!(dht.tasks.len(), 1);
+
+        let event = dht.poll_event().unwrap();
+
+        match event {
+            Event::Transmit {
+                task_id,
+                data,
+                target,
+                ..
+            } => {
+                assert_eq!(task_id, dht.tasks[0].id());
+                assert_eq!(target, router);
+
+                let mut parser = Parser::new();
+                let msg = parser.parse::<Msg>(&data).unwrap();
+                let q = match msg {
+                    Msg::Query(q) => q,
+                    _ => panic!("Unexpected message: {:?}", msg),
+                };
+
+                assert_eq!(q.id, &id);
+                assert_eq!(q.kind, QueryKind::FindNode);
+                assert_eq!(q.args.get_bytes("id").unwrap(), &id[..]);
+            }
+            _ => panic!("Unexpected event: {:?}", event),
+        }
+    }
+}
