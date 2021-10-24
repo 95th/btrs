@@ -9,9 +9,6 @@ mod parse;
 mod token;
 
 pub use decode::{Decode, Decoder};
-pub use encode::{
-    encode_bytes, encode_int, DictEncoder, Encode, ExactBytesEncoder, ListEncoder,
-    SortedDictEncoder,
-};
+pub use encode::{encode_bytes, encode_int, DictEncoder, Encode, ListEncoder};
 pub use error::{Error, Result};
 pub use parse::Parser;

@@ -1,5 +1,4 @@
 use itoa::Buffer;
-use std::collections::BTreeMap;
 
 pub fn encode_int(buf: &mut Vec<u8>, value: i64) {
     buf.push(b'i');
@@ -35,44 +34,6 @@ pub trait Encode {
     }
 }
 
-/// Add bytes lazily to given encoder.
-///
-/// # Panic
-/// Drop will panic if the expected number of bytes
-/// is not equal to actually added bytes.
-pub struct ExactBytesEncoder<'a> {
-    buf: &'a mut Vec<u8>,
-    expected: usize,
-    written: usize,
-}
-
-impl<'a> ExactBytesEncoder<'a> {
-    pub fn new(buf: &'a mut Vec<u8>, len: usize) -> Self {
-        let mut fmt = Buffer::new();
-        buf.extend(fmt.format(len).as_bytes());
-        buf.push(b':');
-        Self {
-            buf,
-            expected: len,
-            written: 0,
-        }
-    }
-
-    /// Add given byte slice.
-    pub fn add(&mut self, buf: &[u8]) {
-        self.written += buf.len();
-        self.buf.extend(buf);
-    }
-
-    pub fn finish(self) {}
-}
-
-impl Drop for ExactBytesEncoder<'_> {
-    fn drop(&mut self) {
-        assert_eq!(self.expected, self.written);
-    }
-}
-
 /// Bencode List representation.
 pub struct ListEncoder<'a> {
     buf: &'a mut Vec<u8>,
@@ -92,13 +53,6 @@ impl<'a> ListEncoder<'a> {
         value.encode(self.buf);
     }
 
-    /// Create a new object which accepts exactly given number of
-    /// bytes lazily.
-    #[inline]
-    pub fn push_bytes_exact(&mut self, len: usize) -> ExactBytesEncoder<'_> {
-        ExactBytesEncoder::new(self.buf, len)
-    }
-
     /// Create a new `ListEncoder` in this list.
     #[inline]
     pub fn push_list(&mut self) -> ListEncoder<'_> {
@@ -108,12 +62,6 @@ impl<'a> ListEncoder<'a> {
     /// Create a new `DictEncoder` in this list.
     #[inline]
     pub fn push_dict(&mut self) -> DictEncoder<'_> {
-        self.buf.into()
-    }
-
-    /// Create a new `SortedDictEncoder` in this list.
-    #[inline]
-    pub fn push_sorted_dict<'key>(&mut self) -> SortedDictEncoder<'_, 'key> {
         self.buf.into()
     }
 
@@ -132,8 +80,7 @@ impl Drop for ListEncoder<'_> {
 /// Bencode Dictionary representation.
 ///
 /// Note: This will not enforce order or uniqueness of keys.
-/// These invariants have to be maintained by the caller. If the keys
-/// are not known beforehand, use `SortedDictEncoder` instead.
+/// These invariants have to be maintained by the caller.
 ///
 /// If the invariants don't meet in debug mode, the add calls will
 /// panic.
@@ -163,14 +110,6 @@ impl<'a> DictEncoder<'a> {
         value.encode(self.buf);
     }
 
-    /// Create a new object which accepts exactly given number of
-    /// bytes lazily.
-    #[inline]
-    pub fn insert_bytes_exact(&mut self, key: &str, len: usize) -> ExactBytesEncoder<'_> {
-        self.insert_key(key);
-        ExactBytesEncoder::new(self.buf, len)
-    }
-
     /// Create a new `ListEncoder` for given key inside this dictionary.
     #[inline]
     pub fn insert_list(&mut self, key: &str) -> ListEncoder<'_> {
@@ -181,13 +120,6 @@ impl<'a> DictEncoder<'a> {
     /// Create a new `DictEncoder` for given key inside this dictionary.
     #[inline]
     pub fn insert_dict(&mut self, key: &str) -> DictEncoder<'_> {
-        self.insert_key(key);
-        self.buf.into()
-    }
-
-    /// Create a new `SortedDictEncoder` inside this dictionary.
-    #[inline]
-    pub fn insert_sorted_dict<'key>(&mut self, key: &str) -> SortedDictEncoder<'_, 'key> {
         self.insert_key(key);
         self.buf.into()
     }
@@ -231,70 +163,6 @@ impl Drop for DictEncoder<'_> {
     }
 }
 
-/// Bencode Ordered Dictionary representation.
-///
-/// This will maintain keys to be unique and sorted.
-pub struct SortedDictEncoder<'buf, 'key> {
-    buf: &'buf mut Vec<u8>,
-    entries: BTreeMap<&'key str, Vec<u8>>,
-}
-
-impl<'buf, 'key> SortedDictEncoder<'buf, 'key> {
-    /// Create a new dict
-    #[inline]
-    pub fn new(buf: &'buf mut Vec<u8>) -> Self {
-        Self {
-            buf,
-            entries: BTreeMap::new(),
-        }
-    }
-
-    /// `Encode` the value for given key inside this dictionary.
-    #[inline]
-    pub fn insert<E: Encode>(&mut self, key: &'key str, value: E) {
-        value.encode(self.entry(key));
-    }
-
-    /// Create a new `ListEncoder` for given key inside this dictionary.
-    #[inline]
-    pub fn insert_list(&mut self, key: &'key str) -> ListEncoder<'_> {
-        self.entry(key).into()
-    }
-
-    /// Create a new `DictEncoder` for given key inside this dictionary.
-    #[inline]
-    pub fn insert_dict(&mut self, key: &'key str) -> DictEncoder<'_> {
-        self.entry(key).into()
-    }
-
-    /// Create a new `SortedDictEncoder` inside this dictionary.
-    #[inline]
-    pub fn insert_sorted_dict(&mut self, key: &'key str) -> SortedDictEncoder<'_, 'key> {
-        self.entry(key).into()
-    }
-
-    fn entry(&mut self, key: &'key str) -> &mut Vec<u8> {
-        let buf = self.entries.entry(key).or_insert_with(Vec::new);
-        buf.clear();
-        buf
-    }
-
-    /// Finish building this dictionary.
-    #[inline]
-    pub fn finish(self) {}
-}
-
-impl Drop for SortedDictEncoder<'_, '_> {
-    fn drop(&mut self) {
-        self.buf.push(b'd');
-        for (k, v) in &self.entries {
-            encode_bytes(self.buf, k);
-            self.buf.extend(v);
-        }
-        self.buf.push(b'e');
-    }
-}
-
 impl<'a> From<&'a mut Vec<u8>> for ListEncoder<'a> {
     fn from(buf: &'a mut Vec<u8>) -> Self {
         Self::new(buf)
@@ -302,12 +170,6 @@ impl<'a> From<&'a mut Vec<u8>> for ListEncoder<'a> {
 }
 
 impl<'a> From<&'a mut Vec<u8>> for DictEncoder<'a> {
-    fn from(buf: &'a mut Vec<u8>) -> Self {
-        Self::new(buf)
-    }
-}
-
-impl<'a> From<&'a mut Vec<u8>> for SortedDictEncoder<'a, '_> {
     fn from(buf: &'a mut Vec<u8>) -> Self {
         Self::new(buf)
     }
@@ -377,23 +239,12 @@ impl Encode for i64 {
     }
 }
 
-macro_rules! impl_arr {
-    ( $($len: expr),+ ) => {
-        $(
-            impl Encode for [u8; $len] {
-                #[inline]
-                fn encode(&self, buf: &mut Vec<u8>) {
-                    encode_bytes(buf, &self[..]);
-                }
-            }
-        )+
-    };
+impl<const N: usize> Encode for [u8; N] {
+    #[inline]
+    fn encode(&self, buf: &mut Vec<u8>) {
+        encode_bytes(buf, self);
+    }
 }
-
-impl_arr![
-    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25,
-    26, 27, 28, 29, 30, 31, 32, 64, 128, 256, 512, 1024
-];
 
 #[cfg(test)]
 mod tests {
@@ -429,41 +280,6 @@ mod tests {
         dict.insert("Hello", "World");
         drop(dict);
         assert_eq!(b"d5:Hello5:Worlde", &buf[..]);
-    }
-
-    #[test]
-    fn encode_dict_sorted() {
-        let buf = &mut vec![];
-        let mut dict = SortedDictEncoder::new(buf);
-        dict.insert("b", "World");
-        dict.insert("a", 100);
-        dict.insert_list("d").push("a");
-        dict.insert_dict("c").insert("b", "x");
-        dict.finish();
-        assert_eq!(&b"d1:ai100e1:b5:World1:cd1:b1:xe1:dl1:aee"[..], &buf[..]);
-    }
-
-    #[test]
-    fn encode_dict_sorted_drop() {
-        let buf = &mut vec![];
-        let mut dict = SortedDictEncoder::new(buf);
-        dict.insert("b", "World");
-        dict.insert("a", 100);
-        dict.insert_list("d").push("a");
-        dict.insert_dict("c").insert("b", "x");
-        drop(dict);
-        assert_eq!(&b"d1:ai100e1:b5:World1:cd1:b1:xe1:dl1:aee"[..], &buf[..]);
-    }
-
-    #[test]
-    fn encode_dict_sorted_duplicate_keys() {
-        let buf = &mut vec![];
-        let mut dict = SortedDictEncoder::new(buf);
-        dict.insert("b", "World");
-        dict.insert("a", "Foo");
-        dict.insert("a", "Hello");
-        dict.finish();
-        assert_eq!(&b"d1:a5:Hello1:b5:Worlde"[..], &buf[..]);
     }
 
     #[test]
@@ -521,24 +337,6 @@ mod tests {
 
         drop(list);
         assert_eq!(&b"ld1:0i1e1:1i2eed1:xi1e1:y11:Hello worldee"[..], &buf[..]);
-    }
-
-    #[test]
-    fn encode_add_bytes2_ok() {
-        let buf = &mut vec![];
-        let mut bytes = ExactBytesEncoder::new(buf, 4);
-        bytes.add(&[0; 2]);
-        bytes.add(&[0; 2]);
-        drop(bytes);
-        assert_eq!(&b"4:\x00\x00\x00\x00"[..], &buf[..]);
-    }
-
-    #[test]
-    #[should_panic]
-    fn encode_add_bytes2_panic() {
-        let buf = &mut vec![];
-        let mut bytes = ExactBytesEncoder::new(buf, 4);
-        bytes.add(&[0; 100]);
     }
 
     #[cfg(debug_assertions)]

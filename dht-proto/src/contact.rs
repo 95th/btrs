@@ -2,7 +2,7 @@ use crate::{
     id::NodeId,
     util::{self, to_ipv6},
 };
-use ben::{Encode, ExactBytesEncoder};
+use ben::Encode;
 use std::net::SocketAddr;
 
 bitflags::bitflags! {
@@ -97,14 +97,21 @@ impl Contact {
 
 impl Encode for Contact {
     fn encode(&self, buf: &mut Vec<u8>) {
-        let len = if self.addr.is_ipv4() { 6 } else { 18 };
-        let mut bytes = ExactBytesEncoder::new(buf, 20 + len);
-        bytes.add(&self.id[..]);
+        let mut bytes = [0; 38];
+        bytes[..20].copy_from_slice(&self.id[..]);
+
         match &self.addr {
-            SocketAddr::V4(addr) => bytes.add(&addr.ip().octets()),
-            SocketAddr::V6(addr) => bytes.add(&addr.ip().octets()),
+            SocketAddr::V4(addr) => {
+                bytes[20..24].copy_from_slice(&addr.ip().octets());
+                bytes[24..26].copy_from_slice(&addr.port().to_be_bytes());
+                bytes[..26].encode(buf);
+            }
+            SocketAddr::V6(addr) => {
+                bytes[20..36].copy_from_slice(&addr.ip().octets());
+                bytes[36..38].copy_from_slice(&addr.port().to_be_bytes());
+                bytes.encode(buf);
+            }
         }
-        bytes.add(&self.addr.port().to_be_bytes());
     }
 }
 
