@@ -19,10 +19,18 @@ impl Default for DhtTracker {
 
 impl DhtTracker {
     pub fn new() -> Self {
-        let dht_routers = "dht.libtorrent.org:25401"
-            .to_socket_addrs()
-            .unwrap()
-            .collect();
+        let dht_routers = [
+            "dht.libtorrent.org:25401",
+            "router.utorrent.com:6881",
+            "router.bittorrent.com:6881",
+            "dht.transmissionbt.com:6881",
+            "router.bitcomet.com:6881",
+            "dht.aelitis.com:6881",
+        ]
+        .into_iter()
+        .filter_map(|a| a.to_socket_addrs().ok())
+        .flatten()
+        .collect();
         let (dht, driver) = Dht::new(6881, dht_routers);
 
         tokio::spawn(driver.run());

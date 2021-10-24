@@ -18,19 +18,26 @@ pub struct RoutingTable {
 }
 
 impl RoutingTable {
-    pub fn new(own_id: NodeId, router_nodes: Vec<SocketAddr>) -> Self {
+    pub fn new(own_id: NodeId, router_nodes: Vec<SocketAddr>, now: Instant) -> Self {
         Self {
             own_id,
-            buckets: vec![Bucket::new()],
+            buckets: vec![Bucket::new(now)],
             router_nodes: router_nodes.into_iter().map(to_ipv6).collect(),
         }
     }
 
-    pub fn next_refresh(&mut self) -> Option<ClientRequest> {
-        let bucket_no = self.buckets.iter().position(|b| b.need_refresh())?;
+    pub fn next_timeout(&self) -> Option<Instant> {
+        self.buckets.iter().map(|b| b.timer()).min()
+    }
 
-        let bucket = &mut self.buckets[bucket_no];
-        bucket.last_updated = Instant::now();
+    pub fn next_refresh(&mut self, now: Instant) -> Option<ClientRequest> {
+        let (bucket_no, bucket) = self
+            .buckets
+            .iter_mut()
+            .enumerate()
+            .find(|(_, b)| b.timer() < now)?;
+
+        bucket.reset_timer(now);
         log::trace!("Refresh bucket: {}", bucket_no);
 
         let c = bucket
@@ -50,8 +57,8 @@ impl RoutingTable {
         }
     }
 
-    pub fn add_contact(&mut self, contact: &ContactRef<'_>) -> bool {
-        let mut result = self.add_contact_impl(contact);
+    pub fn add_contact(&mut self, contact: &ContactRef<'_>, now: Instant) -> bool {
+        let mut result = self.add_contact_impl(contact, now);
         loop {
             match result {
                 BucketResult::Success => return true,
@@ -60,7 +67,7 @@ impl RoutingTable {
             }
 
             log::trace!("Split the buckets, before count: {}", self.buckets.len());
-            self.split_bucket();
+            self.split_bucket(now);
             log::trace!("Split the buckets, after count : {}", self.buckets.len());
 
             if let Some(last) = self.buckets.iter().last() {
@@ -69,7 +76,7 @@ impl RoutingTable {
                 }
             }
 
-            result = self.add_contact_impl(contact);
+            result = self.add_contact_impl(contact, now);
 
             if let Some(last) = self.buckets.iter().last() {
                 if last.live.is_empty() {
@@ -132,18 +139,18 @@ impl RoutingTable {
         }
     }
 
-    pub fn heard_from(&mut self, id: &NodeId) {
+    pub fn heard_from(&mut self, id: &NodeId, now: Instant) {
         let idx = self.find_bucket(id);
         let bucket = &mut self.buckets[idx];
 
         if let Some(c) = bucket.live.iter_mut().find(|c| c.id == *id) {
             c.status = ContactStatus::ALIVE | ContactStatus::QUERIED;
             c.clear_timeout();
-            bucket.last_updated = Instant::now();
+            bucket.reset_timer(now);
         }
     }
 
-    fn add_contact_impl(&mut self, contact: &ContactRef<'_>) -> BucketResult {
+    fn add_contact_impl(&mut self, contact: &ContactRef<'_>, now: Instant) -> BucketResult {
         use BucketResult::*;
         if self.router_nodes.contains(&contact.addr) {
             return Fail;
@@ -166,7 +173,7 @@ impl RoutingTable {
             }
 
             c.timeout_count = Some(0);
-            bucket.last_updated = Instant::now();
+            bucket.reset_timer(now);
             return Success;
         }
 
@@ -192,7 +199,7 @@ impl RoutingTable {
                 bucket.live.reserve(Bucket::MAX_LEN);
             }
             bucket.live.push(contact);
-            bucket.last_updated = Instant::now();
+            bucket.reset_timer(now);
             return Success;
         }
 
@@ -201,7 +208,7 @@ impl RoutingTable {
         }
 
         if contact.is_confirmed() {
-            let result = bucket.replace_node(&contact);
+            let result = bucket.replace_node(&contact, now);
             if result != RequireSplit {
                 return result;
             }
@@ -223,7 +230,7 @@ impl RoutingTable {
             if let Some(i) = bucket.extra.iter().position(|c| !c.is_pinged()) {
                 bucket.extra.remove(i);
             } else {
-                let result = bucket.replace_node(&contact);
+                let result = bucket.replace_node(&contact, now);
                 return if let Success = result { Success } else { Fail };
             }
         }
@@ -232,11 +239,11 @@ impl RoutingTable {
             bucket.extra.reserve(Bucket::MAX_LEN);
         }
         bucket.extra.push(contact);
-        bucket.last_updated = Instant::now();
+        bucket.reset_timer(now);
         Success
     }
 
-    fn split_bucket(&mut self) {
+    fn split_bucket(&mut self, now: Instant) {
         if self.buckets.is_empty() {
             return;
         }
@@ -244,7 +251,7 @@ impl RoutingTable {
         let index = self.buckets.len() - 1;
         let last_bucket = &mut self.buckets[index];
 
-        let new_bucket = last_bucket.split(&self.own_id, index);
+        let new_bucket = last_bucket.split(&self.own_id, index, now);
         self.buckets.push(new_bucket);
     }
 
@@ -261,7 +268,7 @@ mod tests {
 
     #[test]
     fn basic() {
-        let mut rt = RoutingTable::new(NodeId::all(0), vec![]);
+        let mut rt = RoutingTable::new(NodeId::all(0), vec![], Instant::now());
         assert!(rt.is_empty());
         assert_eq!(rt.len_extra(), 0);
         assert_eq!(rt.buckets.len(), 1);
@@ -269,39 +276,51 @@ mod tests {
         let addr = SocketAddr::from(([0u8; 4], 100));
 
         // Add one contact
-        assert!(rt.add_contact(&ContactRef {
-            addr,
-            id: &NodeId::all(1),
-        }));
+        assert!(rt.add_contact(
+            &ContactRef {
+                addr,
+                id: &NodeId::all(1),
+            },
+            Instant::now()
+        ));
         assert_eq!(rt.len(), 1);
         assert_eq!(rt.len_extra(), 0);
         assert_eq!(rt.buckets.len(), 1);
 
         // Add the same contact again - Should add but size shouldn't change
-        assert!(rt.add_contact(&ContactRef {
-            addr,
-            id: &NodeId::all(1),
-        }));
+        assert!(rt.add_contact(
+            &ContactRef {
+                addr,
+                id: &NodeId::all(1),
+            },
+            Instant::now()
+        ));
         assert_eq!(rt.len(), 1);
         assert_eq!(rt.len_extra(), 0);
         assert_eq!(rt.buckets.len(), 1);
 
         // Add 7 more contacts, one bucket should be full now
         for i in 2..9 {
-            assert!(rt.add_contact(&ContactRef {
-                addr,
-                id: &NodeId::all(i),
-            }));
+            assert!(rt.add_contact(
+                &ContactRef {
+                    addr,
+                    id: &NodeId::all(i),
+                },
+                Instant::now()
+            ));
             assert_eq!(rt.len(), i as usize);
             assert_eq!(rt.len_extra(), 0);
             assert_eq!(rt.buckets.len(), 1);
         }
 
         // Add 1 more contacts - splits the bucket
-        assert!(rt.add_contact(&ContactRef {
-            addr,
-            id: &NodeId::all(9),
-        }));
+        assert!(rt.add_contact(
+            &ContactRef {
+                addr,
+                id: &NodeId::all(9),
+            },
+            Instant::now()
+        ));
         assert_eq!(rt.len(), 9);
         assert_eq!(rt.len_extra(), 0);
         assert_eq!(rt.buckets.len(), 6);
@@ -312,7 +331,7 @@ mod tests {
         for i in 0..6 {
             let mut n = NodeId::all(9);
             n.0[19] = i as u8;
-            assert!(rt.add_contact(&ContactRef { addr, id: &n }));
+            assert!(rt.add_contact(&ContactRef { addr, id: &n }, Instant::now()));
             assert_eq!(rt.len(), 10 + i);
             assert_eq!(rt.len_extra(), 0);
             assert_eq!(rt.buckets.len(), 6);
@@ -323,7 +342,7 @@ mod tests {
         // Add 1 more contacts - goes into bucket index 4 extras
         let mut n = NodeId::all(9);
         n.0[19] = 6;
-        assert!(rt.add_contact(&ContactRef { addr, id: &n }));
+        assert!(rt.add_contact(&ContactRef { addr, id: &n }, Instant::now()));
         assert_eq!(rt.len(), 15);
         assert_eq!(rt.len_extra(), 1);
         assert_eq!(rt.buckets.len(), 6);
@@ -334,7 +353,7 @@ mod tests {
 
     #[test]
     fn test_closest() {
-        let mut table = RoutingTable::new(NodeId::all(0), vec![]);
+        let mut table = RoutingTable::new(NodeId::all(0), vec![], Instant::now());
         let addr = SocketAddr::from(([0u8; 4], 100));
 
         fn node(idx: usize) -> NodeId {
@@ -344,7 +363,7 @@ mod tests {
         }
 
         for i in 0..20 {
-            let added = table.add_contact(&ContactRef { id: &node(i), addr });
+            let added = table.add_contact(&ContactRef { id: &node(i), addr }, Instant::now());
             assert!(added, "Adding contact failed at {}", i);
         }
 

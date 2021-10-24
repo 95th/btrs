@@ -1,4 +1,4 @@
-use std::net::SocketAddr;
+use std::{net::SocketAddr, time::Instant};
 
 use crate::{
     bucket::Bucket,
@@ -53,6 +53,7 @@ impl BaseTask {
         addr: &SocketAddr,
         table: &mut RoutingTable,
         has_id: bool,
+        now: Instant,
     ) {
         log::trace!("Invoke count: {}", self.invoke_count);
         if has_id {
@@ -72,11 +73,15 @@ impl BaseTask {
             self.invoke_count -= 1;
         }
 
-        let result = table.read_nodes_with(resp, |c| {
-            if !self.nodes.iter().any(|n| &n.id == c.id) {
-                self.nodes.push(DhtNode::new(c));
-            }
-        });
+        let result = table.read_nodes_with(
+            resp,
+            |c| {
+                if !self.nodes.iter().any(|n| &n.id == c.id) {
+                    self.nodes.push(DhtNode::new(c));
+                }
+            },
+            now,
+        );
 
         if let Err(e) = result {
             log::warn!("{}", e);
@@ -109,7 +114,7 @@ impl BaseTask {
         }
     }
 
-    pub fn add_requests<F>(&mut self, rpc: &mut RpcManager, mut write_msg: F) -> bool
+    pub fn add_requests<F>(&mut self, rpc: &mut RpcManager, mut write_msg: F, now: Instant) -> bool
     where
         F: FnMut(&mut Vec<u8>, &mut RpcManager) -> TxnId,
     {
@@ -143,7 +148,7 @@ impl BaseTask {
 
             rpc.transmit(self.task_id, n.id, buf, n.addr);
             n.status.insert(Status::QUERIED);
-            rpc.txns.insert(txn_id, &n.id, &n.addr, self.task_id);
+            rpc.txns.insert(txn_id, &n.id, &n.addr, self.task_id, now);
 
             outstanding += 1;
             self.invoke_count += 1;

@@ -2,6 +2,9 @@ use crate::contact::{Contact, ContactRef};
 use crate::id::NodeId;
 use std::time::{Duration, Instant};
 
+// Refresh every 15 mins
+const REFRESH_INTERVAL: Duration = Duration::from_secs(15 * 60);
+
 #[derive(Debug, PartialEq)]
 pub enum BucketResult {
     Fail,
@@ -13,25 +16,19 @@ pub enum BucketResult {
 pub struct Bucket {
     pub live: Vec<Contact>,
     pub extra: Vec<Contact>,
-    pub last_updated: Instant,
-}
-
-impl Default for Bucket {
-    fn default() -> Self {
-        Self {
-            live: vec![],
-            extra: vec![],
-            last_updated: Instant::now(),
-        }
-    }
+    next_refresh: Instant,
 }
 
 impl Bucket {
     // The 'K' constant in Kademlia algorithm
     pub const MAX_LEN: usize = 8;
 
-    pub fn new() -> Self {
-        Self::default()
+    pub fn new(now: Instant) -> Self {
+        Self {
+            live: vec![],
+            extra: vec![],
+            next_refresh: now + REFRESH_INTERVAL,
+        }
     }
 
     pub fn is_full(&self) -> bool {
@@ -45,28 +42,29 @@ impl Bucket {
             .for_each(|c| out.push(c.as_ref()));
     }
 
-    pub fn need_refresh(&self) -> bool {
-        // Refresh every 15 mins
-        const REFRESH_INTERVAL: Duration = Duration::from_secs(15 * 60);
-
-        self.last_updated < Instant::now() - REFRESH_INTERVAL
+    pub fn reset_timer(&mut self, now: Instant) {
+        self.next_refresh = now + REFRESH_INTERVAL;
     }
 
-    pub fn replace_node(&mut self, contact: &Contact) -> BucketResult {
+    pub fn timer(&self) -> Instant {
+        self.next_refresh
+    }
+
+    pub fn replace_node(&mut self, contact: &Contact, now: Instant) -> BucketResult {
         debug_assert!(self.live.len() >= Bucket::MAX_LEN);
 
         if replace_stale(&mut self.live, contact) || replace_stale(&mut self.extra, contact) {
-            self.last_updated = Instant::now();
+            self.reset_timer(now);
             BucketResult::Success
         } else {
             BucketResult::RequireSplit
         }
     }
 
-    pub fn split(&mut self, own_id: &NodeId, curr_index: usize) -> Bucket {
+    pub fn split(&mut self, own_id: &NodeId, curr_index: usize, now: Instant) -> Bucket {
         debug_assert!(self.live.len() >= Bucket::MAX_LEN);
 
-        let mut new_bucket = Bucket::new();
+        let mut new_bucket = Bucket::new(now);
         let mut i = 0;
         while i < self.live.len() {
             let bucket_index = self.live[i].id.xlz(own_id);

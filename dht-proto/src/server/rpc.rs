@@ -66,13 +66,14 @@ impl RpcManager {
         addr: SocketAddr,
         table: &mut RoutingTable,
         tasks: &mut Slab<Box<dyn Task>>,
+        now: Instant,
     ) {
         log::trace!("Received msg: {:?}", msg);
 
         match msg {
-            Msg::Response(r) => self.handle_ok(r, addr, table, tasks),
-            Msg::Error(e) => self.handle_error(e, addr, table, tasks),
-            Msg::Query(q) => self.handle_query(q, addr, table),
+            Msg::Response(r) => self.handle_ok(r, addr, table, tasks, now),
+            Msg::Error(e) => self.handle_error(e, addr, table, tasks, now),
+            Msg::Query(q) => self.handle_query(q, addr, table, now),
         }
     }
 
@@ -82,6 +83,7 @@ impl RpcManager {
         addr: SocketAddr,
         table: &mut RoutingTable,
         tasks: &mut Slab<Box<dyn Task>>,
+        now: Instant,
     ) {
         let req = match self.txns.remove(resp.txn_id) {
             Some(req) => req,
@@ -92,7 +94,7 @@ impl RpcManager {
         };
 
         if req.has_id && &req.id == resp.id {
-            table.heard_from(&req.id);
+            table.heard_from(&req.id, now);
         } else if req.has_id {
             log::warn!(
                 "ID mismatch from {}, Expected: {:?}, Actual: {:?}",
@@ -104,7 +106,7 @@ impl RpcManager {
 
             if let Some(task) = tasks.get_mut(req.task_id.0) {
                 task.set_failed(&req.id, &addr);
-                let done = task.add_requests(self);
+                let done = task.add_requests(self, now);
                 if done {
                     tasks.remove(req.task_id.0).done(self);
                 }
@@ -113,8 +115,8 @@ impl RpcManager {
         }
 
         if let Some(task) = tasks.get_mut(req.task_id.0) {
-            task.handle_response(&resp, &addr, table, self, req.has_id);
-            let done = task.add_requests(self);
+            task.handle_response(&resp, &addr, table, self, req.has_id, now);
+            let done = task.add_requests(self, now);
             if done {
                 tasks.remove(req.task_id.0).done(self);
             }
@@ -127,6 +129,7 @@ impl RpcManager {
         addr: SocketAddr,
         table: &mut RoutingTable,
         tasks: &mut Slab<Box<dyn Task>>,
+        now: Instant,
     ) {
         let req = match self.txns.remove(err.txn_id) {
             Some(req) => req,
@@ -142,15 +145,21 @@ impl RpcManager {
 
         if let Some(task) = tasks.get_mut(req.task_id.0) {
             task.set_failed(&req.id, &addr);
-            let done = task.add_requests(self);
+            let done = task.add_requests(self, now);
             if done {
                 tasks.remove(req.task_id.0).done(self);
             }
         }
     }
 
-    fn handle_query(&mut self, query: Query<'_>, addr: SocketAddr, table: &mut RoutingTable) {
-        table.heard_from(query.id);
+    fn handle_query(
+        &mut self,
+        query: Query<'_>,
+        addr: SocketAddr,
+        table: &mut RoutingTable,
+        now: Instant,
+    ) {
+        table.heard_from(query.id, now);
 
         let mut buf = Vec::new();
         let mut dict = DictEncoder::new(&mut buf);
@@ -205,18 +214,22 @@ impl RpcManager {
         self.reply(buf, addr);
     }
 
+    pub fn next_timeout(&self) -> Option<Instant> {
+        self.txns.pending.values().map(|req| req.timeout).min()
+    }
+
     pub fn check_timeouts(
         &mut self,
         table: &mut RoutingTable,
         tasks: &mut Slab<Box<dyn Task>>,
         timed_out: &mut Vec<(TxnId, Request)>,
+        now: Instant,
     ) {
         if self.txns.pending.is_empty() {
             return;
         }
 
         let before = self.txns.pending.len();
-        let cutoff = Instant::now() - self.txns.timeout;
 
         log::debug!(
             "{} pending txns in {} tasks",
@@ -228,7 +241,7 @@ impl RpcManager {
             assert!(tasks.is_empty());
         }
 
-        timed_out.extend(self.txns.pending.drain_filter(|_, req| req.sent < cutoff));
+        timed_out.extend(self.txns.pending.drain_filter(|_, req| req.timeout <= now));
 
         for (txn_id, req) in timed_out.drain(..) {
             log::trace!("Txn {:?} expired", txn_id);
@@ -238,7 +251,7 @@ impl RpcManager {
 
             if let Some(task) = tasks.get_mut(req.task_id.0) {
                 task.set_failed(&req.id, &req.addr);
-                let done = task.add_requests(self);
+                let done = task.add_requests(self, now);
                 if done {
                     tasks.remove(req.task_id.0).done(self);
                 }
@@ -256,17 +269,17 @@ impl RpcManager {
 pub struct Request {
     pub id: NodeId,
     pub addr: SocketAddr,
-    pub sent: Instant,
+    pub timeout: Instant,
     pub has_id: bool,
     pub task_id: TaskId,
 }
 
 impl Request {
-    pub fn new(id: &NodeId, addr: &SocketAddr, task_id: TaskId) -> Self {
+    pub fn new(id: &NodeId, addr: &SocketAddr, task_id: TaskId, timeout: Instant) -> Self {
         Self {
             id: if id.is_zero() { NodeId::gen() } else { *id },
             addr: *addr,
-            sent: Instant::now(),
+            timeout,
             has_id: !id.is_zero(),
             task_id,
         }
@@ -290,8 +303,16 @@ impl Transactions {
         }
     }
 
-    pub fn insert(&mut self, txn_id: TxnId, id: &NodeId, addr: &SocketAddr, task_id: TaskId) {
-        self.pending.insert(txn_id, Request::new(id, addr, task_id));
+    pub fn insert(
+        &mut self,
+        txn_id: TxnId,
+        id: &NodeId,
+        addr: &SocketAddr,
+        task_id: TaskId,
+        now: Instant,
+    ) {
+        self.pending
+            .insert(txn_id, Request::new(id, addr, task_id, now + self.timeout));
     }
 
     pub fn remove(&mut self, txn_id: TxnId) -> Option<Request> {

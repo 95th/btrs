@@ -7,6 +7,7 @@ use crate::table::RoutingTable;
 use ben::{Decoder, Encode};
 use std::collections::HashSet;
 use std::net::SocketAddr;
+use std::time::Instant;
 
 use super::base::BaseTask;
 use super::{Task, TaskId};
@@ -37,9 +38,10 @@ impl Task for GetPeersTask {
         table: &mut RoutingTable,
         rpc: &mut RpcManager,
         has_id: bool,
+        now: Instant,
     ) {
         log::trace!("Handle GET_PEERS response");
-        self.base.handle_response(resp, addr, table, has_id);
+        self.base.handle_response(resp, addr, table, has_id, now);
 
         if let Some(token) = resp.body.get_bytes("token") {
             rpc.tokens.insert(*addr, token.to_vec());
@@ -55,22 +57,26 @@ impl Task for GetPeersTask {
         self.base.set_failed(id, addr);
     }
 
-    fn add_requests(&mut self, rpc: &mut RpcManager) -> bool {
+    fn add_requests(&mut self, rpc: &mut RpcManager, now: Instant) -> bool {
         log::trace!("Add GET_PEERS requests");
 
         let info_hash = self.base.target;
-        self.base.add_requests(rpc, |buf, rpc| {
-            let msg = GetPeers {
-                txn_id: rpc.new_txn(),
-                id: &rpc.own_id,
-                info_hash: &info_hash,
-            };
+        self.base.add_requests(
+            rpc,
+            |buf, rpc| {
+                let msg = GetPeers {
+                    txn_id: rpc.new_txn(),
+                    id: &rpc.own_id,
+                    info_hash: &info_hash,
+                };
 
-            log::trace!("Send {:?}", msg);
+                log::trace!("Send {:?}", msg);
 
-            msg.encode(buf);
-            msg.txn_id
-        })
+                msg.encode(buf);
+                msg.txn_id
+            },
+            now,
+        )
     }
 
     fn done(&mut self, rpc: &mut RpcManager) {

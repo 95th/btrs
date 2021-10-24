@@ -1,6 +1,7 @@
 use crate::id::NodeId;
 use crate::{contact::ContactRef, msg::recv::Response, table::RoutingTable};
 use std::net::SocketAddr;
+use std::time::Instant;
 
 mod announce;
 mod base;
@@ -18,7 +19,7 @@ use super::rpc::RpcManager;
 pub trait Task: Send {
     fn id(&self) -> TaskId;
 
-    fn add_requests(&mut self, rpc: &mut RpcManager) -> bool;
+    fn add_requests(&mut self, rpc: &mut RpcManager, now: Instant) -> bool;
 
     fn set_failed(&mut self, id: &NodeId, addr: &SocketAddr);
 
@@ -29,6 +30,7 @@ pub trait Task: Send {
         table: &mut RoutingTable,
         rpc: &mut RpcManager,
         has_id: bool,
+        now: Instant,
     );
 
     fn done(&mut self, _rpc: &mut RpcManager) {}

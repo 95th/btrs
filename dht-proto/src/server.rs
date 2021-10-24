@@ -11,10 +11,7 @@ use crate::{
 use ben::Parser;
 use rpc::RpcManager;
 use slab::Slab;
-use std::{
-    net::SocketAddr,
-    time::{Duration, Instant},
-};
+use std::{net::SocketAddr, time::Instant};
 
 use self::{
     rpc::Request,
@@ -23,9 +20,6 @@ use self::{
 
 pub use rpc::Event;
 pub use task::TaskId;
-
-const ONE_SEC: Duration = Duration::from_secs(1);
-const ONE_MIN: Duration = Duration::from_secs(60);
 
 mod rpc;
 mod task;
@@ -43,20 +37,16 @@ pub struct Dht {
     timed_out: Vec<(TxnId, Request)>,
     parser: Parser,
     rpc: RpcManager,
-    prune_txn_timer: Instant,
-    table_refresh_timer: Instant,
 }
 
 impl Dht {
     pub fn new(id: NodeId, router_nodes: Vec<SocketAddr>, now: Instant) -> Self {
         Self {
-            table: RoutingTable::new(id, router_nodes),
+            table: RoutingTable::new(id, router_nodes, now),
             tasks: Slab::new(),
             timed_out: vec![],
             parser: Parser::new(),
             rpc: RpcManager::new(id),
-            prune_txn_timer: now + ONE_SEC,
-            table_refresh_timer: now + ONE_MIN,
         }
     }
 
@@ -64,27 +54,32 @@ impl Dht {
         self.tasks.is_empty()
     }
 
-    pub fn poll(&mut self) -> Option<Event> {
+    pub fn poll_event(&mut self) -> Option<Event> {
         self.rpc.events.pop_front()
     }
 
-    pub fn tick(&mut self, now: Instant) {
-        if self.prune_txn_timer <= now {
-            self.rpc
-                .check_timeouts(&mut self.table, &mut self.tasks, &mut self.timed_out);
-            self.prune_txn_timer = now + ONE_SEC;
-        }
+    pub fn poll_timeout(&self) -> Option<Instant> {
+        let txn_timeout = self.rpc.next_timeout();
+        let table_timeout = self.table.next_timeout();
 
-        if self.table_refresh_timer <= now {
-            if let Some(refresh) = self.table.next_refresh() {
-                log::trace!("Time to refresh the routing table");
-                self.add_request(refresh);
-            }
-            self.table_refresh_timer = now + ONE_MIN;
+        match (txn_timeout, table_timeout) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
         }
     }
 
-    pub fn add_request(&mut self, request: ClientRequest) -> Option<TaskId> {
+    pub fn tick(&mut self, now: Instant) {
+        log::trace!("tick tock");
+        self.rpc
+            .check_timeouts(&mut self.table, &mut self.tasks, &mut self.timed_out, now);
+
+        if let Some(refresh) = self.table.next_refresh(now) {
+            log::trace!("Time to refresh the routing table");
+            self.add_request(refresh, now);
+        }
+    }
+
+    pub fn add_request(&mut self, request: ClientRequest, now: Instant) -> Option<TaskId> {
         use ClientRequest::*;
 
         let entry = self.tasks.vacant_entry();
@@ -97,7 +92,7 @@ impl Dht {
             Ping { id, addr } => Box::new(PingTask::new(&id, &addr, tid)),
         };
 
-        let done = task.add_requests(&mut self.rpc);
+        let done = task.add_requests(&mut self.rpc, now);
         if done {
             None
         } else {
@@ -112,7 +107,7 @@ impl Dht {
         }
     }
 
-    pub fn receive(&mut self, buf: &[u8], addr: SocketAddr) {
+    pub fn receive(&mut self, buf: &[u8], addr: SocketAddr, now: Instant) {
         log::debug!("Got {} bytes from {}", buf.len(), addr);
 
         let msg = match self.parser.parse::<Msg>(buf) {
@@ -124,25 +119,30 @@ impl Dht {
         };
 
         self.rpc
-            .handle_response(msg, addr, &mut self.table, &mut self.tasks);
+            .handle_response(msg, addr, &mut self.table, &mut self.tasks, now);
     }
 }
 
 impl RoutingTable {
-    fn read_nodes_with<F>(&mut self, response: &Response, mut f: F) -> anyhow::Result<()>
+    fn read_nodes_with<F>(
+        &mut self,
+        response: &Response,
+        mut f: F,
+        now: Instant,
+    ) -> anyhow::Result<()>
     where
         F: FnMut(&ContactRef),
     {
         if let Some(nodes) = response.body.get_bytes("nodes") {
             for c in CompactNodes::new(nodes)? {
-                self.add_contact(&c);
+                self.add_contact(&c, now);
                 f(&c);
             }
         }
 
         if let Some(nodes6) = response.body.get_bytes("nodes6") {
             for c in CompactNodesV6::new(nodes6)? {
-                self.add_contact(&c);
+                self.add_contact(&c, now);
                 f(&c);
             }
         }

@@ -7,7 +7,7 @@ use crate::msg::send::AnnouncePeer;
 use crate::server::task::Status;
 use crate::server::RpcManager;
 use crate::table::RoutingTable;
-use std::net::SocketAddr;
+use std::{net::SocketAddr, time::Instant};
 
 use super::{GetPeersTask, Task, TaskId};
 
@@ -35,20 +35,21 @@ impl Task for AnnounceTask {
         table: &mut RoutingTable,
         rpc: &mut RpcManager,
         has_id: bool,
+        now: Instant,
     ) {
         log::trace!("Handle ANNOUNCE response");
         self.get_peers
-            .handle_response(resp, addr, table, rpc, has_id);
+            .handle_response(resp, addr, table, rpc, has_id, now);
     }
 
     fn set_failed(&mut self, id: &NodeId, addr: &SocketAddr) {
         self.get_peers.set_failed(id, addr);
     }
 
-    fn add_requests(&mut self, rpc: &mut RpcManager) -> bool {
+    fn add_requests(&mut self, rpc: &mut RpcManager, now: Instant) -> bool {
         log::trace!("Add ANNOUNCE's GET_PEERS requests");
 
-        let done = self.get_peers.add_requests(rpc);
+        let done = self.get_peers.add_requests(rpc, now);
         if !done {
             return false;
         }

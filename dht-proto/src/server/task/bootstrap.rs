@@ -6,6 +6,7 @@ use crate::server::RpcManager;
 use crate::table::RoutingTable;
 use ben::Encode;
 use std::net::SocketAddr;
+use std::time::Instant;
 
 use super::base::BaseTask;
 use super::{Task, TaskId};
@@ -34,30 +35,35 @@ impl Task for BootstrapTask {
         table: &mut RoutingTable,
         _rpc: &mut RpcManager,
         has_id: bool,
+        now: Instant,
     ) {
         log::trace!("Handle BOOTSTRAP response");
-        self.base.handle_response(resp, addr, table, has_id);
+        self.base.handle_response(resp, addr, table, has_id, now);
     }
 
     fn set_failed(&mut self, id: &NodeId, addr: &SocketAddr) {
         self.base.set_failed(id, addr);
     }
 
-    fn add_requests(&mut self, rpc: &mut RpcManager) -> bool {
+    fn add_requests(&mut self, rpc: &mut RpcManager, now: Instant) -> bool {
         log::trace!("Add BOOTSTRAP requests");
 
         let target = self.base.target;
-        self.base.add_requests(rpc, |buf, rpc| {
-            let msg = FindNode {
-                txn_id: rpc.new_txn(),
-                target: &target,
-                id: &rpc.own_id,
-            };
-            log::trace!("Send {:?}", msg);
+        self.base.add_requests(
+            rpc,
+            |buf, rpc| {
+                let msg = FindNode {
+                    txn_id: rpc.new_txn(),
+                    target: &target,
+                    id: &rpc.own_id,
+                };
+                log::trace!("Send {:?}", msg);
 
-            msg.encode(buf);
-            msg.txn_id
-        })
+                msg.encode(buf);
+                msg.txn_id
+            },
+            now,
+        )
     }
 
     fn done(&mut self, rpc: &mut RpcManager) {

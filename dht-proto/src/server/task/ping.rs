@@ -7,6 +7,7 @@ use crate::server::RpcManager;
 use crate::table::RoutingTable;
 use ben::Encode;
 use std::net::SocketAddr;
+use std::time::Instant;
 
 use super::{Task, TaskId};
 
@@ -42,14 +43,18 @@ impl Task for PingTask {
         table: &mut RoutingTable,
         _rpc: &mut RpcManager,
         _has_id: bool,
+        now: Instant,
     ) {
         log::trace!("Handle PING response");
 
         if self.node.id == *resp.id && self.node.addr == *addr {
-            table.add_contact(&ContactRef {
-                id: resp.id,
-                addr: *addr,
-            });
+            table.add_contact(
+                &ContactRef {
+                    id: resp.id,
+                    addr: *addr,
+                },
+                now,
+            );
         } else {
             table.failed(resp.id);
         }
@@ -64,7 +69,7 @@ impl Task for PingTask {
         self.done = true;
     }
 
-    fn add_requests(&mut self, rpc: &mut RpcManager) -> bool {
+    fn add_requests(&mut self, rpc: &mut RpcManager, now: Instant) -> bool {
         log::trace!("Invoke PING request");
         if self.done {
             return true;
@@ -83,7 +88,7 @@ impl Task for PingTask {
         rpc.transmit(self.id(), self.node.id, buf, self.node.addr);
         self.node.status.insert(Status::QUERIED);
         rpc.txns
-            .insert(txn_id, &self.node.id, &self.node.addr, self.task_id);
+            .insert(txn_id, &self.node.id, &self.node.addr, self.task_id, now);
         false
     }
 }
