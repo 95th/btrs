@@ -124,7 +124,7 @@ impl DerefMut for NodeId {
 
 impl Encode for NodeId {
     fn encode(&self, buf: &mut Vec<u8>) {
-        ben::write_bytes(buf, &self[..]);
+        ben::encode_bytes(buf, &self[..]);
     }
 }
 

@@ -214,7 +214,6 @@ dependencies = [
  "anyhow",
  "data-encoding",
  "dht-proto",
- "env_logger",
  "futures",
  "log",
  "tokio",

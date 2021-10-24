@@ -1,14 +1,14 @@
 use itoa::Buffer;
 use std::collections::BTreeMap;
 
-pub fn write_int(buf: &mut Vec<u8>, value: i64) {
+pub fn encode_int(buf: &mut Vec<u8>, value: i64) {
     buf.push(b'i');
     let mut fmt = Buffer::new();
     buf.extend(fmt.format(value).as_bytes());
     buf.push(b'e');
 }
 
-pub fn write_bytes<I>(buf: &mut Vec<u8>, value: I)
+pub fn encode_bytes<I>(buf: &mut Vec<u8>, value: I)
 where
     I: AsRef<[u8]>,
 {
@@ -194,7 +194,7 @@ impl<'a> DictEncoder<'a> {
 
     fn insert_key(&mut self, key: &str) {
         self.assert_key_ordering(key);
-        write_bytes(self.buf, key);
+        encode_bytes(self.buf, key);
     }
 
     #[cfg(debug_assertions)]
@@ -236,7 +236,7 @@ impl Drop for DictEncoder<'_> {
 /// This will maintain keys to be unique and sorted.
 pub struct SortedDictEncoder<'buf, 'key> {
     buf: &'buf mut Vec<u8>,
-    entries: BTreeMap<&'key [u8], Vec<u8>>,
+    entries: BTreeMap<&'key str, Vec<u8>>,
 }
 
 impl<'buf, 'key> SortedDictEncoder<'buf, 'key> {
@@ -274,7 +274,7 @@ impl<'buf, 'key> SortedDictEncoder<'buf, 'key> {
     }
 
     fn entry(&mut self, key: &'key str) -> &mut Vec<u8> {
-        let buf = self.entries.entry(key.as_bytes()).or_insert_with(Vec::new);
+        let buf = self.entries.entry(key).or_insert_with(Vec::new);
         buf.clear();
         buf
     }
@@ -288,7 +288,7 @@ impl Drop for SortedDictEncoder<'_, '_> {
     fn drop(&mut self) {
         self.buf.push(b'd');
         for (k, v) in &self.entries {
-            write_bytes(self.buf, k);
+            encode_bytes(self.buf, k);
             self.buf.extend(v);
         }
         self.buf.push(b'e');
@@ -313,14 +313,14 @@ impl<'a> From<&'a mut Vec<u8>> for SortedDictEncoder<'a, '_> {
     }
 }
 
-impl<T: Encode> Encode for &T {
+impl<T: Encode + ?Sized> Encode for &T {
     #[inline]
     fn encode(&self, buf: &mut Vec<u8>) {
         (&**self).encode(buf);
     }
 }
 
-impl<T: Encode> Encode for Box<T> {
+impl<T: Encode + ?Sized> Encode for Box<T> {
     #[inline]
     fn encode(&self, buf: &mut Vec<u8>) {
         (&**self).encode(buf);
@@ -349,31 +349,31 @@ impl<T: Encode> Encode for [T] {
     }
 }
 
-impl Encode for &[u8] {
+impl Encode for [u8] {
     #[inline]
     fn encode(&self, buf: &mut Vec<u8>) {
-        write_bytes(buf, self);
+        encode_bytes(buf, self);
     }
 }
 
-impl Encode for &str {
+impl Encode for str {
     #[inline]
     fn encode(&self, buf: &mut Vec<u8>) {
-        write_bytes(buf, self);
+        encode_bytes(buf, self);
     }
 }
 
 impl Encode for String {
     #[inline]
     fn encode(&self, buf: &mut Vec<u8>) {
-        write_bytes(buf, self);
+        encode_bytes(buf, self);
     }
 }
 
 impl Encode for i64 {
     #[inline]
     fn encode(&self, buf: &mut Vec<u8>) {
-        write_int(buf, *self);
+        encode_int(buf, *self);
     }
 }
 
@@ -383,7 +383,7 @@ macro_rules! impl_arr {
             impl Encode for [u8; $len] {
                 #[inline]
                 fn encode(&self, buf: &mut Vec<u8>) {
-                    write_bytes(buf, &self[..]);
+                    encode_bytes(buf, &self[..]);
                 }
             }
         )+
@@ -400,16 +400,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn encode_int() {
+    fn encode_integer() {
         let buf = &mut vec![];
-        write_int(buf, 10);
+        encode_int(buf, 10);
         assert_eq!(b"i10e", &buf[..]);
     }
 
     #[test]
     fn encode_str() {
         let buf = &mut vec![];
-        write_bytes(buf, "1000");
+        encode_bytes(buf, "1000");
         assert_eq!(b"4:1000", &buf[..]);
     }
 
