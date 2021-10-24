@@ -7,9 +7,25 @@ use std::convert::TryInto;
 #[derive(Debug)]
 pub struct Query<'a> {
     pub txn_id: TxnId,
-    pub args: Dict<'a>,
     pub id: &'a NodeId,
-    pub kind: QueryKind,
+    pub kind: QueryKind<'a>,
+}
+
+#[derive(Debug, PartialEq)]
+pub enum QueryKind<'a> {
+    Ping,
+    FindNode {
+        target: &'a NodeId,
+    },
+    GetPeers {
+        info_hash: &'a NodeId,
+    },
+    AnnouncePeer {
+        info_hash: &'a NodeId,
+        implied_port: bool,
+        port: u16,
+        token: &'a [u8],
+    },
 }
 
 #[derive(Debug)]
@@ -32,14 +48,6 @@ pub enum Msg<'a> {
     Error(ErrorResponse<'a>),
 }
 
-#[derive(Debug, Clone, Copy, PartialOrd, PartialEq)]
-pub enum QueryKind {
-    Ping,
-    FindNode,
-    GetPeers,
-    AnnouncePeer,
-}
-
 macro_rules! check {
     ($expr:expr, $err:literal) => {
         match $expr {
@@ -49,41 +57,71 @@ macro_rules! check {
     };
 }
 
+macro_rules! node_id {
+    ($dict: expr, $key: literal) => {{
+        let id = match $dict.get_bytes($key) {
+            Some(id) => id,
+            None => return Err(ben::Error::Other(concat!($key, " is required"))),
+        };
+        if id.len() == 20 {
+            let ptr = id.as_ptr().cast::<NodeId>();
+            unsafe { &*ptr }
+        } else {
+            return Err(ben::Error::Other("Node ID must be 20 bytes long"));
+        }
+    }};
+}
+
 impl<'a> Decode<'a> for Msg<'a> {
     fn decode(decoder: Decoder<'a>) -> ben::Result<Self> {
         use ben::Error::Other;
 
         let dict = check!(decoder.into_dict(), "Not a dict");
-        let y = check!(dict.get_bytes("y"), "Message type is required");
+        let msg_type = check!(dict.get_bytes("y"), "Message type is required");
         let txn_id = check!(dict.get_bytes("t"), "Transaction ID is required");
         let txn_id = check!(txn_id.try_into().ok(), "Transaction ID must be 2 bytes");
         let txn_id = TxnId(u16::from_be_bytes(txn_id));
 
-        let msg = match y {
+        let msg = match msg_type {
             b"q" => {
-                let q = check!(dict.get_bytes("q"), "Query type is required");
-                let query_kind = match q {
+                let kind = check!(dict.get_bytes("q"), "Query type is required");
+                let args = check!(dict.get_dict("a"), "Arguments are required");
+
+                let query_kind = match kind {
                     b"ping" => QueryKind::Ping,
-                    b"find_node" => QueryKind::FindNode,
-                    b"get_peers" => QueryKind::GetPeers,
-                    b"announce_peer" => QueryKind::AnnouncePeer,
+                    b"find_node" => QueryKind::FindNode {
+                        target: node_id!(args, "target"),
+                    },
+                    b"get_peers" => QueryKind::GetPeers {
+                        info_hash: node_id!(args, "info_hash"),
+                    },
+                    b"announce_peer" => {
+                        let implied_port = args
+                            .get_int("implied_port")
+                            .map(|n| n == 1)
+                            .unwrap_or(false);
+                        QueryKind::AnnouncePeer {
+                            info_hash: node_id!(args, "info_hash"),
+                            implied_port,
+                            port: check!(args.get_int("port"), "port is required") as u16,
+                            token: check!(args.get_bytes("token"), "Token is required"),
+                        }
+                    }
                     other => {
                         log::trace!("Unexpected Query type: {:?}", other);
                         return Err(Other("Unexpected Query type"));
                     }
                 };
-                let args = check!(dict.get_dict("a"), "Query args are required");
                 Msg::Query(Query {
                     kind: query_kind,
-                    id: extract_id(&args)?,
+                    id: node_id!(args, "id"),
                     txn_id,
-                    args,
                 })
             }
             b"r" => {
                 let body = check!(dict.get_dict("r"), "Response args are required");
                 Msg::Response(Response {
-                    id: extract_id(&body)?,
+                    id: node_id!(body, "id"),
                     txn_id,
                     body,
                 })
@@ -103,16 +141,6 @@ impl<'a> Decode<'a> for Msg<'a> {
     }
 }
 
-fn extract_id<'a>(dict: &Dict<'a>) -> ben::Result<&'a NodeId> {
-    let id = check!(dict.get_bytes("id"), "ID is required");
-    if id.len() == 20 {
-        let ptr = id.as_ptr().cast();
-        unsafe { Ok(&*ptr) }
-    } else {
-        Err(ben::Error::Other("ID must be 20 bytes long"))
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -126,10 +154,9 @@ mod tests {
 
         match msg {
             Msg::Query(query) => {
-                assert_eq!(query.kind, QueryKind::Ping);
                 assert_eq!(query.id, &NodeId::all(1));
                 assert_eq!(query.txn_id, TxnId(10));
-                assert_eq!(b"d2:id20:\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01e", query.args.as_raw_bytes());
+                assert_eq!(query.kind, QueryKind::Ping);
             }
             _ => {
                 panic!("Incorrect msg type");

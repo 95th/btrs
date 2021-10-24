@@ -175,17 +175,9 @@ impl RpcManager {
             QueryKind::Ping => {
                 // Nothing else to add
             }
-            QueryKind::FindNode | QueryKind::GetPeers => {
-                let info_hash = match query.args.get_bytes("info_hash") {
-                    Some(ih) if ih.len() == 20 => unsafe { &*ih.as_ptr().cast() },
-                    _ => {
-                        log::warn!("Valid info_hash not found in GET_PEERS query");
-                        return;
-                    }
-                };
-
+            QueryKind::FindNode { target } | QueryKind::GetPeers { info_hash: target } => {
                 let mut out = Vec::with_capacity(8);
-                table.find_closest(info_hash, &mut out, Bucket::MAX_LEN);
+                table.find_closest(target, &mut out, Bucket::MAX_LEN);
 
                 let nodes = &mut Vec::with_capacity(256);
                 for c in out {
@@ -193,8 +185,8 @@ impl RpcManager {
                 }
                 r.insert("nodes", &nodes[..]);
             }
-            QueryKind::AnnouncePeer => {
-                log::warn!("Announce peer is not implemented fully");
+            QueryKind::AnnouncePeer { .. } => {
+                log::warn!("Announce peer query is not yet implemented");
             }
         }
 

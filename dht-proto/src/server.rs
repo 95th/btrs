@@ -358,6 +358,7 @@ mod tests {
         let router = SocketAddr::from(([0u8; 16], 0));
 
         let mut dht = Dht::new(id, vec![router], now);
+        let txn_id = dht.rpc.txn_id;
 
         // 20 mins elapsed
         now += Duration::from_secs(20 * 60);
@@ -379,14 +380,15 @@ mod tests {
 
                 let mut parser = Parser::new();
                 let msg = parser.parse::<Msg>(&data).unwrap();
-                let q = match msg {
-                    Msg::Query(q) => q,
-                    _ => panic!("Unexpected message: {:?}", msg),
-                };
 
-                assert_eq!(q.id, &id);
-                assert_eq!(q.kind, QueryKind::FindNode);
-                assert_eq!(q.args.get_bytes("id").unwrap(), &id[..]);
+                match msg {
+                    Msg::Query(query) => {
+                        assert_eq!(query.id, &id);
+                        assert_eq!(query.txn_id, txn_id);
+                        assert!(matches!(query.kind, QueryKind::FindNode { .. }));
+                    }
+                    _ => panic!("Unexpected msg: {:?}", msg),
+                };
             }
             _ => panic!("Unexpected event: {:?}", event),
         }
