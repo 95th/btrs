@@ -42,7 +42,7 @@ impl Dht {
 
         let driver = DhtDriver {
             port,
-            rx: Some(rx),
+            rx,
             dht,
             pending: HashMap::new(),
         };
@@ -77,7 +77,7 @@ impl Dht {
 
 pub struct DhtDriver {
     port: u16,
-    rx: Option<mpsc::Receiver<ClientRequest>>,
+    rx: mpsc::Receiver<ClientRequest>,
     dht: proto::Dht,
     pending: HashMap<TaskId, PeerSender>,
 }
@@ -93,7 +93,6 @@ impl DhtDriver {
         };
 
         let recv_buf: &mut [u8] = &mut [0; 1024];
-        let mut rx = self.rx.take().unwrap();
 
         self.wait_until_idle(socket, recv_buf).await;
 
@@ -124,7 +123,7 @@ impl DhtDriver {
                 },
 
                 // Send requests
-                request = rx.next() => {
+                request = self.rx.next() => {
                     let request = match request {
                         Some(x) => x,
 

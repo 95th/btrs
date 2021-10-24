@@ -69,7 +69,7 @@ impl Dht {
     }
 
     pub fn tick(&mut self, now: Instant) {
-        log::trace!("tick tock");
+        log::trace!("Server::tick");
         self.rpc
             .check_timeouts(&mut self.table, &mut self.tasks, &mut self.timed_out, now);
 
