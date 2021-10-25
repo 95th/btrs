@@ -7,7 +7,7 @@ use std::ops::{BitAnd, BitXor, Deref, DerefMut};
 
 #[derive(Copy, Clone, Default, PartialEq, PartialOrd, Eq, Ord, Hash)]
 #[repr(transparent)]
-pub struct NodeId(pub [u8; 20]);
+pub struct NodeId([u8; 20]);
 
 impl fmt::Debug for NodeId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

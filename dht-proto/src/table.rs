@@ -298,7 +298,7 @@ mod tests {
         // Add 6 more contacts - fill up bucket at index 4
         for i in 0..6 {
             let mut n = NodeId::all(9);
-            n.0[19] = i as u8;
+            n[19] = i as u8;
             assert!(rt.add_contact(&ContactRef { addr, id: &n }, Instant::now()));
             assert_eq!(rt.len(), 10 + i);
             assert_eq!(rt.len_extra(), 0);
@@ -309,7 +309,7 @@ mod tests {
 
         // Add 1 more contacts - goes into bucket index 4 extras
         let mut n = NodeId::all(9);
-        n.0[19] = 6;
+        n[19] = 6;
         assert!(rt.add_contact(&ContactRef { addr, id: &n }, Instant::now()));
         assert_eq!(rt.len(), 15);
         assert_eq!(rt.len_extra(), 1);
