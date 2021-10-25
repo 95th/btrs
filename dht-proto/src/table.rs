@@ -87,12 +87,7 @@ impl RoutingTable {
         }
     }
 
-    pub fn find_closest<'a>(
-        &'a self,
-        target: &NodeId,
-        out: &mut Vec<ContactRef<'a>>,
-        count: usize,
-    ) {
+    pub fn find_closest<'a>(&'a self, target: &NodeId, out: &mut Vec<&'a Contact>, count: usize) {
         let bucket_no = self.find_bucket(target);
         self.buckets[bucket_no].get_contacts(out);
 
@@ -372,7 +367,7 @@ mod tests {
 
         let mut closest_iter = closest.into_iter();
         for i in 0..20 {
-            assert_eq!(closest_iter.next().unwrap().id, &node(i));
+            assert_eq!(closest_iter.next().unwrap().id, node(i));
         }
 
         assert!(closest_iter.next().is_none());

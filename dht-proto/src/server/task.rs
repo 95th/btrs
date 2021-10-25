@@ -1,5 +1,6 @@
+use crate::contact::{Contact, ContactRef};
 use crate::id::NodeId;
-use crate::{contact::ContactRef, msg::recv::Response, table::RoutingTable};
+use crate::{msg::recv::Response, table::RoutingTable};
 use std::net::SocketAddr;
 use std::time::Instant;
 
@@ -46,7 +47,15 @@ pub struct DhtNode {
 }
 
 impl DhtNode {
-    pub fn new(c: &ContactRef) -> Self {
+    pub fn new(c: &Contact) -> Self {
+        Self {
+            id: c.id,
+            addr: c.addr,
+            status: Status::INITIAL,
+        }
+    }
+
+    pub fn with_ref(c: &ContactRef<'_>) -> Self {
         Self {
             id: *c.id,
             addr: c.addr,

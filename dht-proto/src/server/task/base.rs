@@ -25,7 +25,7 @@ impl BaseTask {
 
         let mut nodes = vec![];
         for c in closest {
-            nodes.push(DhtNode::new(&c));
+            nodes.push(DhtNode::new(c));
         }
 
         if nodes.len() < 3 {
@@ -76,8 +76,11 @@ impl BaseTask {
         let result = table.read_nodes_with(
             resp,
             |c| {
-                if !self.nodes.iter().any(|n| &n.id == c.id) {
-                    self.nodes.push(DhtNode::new(c));
+                let result = self
+                    .nodes
+                    .binary_search_by_key(c.id, |n| n.id ^ self.target);
+                if let Err(i) = result {
+                    self.nodes.insert(i, DhtNode::with_ref(c));
                 }
             },
             now,

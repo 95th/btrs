@@ -1,4 +1,4 @@
-use crate::contact::{Contact, ContactRef};
+use crate::contact::Contact;
 use crate::id::NodeId;
 use std::time::{Duration, Instant};
 
@@ -35,11 +35,11 @@ impl Bucket {
         self.live.len() >= Self::MAX_LEN && self.extra.len() >= Self::MAX_LEN
     }
 
-    pub fn get_contacts<'a>(&'a self, out: &mut Vec<ContactRef<'a>>) {
+    pub fn get_contacts<'a>(&'a self, out: &mut Vec<&'a Contact>) {
         self.live
             .iter()
             .filter(|c| !c.failed())
-            .for_each(|c| out.push(c.as_ref()));
+            .for_each(|c| out.push(c));
     }
 
     pub fn reset_timer(&mut self, now: Instant) {

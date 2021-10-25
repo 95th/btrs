@@ -28,11 +28,6 @@ impl ContactRef<'_> {
     pub fn as_owned(&self) -> Contact {
         Contact::new(*self.id, self.addr)
     }
-
-    pub fn write_compact(&self, buf: &mut Vec<u8>) {
-        buf.extend(&self.id[..]);
-        util::write_addr(buf, &self.addr);
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -53,11 +48,9 @@ impl Contact {
         }
     }
 
-    pub fn as_ref(&self) -> ContactRef<'_> {
-        ContactRef {
-            id: &self.id,
-            addr: self.addr,
-        }
+    pub fn write_compact(&self, buf: &mut Vec<u8>) {
+        buf.extend(&self.id[..]);
+        util::write_addr(buf, &self.addr);
     }
 
     pub fn is_pinged(&self) -> bool {
