@@ -8,11 +8,13 @@ use std::mem::MaybeUninit;
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 
+const BUCKETS: usize = 160;
+
 #[derive(Debug)]
 pub struct RoutingTable {
     pub root_id: NodeId,
-    pub buckets: [Bucket; 160],
-    pub timeouts: [Instant; 160],
+    pub buckets: [Bucket; BUCKETS],
+    pub timeouts: [Instant; BUCKETS],
     pub router_nodes: HashSet<SocketAddr>,
 }
 
@@ -20,9 +22,9 @@ impl RoutingTable {
     pub fn new(root_id: NodeId, router_nodes: Vec<SocketAddr>, now: Instant) -> Self {
         // Bucket is not `Copy`. So create it using an uninitialized array
         let buckets = unsafe {
-            let mut buckets = MaybeUninit::<[Bucket; 160]>::uninit();
+            let mut buckets = MaybeUninit::<[Bucket; BUCKETS]>::uninit();
             let ptr = buckets.as_mut_ptr().cast::<Bucket>();
-            for i in 0..160 {
+            for i in 0..BUCKETS {
                 ptr.add(i).write(Bucket::new());
             }
             buckets.assume_init()
@@ -31,7 +33,7 @@ impl RoutingTable {
         Self {
             root_id,
             buckets,
-            timeouts: [now; 160],
+            timeouts: [next_timeout(now); BUCKETS],
             router_nodes: router_nodes.into_iter().map(to_ipv6).collect(),
         }
     }
@@ -124,7 +126,7 @@ impl RoutingTable {
             };
         }
 
-        // if we can't split, nor replace anything in the live buckets try to insert
+        // if we can't replace anything in the live buckets, then try to insert
         // into the replacement bucket
 
         // if we don't have any identified stale nodes in
@@ -160,18 +162,17 @@ impl RoutingTable {
     pub fn find_closest(&self, target: &NodeId, count: usize) -> Vec<&Contact> {
         let mut out = Vec::with_capacity(count);
 
-        let bucket_no = self.idx_of(target);
-        self.buckets[bucket_no].get_contacts(&mut out);
+        let idx = self.idx_of(target);
+        self.buckets[idx].get_contacts(&mut out);
 
-        let len = self.buckets.len();
         let mut i = 1;
 
-        while out.len() < count && (i <= bucket_no || bucket_no + i < len) {
-            if i <= bucket_no {
-                self.buckets[bucket_no - i].get_contacts(&mut out);
+        while out.len() < count && (i <= idx || idx + i < BUCKETS) {
+            if i <= idx {
+                self.buckets[idx - i].get_contacts(&mut out);
             }
-            if bucket_no + i < len {
-                self.buckets[bucket_no + i].get_contacts(&mut out);
+            if idx + i < BUCKETS {
+                self.buckets[idx + i].get_contacts(&mut out);
             }
             i += 1;
         }
@@ -219,7 +220,7 @@ impl RoutingTable {
     }
 
     fn idx_of(&self, id: &NodeId) -> usize {
-        self.root_id.xor_leading_zeros(id)
+        self.root_id.xor_leading_zeros(id).min(BUCKETS - 1)
     }
 }
 
@@ -236,87 +237,69 @@ mod tests {
 
     #[test]
     fn basic() {
-        let mut rt = RoutingTable::new(NodeId::all(0), vec![], Instant::now());
-        assert!(rt.is_empty());
-        assert_eq!(rt.len_extra(), 0);
-        assert_eq!(rt.buckets.len(), 1);
+        let mut table = RoutingTable::new(NodeId::all(0), vec![], Instant::now());
+        assert!(table.is_empty());
+        assert_eq!(table.len_extra(), 0);
 
         let addr = SocketAddr::from(([0u8; 4], 100));
 
         // Add one contact
-        assert!(rt.add_contact(
-            &ContactRef {
-                addr,
-                id: &NodeId::all(1),
-            },
-            Instant::now()
-        ));
-        assert_eq!(rt.len(), 1);
-        assert_eq!(rt.len_extra(), 0);
-        assert_eq!(rt.buckets.len(), 1);
+        let n = NodeId::all(1);
+        assert!(table.add_contact(&ContactRef { addr, id: &n }, Instant::now()));
+        assert_eq!(table.len(), 1);
+        assert_eq!(table.len_extra(), 0);
 
         // Add the same contact again - Should add but size shouldn't change
-        assert!(rt.add_contact(
-            &ContactRef {
-                addr,
-                id: &NodeId::all(1),
-            },
-            Instant::now()
-        ));
-        assert_eq!(rt.len(), 1);
-        assert_eq!(rt.len_extra(), 0);
-        assert_eq!(rt.buckets.len(), 1);
+        assert!(table.add_contact(&ContactRef { addr, id: &n }, Instant::now()));
+        assert_eq!(table.len(), 1);
+        assert_eq!(table.len_extra(), 0);
 
-        // Add 7 more contacts, one bucket should be full now
+        // Add 7 more contacts
         for i in 2..9 {
-            assert!(rt.add_contact(
-                &ContactRef {
-                    addr,
-                    id: &NodeId::all(i),
-                },
-                Instant::now()
-            ));
-            assert_eq!(rt.len(), i as usize);
-            assert_eq!(rt.len_extra(), 0);
-            assert_eq!(rt.buckets.len(), 1);
+            let n = NodeId::all(i);
+            assert!(table.add_contact(&ContactRef { addr, id: &n }, Instant::now()));
+            assert_eq!(table.len(), i as usize);
+            assert_eq!(table.len_extra(), 0);
         }
 
-        // Add 1 more contacts - splits the bucket
-        assert!(rt.add_contact(
-            &ContactRef {
-                addr,
-                id: &NodeId::all(9),
-            },
-            Instant::now()
-        ));
-        assert_eq!(rt.len(), 9);
-        assert_eq!(rt.len_extra(), 0);
-        assert_eq!(rt.buckets.len(), 6);
-        assert_eq!(rt.buckets[4].live.len(), 2);
-        assert_eq!(rt.buckets[5].live.len(), 7);
+        assert_eq!(table.len(), 8);
+        assert_eq!(table.len_extra(), 0);
+        assert_eq!(table.buckets[8].live.len(), 0);
+        assert_eq!(table.buckets[7].live.len(), 1);
+        assert_eq!(table.buckets[6].live.len(), 2);
+        assert_eq!(table.buckets[5].live.len(), 4);
+        assert_eq!(table.buckets[4].live.len(), 1);
 
-        // Add 6 more contacts - fill up bucket at index 4
+        // Add 1 more contact
+        let n = NodeId::all(9);
+        assert!(table.add_contact(&ContactRef { addr, id: &n }, Instant::now()));
+
+        assert_eq!(table.len(), 9);
+        assert_eq!(table.len_extra(), 0);
+        assert_eq!(table.buckets[4].live.len(), 2);
+
+        // Add 6 more contacts
         for i in 0..6 {
             let mut n = NodeId::all(9);
             n[19] = i as u8;
-            assert!(rt.add_contact(&ContactRef { addr, id: &n }, Instant::now()));
-            assert_eq!(rt.len(), 10 + i);
-            assert_eq!(rt.len_extra(), 0);
-            assert_eq!(rt.buckets.len(), 6);
+            assert!(table.add_contact(&ContactRef { addr, id: &n }, Instant::now()));
+            assert_eq!(table.len(), 10 + i);
+            assert_eq!(table.len_extra(), 0);
         }
-        assert_eq!(rt.buckets[4].live.len(), 8);
-        assert_eq!(rt.buckets[5].live.len(), 7);
+
+        assert_eq!(table.len(), 15);
+        assert_eq!(table.len_extra(), 0);
+        assert_eq!(table.buckets[4].live.len(), 8);
 
         // Add 1 more contacts - goes into bucket index 4 extras
         let mut n = NodeId::all(9);
         n[19] = 6;
-        assert!(rt.add_contact(&ContactRef { addr, id: &n }, Instant::now()));
-        assert_eq!(rt.len(), 15);
-        assert_eq!(rt.len_extra(), 1);
-        assert_eq!(rt.buckets.len(), 6);
-        assert_eq!(rt.buckets[4].live.len(), 8);
-        assert_eq!(rt.buckets[4].extra.len(), 1);
-        assert_eq!(rt.buckets[5].live.len(), 7);
+        assert!(table.add_contact(&ContactRef { addr, id: &n }, Instant::now()));
+        assert_eq!(table.len(), 15);
+        assert_eq!(table.len_extra(), 1);
+        assert_eq!(table.buckets[4].live.len(), 8);
+        assert_eq!(table.buckets[4].extra.len(), 1);
+        assert_eq!(table.buckets[3].live.len(), 0);
     }
 
     #[test]
