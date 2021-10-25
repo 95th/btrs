@@ -61,22 +61,18 @@ impl Task for GetPeersTask {
         log::trace!("Add GET_PEERS requests");
 
         let info_hash = self.base.target;
-        self.base.add_requests(
-            rpc,
-            |buf, rpc| {
-                let msg = GetPeers {
-                    txn_id: rpc.new_txn(),
-                    id: &rpc.own_id,
-                    info_hash: &info_hash,
-                };
+        self.base.add_requests(rpc, now, |buf, rpc| {
+            let msg = GetPeers {
+                txn_id: rpc.new_txn(),
+                id: &rpc.own_id,
+                info_hash: &info_hash,
+            };
 
-                log::trace!("Send {:?}", msg);
+            log::trace!("Send {:?}", msg);
 
-                msg.encode(buf);
-                msg.txn_id
-            },
-            now,
-        )
+            msg.encode(buf);
+            msg.txn_id
+        })
     }
 
     fn done(&mut self, rpc: &mut RpcManager) {

@@ -49,21 +49,17 @@ impl Task for BootstrapTask {
         log::trace!("Add BOOTSTRAP requests");
 
         let target = self.base.target;
-        self.base.add_requests(
-            rpc,
-            |buf, rpc| {
-                let msg = FindNode {
-                    txn_id: rpc.new_txn(),
-                    target: &target,
-                    id: &rpc.own_id,
-                };
-                log::trace!("Send {:?}", msg);
+        self.base.add_requests(rpc, now, |buf, rpc| {
+            let msg = FindNode {
+                txn_id: rpc.new_txn(),
+                target: &target,
+                id: &rpc.own_id,
+            };
+            log::trace!("Send {:?}", msg);
 
-                msg.encode(buf);
-                msg.txn_id
-            },
-            now,
-        )
+            msg.encode(buf);
+            msg.txn_id
+        })
     }
 
     fn done(&mut self, rpc: &mut RpcManager) {

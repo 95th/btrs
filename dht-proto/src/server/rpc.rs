@@ -176,8 +176,7 @@ impl RpcManager {
                 // Nothing else to add
             }
             QueryKind::FindNode { target } | QueryKind::GetPeers { info_hash: target } => {
-                let mut out = Vec::with_capacity(8);
-                table.find_closest(target, &mut out, Bucket::MAX_LEN);
+                let out = table.find_closest(target, Bucket::MAX_LEN);
 
                 let nodes = &mut Vec::with_capacity(256);
                 for c in out {

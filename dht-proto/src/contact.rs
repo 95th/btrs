@@ -30,7 +30,7 @@ impl ContactRef<'_> {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Contact {
     pub id: NodeId,
     pub addr: SocketAddr,

@@ -20,8 +20,7 @@ pub struct BaseTask {
 
 impl BaseTask {
     pub fn new(target: &NodeId, table: &RoutingTable, task_id: TaskId) -> Self {
-        let mut closest = Vec::with_capacity(Bucket::MAX_LEN);
-        table.find_closest(target, &mut closest, Bucket::MAX_LEN);
+        let closest = table.find_closest(target, Bucket::MAX_LEN);
 
         let mut nodes = vec![];
         for c in closest {
@@ -73,25 +72,20 @@ impl BaseTask {
             self.invoke_count -= 1;
         }
 
-        let result = table.read_nodes_with(
-            resp,
-            |c| {
-                let result = self
-                    .nodes
-                    .binary_search_by_key(c.id, |n| n.id ^ self.target);
-                if let Err(i) = result {
-                    self.nodes.insert(i, DhtNode::with_ref(c));
-                }
-            },
-            now,
-        );
+        let result = table.read_nodes_with(resp, now, |c| {
+            let search_result = self
+                .nodes
+                .binary_search_by_key(c.id, |n| n.id ^ self.target);
+
+            // Insert if not present
+            if let Err(i) = search_result {
+                self.nodes.insert(i, DhtNode::with_ref(c));
+            }
+        });
 
         if let Err(e) = result {
             log::warn!("{}", e);
         }
-
-        let target = &self.target;
-        self.nodes.sort_by_key(|n| n.id ^ target);
 
         if self.nodes.len() > 100 {
             for n in &self.nodes[100..] {
@@ -117,7 +111,7 @@ impl BaseTask {
         }
     }
 
-    pub fn add_requests<F>(&mut self, rpc: &mut RpcManager, mut write_msg: F, now: Instant) -> bool
+    pub fn add_requests<F>(&mut self, rpc: &mut RpcManager, now: Instant, mut write_msg: F) -> bool
     where
         F: FnMut(&mut Vec<u8>, &mut RpcManager) -> TxnId,
     {

@@ -87,25 +87,28 @@ impl RoutingTable {
         }
     }
 
-    pub fn find_closest<'a>(&'a self, target: &NodeId, out: &mut Vec<&'a Contact>, count: usize) {
+    pub fn find_closest<'a>(&'a self, target: &NodeId, count: usize) -> Vec<&'a Contact> {
+        let mut out = Vec::with_capacity(count);
+
         let bucket_no = self.find_bucket(target);
-        self.buckets[bucket_no].get_contacts(out);
+        self.buckets[bucket_no].get_contacts(&mut out);
 
         let len = self.buckets.len();
         let mut i = 1;
 
         while out.len() < count && (i <= bucket_no || bucket_no + i < len) {
             if i <= bucket_no {
-                self.buckets[bucket_no - i].get_contacts(out);
+                self.buckets[bucket_no - i].get_contacts(&mut out);
             }
             if bucket_no + i < len {
-                self.buckets[bucket_no + i].get_contacts(out);
+                self.buckets[bucket_no + i].get_contacts(&mut out);
             }
             i += 1;
         }
 
         out.sort_unstable_by_key(|c| target ^ c.id);
         out.truncate(count);
+        out
     }
 
     #[cfg(test)]
@@ -362,8 +365,7 @@ mod tests {
             assert!(added, "Adding contact failed at {}", i);
         }
 
-        let mut closest = Vec::with_capacity(20);
-        table.find_closest(&NodeId::all(1), &mut closest, 20);
+        let closest = table.find_closest(&NodeId::all(1), 20);
 
         let mut closest_iter = closest.into_iter();
         for i in 0..20 {

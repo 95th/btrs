@@ -127,11 +127,11 @@ impl RoutingTable {
     fn read_nodes_with<F>(
         &mut self,
         response: &Response,
-        mut f: F,
         now: Instant,
+        mut f: F,
     ) -> anyhow::Result<()>
     where
-        F: FnMut(&ContactRef),
+        F: FnMut(&ContactRef<'_>),
     {
         if let Some(nodes) = response.body.get_bytes("nodes") {
             for c in CompactNodes::new(nodes)? {
