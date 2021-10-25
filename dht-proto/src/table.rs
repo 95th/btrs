@@ -1,5 +1,6 @@
-use crate::contact::{Contact, ContactRef, ContactStatus};
+use crate::contact::{CompactNodes, CompactNodesV6, Contact, ContactRef, ContactStatus};
 use crate::id::NodeId;
+use crate::msg::recv::Response;
 use crate::util::to_ipv6;
 use crate::{bucket::Bucket, server::ClientRequest};
 
@@ -177,17 +178,41 @@ impl RoutingTable {
             i += 1;
         }
 
-        out.sort_unstable_by_key(|c| target ^ c.id);
-        out.truncate(count);
         out
     }
 
-    #[cfg(test)]
+    pub fn read_nodes_with<F>(
+        &mut self,
+        response: &Response,
+        now: Instant,
+        mut f: F,
+    ) -> anyhow::Result<()>
+    where
+        F: FnMut(&ContactRef<'_>),
+    {
+        if let Some(nodes) = response.body.get_bytes("nodes") {
+            for c in CompactNodes::new(nodes)? {
+                self.add_contact(&c, now);
+                f(&c);
+            }
+        }
+
+        if let Some(nodes6) = response.body.get_bytes("nodes6") {
+            for c in CompactNodesV6::new(nodes6)? {
+                self.add_contact(&c, now);
+                f(&c);
+            }
+        }
+
+        log::trace!("Live: {}, Extra: {}", self.len(), self.len_extra());
+
+        Ok(())
+    }
+
     pub fn len(&self) -> usize {
         self.buckets.iter().map(|b| b.live.len()).sum()
     }
 
-    #[cfg(test)]
     pub fn len_extra(&self) -> usize {
         self.buckets.iter().map(|b| b.extra.len()).sum()
     }

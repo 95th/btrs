@@ -335,9 +335,18 @@ pub enum Event {
 impl fmt::Display for Event {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::FoundPeers { .. } => f.debug_struct("FoundPeers").finish(),
-            Self::Bootstrapped { .. } => f.debug_struct("Bootstrapped").finish(),
-            Self::Transmit { .. } => f.debug_struct("Transmit").finish(),
+            Self::FoundPeers { task_id, .. } => f
+                .debug_struct("FoundPeers")
+                .field("task_id", task_id)
+                .finish(),
+            Self::Bootstrapped { task_id, .. } => f
+                .debug_struct("Bootstrapped")
+                .field("task_id", task_id)
+                .finish(),
+            Self::Transmit { task_id, .. } => f
+                .debug_struct("Transmit")
+                .field("task_id", task_id)
+                .finish(),
             Self::Reply { .. } => f.debug_struct("Reply").finish(),
         }
     }

@@ -69,7 +69,6 @@ impl Task for GetPeersTask {
             };
 
             log::trace!("Send {:?}", msg);
-
             msg.encode(buf);
             msg.txn_id
         })

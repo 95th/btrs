@@ -42,25 +42,33 @@ pub struct TaskId(pub(crate) usize);
 
 pub struct DhtNode {
     pub id: NodeId,
+    pub key: NodeId,
     pub addr: SocketAddr,
     pub status: Status,
 }
 
 impl DhtNode {
-    pub fn new(c: &Contact) -> Self {
+    pub fn new(c: &Contact, target: &NodeId) -> Self {
         Self {
             id: c.id,
+            key: c.id ^ target,
             addr: c.addr,
             status: Status::INITIAL,
         }
     }
 
-    pub fn with_ref(c: &ContactRef<'_>) -> Self {
+    pub fn with_ref(c: &ContactRef<'_>, target: &NodeId) -> Self {
         Self {
             id: *c.id,
+            key: c.id ^ target,
             addr: c.addr,
             status: Status::INITIAL,
         }
+    }
+
+    pub fn set_id(&mut self, id: &NodeId, target: &NodeId) {
+        self.id = *id;
+        self.key = id ^ target;
     }
 }
 

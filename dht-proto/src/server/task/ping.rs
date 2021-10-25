@@ -22,6 +22,7 @@ impl PingTask {
         Self {
             node: DhtNode {
                 id: *id,
+                key: *id,
                 addr: *addr,
                 status: Status::INITIAL,
             },

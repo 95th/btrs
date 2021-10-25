@@ -1,10 +1,6 @@
 use crate::{
-    contact::{CompactNodes, CompactNodesV6, ContactRef},
     id::NodeId,
-    msg::{
-        recv::{Msg, Response},
-        TxnId,
-    },
+    msg::{recv::Msg, TxnId},
     server::task::Task,
     table::RoutingTable,
 };
@@ -120,34 +116,6 @@ impl Dht {
 
         self.rpc
             .handle_response(msg, addr, &mut self.table, &mut self.tasks, now);
-    }
-}
-
-impl RoutingTable {
-    fn read_nodes_with<F>(
-        &mut self,
-        response: &Response,
-        now: Instant,
-        mut f: F,
-    ) -> anyhow::Result<()>
-    where
-        F: FnMut(&ContactRef<'_>),
-    {
-        if let Some(nodes) = response.body.get_bytes("nodes") {
-            for c in CompactNodes::new(nodes)? {
-                self.add_contact(&c, now);
-                f(&c);
-            }
-        }
-
-        if let Some(nodes6) = response.body.get_bytes("nodes6") {
-            for c in CompactNodesV6::new(nodes6)? {
-                self.add_contact(&c, now);
-                f(&c);
-            }
-        }
-
-        Ok(())
     }
 }
 

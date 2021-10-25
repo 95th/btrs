@@ -24,17 +24,26 @@ impl BaseTask {
 
         let mut nodes = vec![];
         for c in closest {
-            nodes.push(DhtNode::new(c));
+            nodes.push(DhtNode::new(c, target));
         }
+
+        log::info!("Closest nodes in the routing table: {}", nodes.len());
 
         if nodes.len() < 3 {
             for node in &table.router_nodes {
                 nodes.push(DhtNode {
                     id: NodeId::new(),
+                    key: *target,
                     addr: *node,
                     status: Status::INITIAL | Status::NO_ID,
                 });
             }
+        }
+
+        nodes.sort_unstable_by_key(|n| n.key);
+
+        for i in &nodes {
+            log::trace!("node: {:?}, key: {:?}", i.id, i.key);
         }
 
         Self {
@@ -56,8 +65,11 @@ impl BaseTask {
     ) {
         log::trace!("Invoke count: {}", self.invoke_count);
         if has_id {
-            if let Some(node) = self.nodes.iter_mut().find(|node| &node.id == resp.id) {
-                node.status.insert(Status::ALIVE);
+            let key = resp.id & self.target;
+            let result = self.nodes.binary_search_by_key(&key, |n| n.key);
+
+            if let Ok(i) = result {
+                self.nodes[i].status.insert(Status::ALIVE);
                 self.invoke_count -= 1;
             } else {
                 log::warn!(
@@ -67,19 +79,19 @@ impl BaseTask {
                 return;
             }
         } else if let Some(node) = self.nodes.iter_mut().find(|node| &node.addr == addr) {
-            node.id = *resp.id;
+            node.set_id(resp.id, &self.target);
             node.status.insert(Status::ALIVE);
+            self.nodes.sort_unstable_by_key(|n| n.key);
             self.invoke_count -= 1;
         }
 
         let result = table.read_nodes_with(resp, now, |c| {
-            let search_result = self
-                .nodes
-                .binary_search_by_key(c.id, |n| n.id ^ self.target);
+            let key = c.id ^ self.target;
+            let search_result = self.nodes.binary_search_by_key(&key, |n| n.key);
 
             // Insert if not present
             if let Err(i) = search_result {
-                self.nodes.insert(i, DhtNode::with_ref(c));
+                self.nodes.insert(i, DhtNode::with_ref(c, &self.target));
             }
         });
 
@@ -91,12 +103,17 @@ impl BaseTask {
             for n in &self.nodes[100..] {
                 if n.status & (Status::QUERIED | Status::ALIVE | Status::FAILED) == Status::QUERIED
                 {
-                    self.invoke_count -= 1;
+                    self.invoke_count = self.invoke_count.saturating_sub(1);
                 }
             }
         }
 
         self.nodes.truncate(100);
+
+        for i in &self.nodes {
+            log::trace!("node: {:?}, key: {:?}", i.id, i.key);
+        }
+
         log::trace!("Invoke count after: {}", self.invoke_count);
     }
 
@@ -107,7 +124,7 @@ impl BaseTask {
             .find(|node| &node.id == id || &node.addr == addr)
         {
             node.status.insert(Status::FAILED);
-            self.invoke_count -= 1;
+            self.invoke_count = self.invoke_count.saturating_sub(1);
         }
     }
 

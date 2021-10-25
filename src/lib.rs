@@ -26,6 +26,5 @@ pub mod msg;
 pub mod peer;
 pub mod storage;
 pub mod torrent;
-mod util;
 pub mod work;
 mod worker;

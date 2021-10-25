@@ -1,5 +1,5 @@
 use ben::Encode;
-use data_encoding::HEXUPPER_PERMISSIVE as hex_decoder;
+use data_encoding::HEXUPPER_PERMISSIVE as hex;
 use rand::distributions::uniform::{SampleBorrow, SampleUniform, UniformSampler};
 use rand::Rng;
 use std::fmt;
@@ -11,7 +11,7 @@ pub struct NodeId([u8; 20]);
 
 impl fmt::Debug for NodeId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}", &self[..])
+        write!(f, "{}", self.encode_hex())
     }
 }
 
@@ -38,12 +38,12 @@ impl NodeId {
         Self::gen().mask_leading_zeros(leading_zeros)
     }
 
-    pub fn from_hex(hex: &[u8]) -> anyhow::Result<Self> {
-        let len = hex_decoder.decode_len(hex.len())?;
+    pub fn from_hex(buf: &[u8]) -> anyhow::Result<Self> {
+        let len = hex.decode_len(buf.len())?;
         anyhow::ensure!(len == 20, "Invalid hex for node ID");
 
         let mut id = Self::new();
-        if let Err(e) = hex_decoder.decode_mut(hex, &mut id[..]) {
+        if let Err(e) = hex.decode_mut(buf, &mut id[..]) {
             anyhow::bail!("Unable to parse hex string: {:?}", e);
         }
 
@@ -54,12 +54,12 @@ impl NodeId {
         self.iter().all(|b| *b == 0)
     }
 
-    pub fn encode_hex(&self, buf: &mut [u8]) -> anyhow::Result<()> {
-        let len = hex_decoder.encode_len(self.len());
-        anyhow::ensure!(len == buf.len(), "Invalid hex for node ID");
+    pub fn encode_hex(&self) -> String {
+        hex.encode(&self.0)
+    }
 
-        hex_decoder.encode_mut(&self[..], buf);
-        Ok(())
+    pub fn encode_base32(&self) -> String {
+        data_encoding::BASE32.encode(&self.0)
     }
 
     /// Returns number of leading zeros.
@@ -233,9 +233,8 @@ mod tests {
     #[test]
     fn encode_hex() {
         let n = NodeId::all(0x3F);
-        let mut buf = [0; 40];
-        n.encode_hex(&mut buf).unwrap();
-        assert_eq!(b"3F3F3F3F3F3F3F3F3F3F3F3F3F3F3F3F3F3F3F3F"[..], buf[..]);
+        let s = n.encode_hex();
+        assert_eq!("3F3F3F3F3F3F3F3F3F3F3F3F3F3F3F3F3F3F3F3F", s);
     }
 
     #[test]

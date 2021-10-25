@@ -190,7 +190,7 @@ impl DhtDriver {
 
     async fn process_events(&mut self, socket: &UdpSocket) {
         while let Some(event) = self.dht.poll_event() {
-            log::debug!("Received event: {:?}", event);
+            log::debug!("Received event: {}", event);
             match event {
                 Event::FoundPeers { task_id: id, peers } => {
                     if let Some(sender) = self.pending.remove(&id) {
