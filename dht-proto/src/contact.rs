@@ -35,7 +35,7 @@ pub struct Contact {
     pub id: NodeId,
     pub addr: SocketAddr,
     pub status: ContactStatus,
-    pub timeout_count: Option<u8>,
+    timeout_count: Option<u8>,
 }
 
 impl Contact {
@@ -81,6 +81,10 @@ impl Contact {
         if let Some(c) = &mut self.timeout_count {
             *c = 0;
         }
+    }
+
+    pub fn set_confirmed(&mut self) {
+        self.timeout_count = Some(0);
     }
 
     pub fn is_confirmed(&self) -> bool {

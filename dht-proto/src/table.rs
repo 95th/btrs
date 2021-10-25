@@ -1,44 +1,51 @@
 use crate::contact::{Contact, ContactRef, ContactStatus};
 use crate::id::NodeId;
 use crate::util::to_ipv6;
-use crate::{
-    bucket::{Bucket, BucketResult},
-    server::ClientRequest,
-};
+use crate::{bucket::Bucket, server::ClientRequest};
 
 use std::collections::HashSet;
+use std::mem::MaybeUninit;
 use std::net::SocketAddr;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 #[derive(Debug)]
 pub struct RoutingTable {
-    pub own_id: NodeId,
-    pub buckets: Vec<Bucket>,
+    pub root_id: NodeId,
+    pub buckets: [Bucket; 160],
+    pub timeouts: [Instant; 160],
     pub router_nodes: HashSet<SocketAddr>,
 }
 
 impl RoutingTable {
-    pub fn new(own_id: NodeId, router_nodes: Vec<SocketAddr>, now: Instant) -> Self {
+    pub fn new(root_id: NodeId, router_nodes: Vec<SocketAddr>, now: Instant) -> Self {
+        // Bucket is not `Copy`. So create it using an uninitialized array
+        let buckets = unsafe {
+            let mut buckets = MaybeUninit::<[Bucket; 160]>::uninit();
+            let ptr = buckets.as_mut_ptr().cast::<Bucket>();
+            for i in 0..160 {
+                ptr.add(i).write(Bucket::new());
+            }
+            buckets.assume_init()
+        };
+
         Self {
-            own_id,
-            buckets: vec![Bucket::new(now)],
+            root_id,
+            buckets,
+            timeouts: [now; 160],
             router_nodes: router_nodes.into_iter().map(to_ipv6).collect(),
         }
     }
 
     pub fn next_timeout(&self) -> Option<Instant> {
-        self.buckets.iter().map(|b| b.timer()).min()
+        self.timeouts.iter().min().copied()
     }
 
     pub fn next_refresh(&mut self, now: Instant) -> Option<ClientRequest> {
-        let (bucket_no, bucket) = self
-            .buckets
-            .iter_mut()
-            .enumerate()
-            .find(|(_, b)| b.timer() < now)?;
+        let idx = self.timeouts.iter().position(|t| now > *t)?;
+        log::trace!("Refresh bucket: {}", idx);
 
-        bucket.reset_timer(now);
-        log::trace!("Refresh bucket: {}", bucket_no);
+        self.timeouts[idx] = next_timeout(now);
+        let bucket = &mut self.buckets[idx];
 
         if bucket.is_full() {
             let c = bucket
@@ -52,45 +59,108 @@ impl RoutingTable {
                 addr: c.addr,
             })
         } else {
-            let id = NodeId::gen_lz(bucket_no);
+            let id = NodeId::gen_leading_zeros(idx);
             Some(ClientRequest::Bootstrap { target: id })
         }
     }
 
     pub fn add_contact(&mut self, contact: &ContactRef<'_>, now: Instant) -> bool {
-        let mut result = self.add_contact_impl(contact, now);
-        loop {
-            match result {
-                BucketResult::Success => return true,
-                BucketResult::Fail => return false,
-                BucketResult::RequireSplit => {}
+        // Don't add router nodes
+        if self.router_nodes.contains(&contact.addr) {
+            return false;
+        }
+
+        // Don't add ourselves
+        if self.root_id == *contact.id {
+            return false;
+        }
+
+        let idx = self.idx_of(contact.id);
+        let bucket = &mut self.buckets[idx];
+        let timeout = &mut self.timeouts[idx];
+
+        if let Some(c) = bucket.live.iter_mut().find(|c| c.id == *contact.id) {
+            if c.addr != contact.addr {
+                return false;
             }
 
-            log::trace!("Split the buckets, before count: {}", self.buckets.len());
-            self.split_bucket(now);
-            log::trace!("Split the buckets, after count : {}", self.buckets.len());
+            c.set_confirmed();
+            *timeout = next_timeout(now);
+            return true;
+        }
 
-            if let Some(last) = self.buckets.iter().last() {
-                if last.live.len() > Bucket::MAX_LEN {
-                    continue;
-                }
+        let maybe_extra = bucket
+            .extra
+            .iter_mut()
+            .enumerate()
+            .find(|(_, c)| c.id == *contact.id);
+
+        let mut contact = contact.as_owned();
+
+        if let Some((i, c)) = maybe_extra {
+            if c.addr != contact.addr {
+                return false;
             }
 
-            result = self.add_contact_impl(contact, now);
+            c.set_confirmed();
+            contact = bucket.extra.remove(i);
+        }
 
-            if let Some(last) = self.buckets.iter().last() {
-                if last.live.is_empty() {
-                    self.buckets.pop();
-                    debug_assert_ne!(result, BucketResult::RequireSplit);
-                }
+        if bucket.live.len() < Bucket::MAX_LEN {
+            if bucket.live.is_empty() {
+                bucket.live.reserve(Bucket::MAX_LEN);
+            }
+            bucket.live.push(contact);
+            *timeout = next_timeout(now);
+            return true;
+        }
+
+        if contact.is_confirmed() {
+            return if bucket.replace_node(&contact) {
+                *timeout = next_timeout(now);
+                true
+            } else {
+                false
+            };
+        }
+
+        // if we can't split, nor replace anything in the live buckets try to insert
+        // into the replacement bucket
+
+        // if we don't have any identified stale nodes in
+        // the bucket, and the bucket is full, we have to
+        // cache this node and wait until some node fails
+        // and then replace it.
+        if let Some(c) = bucket.extra.iter_mut().find(|c| c.addr == contact.addr) {
+            c.set_pinged();
+            return true;
+        }
+
+        if bucket.extra.len() >= Bucket::MAX_LEN {
+            if let Some(i) = bucket.extra.iter().position(|c| !c.is_pinged()) {
+                bucket.extra.remove(i);
+            } else {
+                return if bucket.replace_node(&contact) {
+                    *timeout = next_timeout(now);
+                    true
+                } else {
+                    false
+                };
             }
         }
+
+        if bucket.extra.is_empty() {
+            bucket.extra.reserve(Bucket::MAX_LEN);
+        }
+        bucket.extra.push(contact);
+        *timeout = next_timeout(now);
+        true
     }
 
     pub fn find_closest(&self, target: &NodeId, count: usize) -> Vec<&Contact> {
         let mut out = Vec::with_capacity(count);
 
-        let bucket_no = self.find_bucket(target);
+        let bucket_no = self.idx_of(target);
         self.buckets[bucket_no].get_contacts(&mut out);
 
         let len = self.buckets.len();
@@ -127,7 +197,7 @@ impl RoutingTable {
     }
 
     pub fn find_contact(&mut self, id: &NodeId) -> Option<&mut Contact> {
-        let idx = self.find_bucket(id);
+        let idx = self.idx_of(id);
         self.buckets[idx].live.iter_mut().find(|c| c.id == *id)
     }
 
@@ -138,126 +208,26 @@ impl RoutingTable {
     }
 
     pub fn heard_from(&mut self, id: &NodeId, now: Instant) {
-        let idx = self.find_bucket(id);
+        let idx = self.idx_of(id);
         let bucket = &mut self.buckets[idx];
 
         if let Some(c) = bucket.live.iter_mut().find(|c| c.id == *id) {
             c.status = ContactStatus::ALIVE | ContactStatus::QUERIED;
             c.clear_timeout();
-            bucket.reset_timer(now);
+            self.timeouts[idx] = next_timeout(now);
         }
     }
 
-    fn add_contact_impl(&mut self, contact: &ContactRef<'_>, now: Instant) -> BucketResult {
-        use BucketResult::*;
-        if self.router_nodes.contains(&contact.addr) {
-            return Fail;
-        }
-
-        // Don't add ourselves
-        if self.own_id == *contact.id {
-            return Fail;
-        }
-
-        let bucket_index = self.find_bucket(contact.id);
-        let bucket_count = self.buckets.len();
-        let can_split = { bucket_index + 1 == bucket_count && bucket_count < 159 };
-
-        let bucket = &mut self.buckets[bucket_index];
-
-        if let Some(c) = bucket.live.iter_mut().find(|c| c.id == *contact.id) {
-            if c.addr != contact.addr {
-                return Fail;
-            }
-
-            c.timeout_count = Some(0);
-            bucket.reset_timer(now);
-            return Success;
-        }
-
-        let maybe_extra = bucket
-            .extra
-            .iter_mut()
-            .enumerate()
-            .find(|(_, c)| c.id == *contact.id);
-
-        let mut contact = contact.as_owned();
-
-        if let Some((i, c)) = maybe_extra {
-            if c.addr != contact.addr {
-                return Fail;
-            }
-
-            c.timeout_count = Some(0);
-            contact = bucket.extra.remove(i);
-        }
-
-        if bucket.live.len() < Bucket::MAX_LEN {
-            if bucket.live.is_empty() {
-                bucket.live.reserve(Bucket::MAX_LEN);
-            }
-            bucket.live.push(contact);
-            bucket.reset_timer(now);
-            return Success;
-        }
-
-        if can_split {
-            return RequireSplit;
-        }
-
-        if contact.is_confirmed() {
-            let result = bucket.replace_node(&contact, now);
-            if result != RequireSplit {
-                return result;
-            }
-        }
-
-        // if we can't split, nor replace anything in the live buckets try to insert
-        // into the replacement bucket
-
-        // if we don't have any identified stale nodes in
-        // the bucket, and the bucket is full, we have to
-        // cache this node and wait until some node fails
-        // and then replace it.
-        if let Some(c) = bucket.extra.iter_mut().find(|c| c.addr == contact.addr) {
-            c.set_pinged();
-            return Success;
-        }
-
-        if bucket.extra.len() >= Bucket::MAX_LEN {
-            if let Some(i) = bucket.extra.iter().position(|c| !c.is_pinged()) {
-                bucket.extra.remove(i);
-            } else {
-                let result = bucket.replace_node(&contact, now);
-                return if let Success = result { Success } else { Fail };
-            }
-        }
-
-        if bucket.extra.is_empty() {
-            bucket.extra.reserve(Bucket::MAX_LEN);
-        }
-        bucket.extra.push(contact);
-        bucket.reset_timer(now);
-        Success
+    fn idx_of(&self, id: &NodeId) -> usize {
+        self.root_id.xor_leading_zeros(id)
     }
+}
 
-    fn split_bucket(&mut self, now: Instant) {
-        if self.buckets.is_empty() {
-            return;
-        }
+fn next_timeout(instant: Instant) -> Instant {
+    // 15 mins
+    const BUCKET_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 
-        let index = self.buckets.len() - 1;
-        let last_bucket = &mut self.buckets[index];
-
-        let new_bucket = last_bucket.split(&self.own_id, index, now);
-        self.buckets.push(new_bucket);
-    }
-
-    fn find_bucket(&self, id: &NodeId) -> usize {
-        let idx = self.own_id.xlz(id);
-        let last_idx = self.buckets.len().checked_sub(1).unwrap();
-        idx.min(last_idx)
-    }
+    instant + BUCKET_TIMEOUT
 }
 
 #[cfg(test)]

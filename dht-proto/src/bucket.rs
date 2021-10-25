@@ -1,33 +1,19 @@
 use crate::contact::Contact;
-use crate::id::NodeId;
-use std::time::{Duration, Instant};
 
-// Refresh every 15 mins
-const REFRESH_INTERVAL: Duration = Duration::from_secs(15 * 60);
-
-#[derive(Debug, PartialEq)]
-pub enum BucketResult {
-    Fail,
-    Success,
-    RequireSplit,
-}
-
-#[derive(Debug)]
+#[derive(Debug, Default, Clone)]
 pub struct Bucket {
     pub live: Vec<Contact>,
     pub extra: Vec<Contact>,
-    next_refresh: Instant,
 }
 
 impl Bucket {
     // The 'K' constant in Kademlia algorithm
     pub const MAX_LEN: usize = 8;
 
-    pub fn new(now: Instant) -> Self {
+    pub const fn new() -> Self {
         Self {
-            live: vec![],
-            extra: vec![],
-            next_refresh: now + REFRESH_INTERVAL,
+            live: Vec::new(),
+            extra: Vec::new(),
         }
     }
 
@@ -42,64 +28,10 @@ impl Bucket {
             .for_each(|c| out.push(c));
     }
 
-    pub fn reset_timer(&mut self, now: Instant) {
-        self.next_refresh = now + REFRESH_INTERVAL;
-    }
-
-    pub fn timer(&self) -> Instant {
-        self.next_refresh
-    }
-
-    pub fn replace_node(&mut self, contact: &Contact, now: Instant) -> BucketResult {
+    pub fn replace_node(&mut self, contact: &Contact) -> bool {
         debug_assert!(self.live.len() >= Bucket::MAX_LEN);
 
-        if replace_stale(&mut self.live, contact) || replace_stale(&mut self.extra, contact) {
-            self.reset_timer(now);
-            BucketResult::Success
-        } else {
-            BucketResult::RequireSplit
-        }
-    }
-
-    pub fn split(&mut self, own_id: &NodeId, curr_index: usize, now: Instant) -> Bucket {
-        debug_assert!(self.live.len() >= Bucket::MAX_LEN);
-
-        let mut new_bucket = Bucket::new(now);
-        let mut i = 0;
-        while i < self.live.len() {
-            let bucket_index = self.live[i].id.xlz(own_id);
-            if bucket_index == curr_index {
-                i += 1;
-                continue;
-            }
-
-            new_bucket.live.push(self.live.remove(i));
-        }
-
-        if self.live.len() > Bucket::MAX_LEN {
-            self.extra.extend(self.live.drain(Bucket::MAX_LEN..));
-        }
-
-        let mut i = 0;
-        while i < self.extra.len() {
-            let bucket_index = self.extra[i].id.xlz(own_id);
-            if bucket_index == curr_index {
-                if self.live.len() >= Bucket::MAX_LEN {
-                    i += 1;
-                    continue;
-                }
-                self.live.push(self.extra.remove(i));
-            } else {
-                let contact = self.extra.remove(i);
-                if new_bucket.live.len() < Bucket::MAX_LEN {
-                    new_bucket.live.push(contact);
-                } else {
-                    new_bucket.extra.push(contact);
-                }
-            }
-        }
-
-        new_bucket
+        replace_stale(&mut self.live, contact) || replace_stale(&mut self.extra, contact)
     }
 }
 

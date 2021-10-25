@@ -34,10 +34,8 @@ impl NodeId {
         id
     }
 
-    pub fn gen_lz(leading_zeros: usize) -> Self {
-        let mask = Self::mask_lz(leading_zeros);
-        let gen = Self::gen();
-        gen & mask
+    pub fn gen_leading_zeros(leading_zeros: usize) -> Self {
+        Self::gen().mask_leading_zeros(leading_zeros)
     }
 
     pub fn from_hex(hex: &[u8]) -> anyhow::Result<Self> {
@@ -65,7 +63,7 @@ impl NodeId {
     }
 
     /// Returns number of leading zeros.
-    pub fn lz(&self) -> usize {
+    pub fn leading_zeros(&self) -> usize {
         let mut n = 0;
         for &c in self.iter() {
             if c == 0 {
@@ -79,26 +77,25 @@ impl NodeId {
     }
 
     /// Returns number of leading zeros of `XOR` of `self` with given `NodeId`
-    pub fn xlz(&self, other: &Self) -> usize {
-        (self ^ other).lz()
+    pub fn xor_leading_zeros(&self, other: &Self) -> usize {
+        (self ^ other).leading_zeros()
     }
 
-    pub fn mask_lz(leading_zeros: usize) -> Self {
+    fn mask_leading_zeros(mut self, leading_zeros: usize) -> Self {
         if leading_zeros >= 160 {
             return Self::new();
         }
 
-        let mut id = Self::max();
         for i in 0..leading_zeros / 8 {
-            id[i] = 0;
+            self[i] = 0;
         }
 
         if leading_zeros % 8 != 0 {
             let idx = leading_zeros / 8;
-            id[idx] = 0xff >> (leading_zeros % 8);
+            self[idx] = 0xff >> (leading_zeros % 8);
         }
 
-        id
+        self
     }
 }
 
@@ -257,30 +254,30 @@ mod tests {
     }
 
     #[test]
-    fn test_gen_lz() {
-        let n = NodeId::gen_lz(5);
-        assert!(n.lz() >= 5);
+    fn test_gen_leading_zeros() {
+        let n = NodeId::gen_leading_zeros(5);
+        assert!(n.leading_zeros() >= 5);
     }
 
     #[test]
-    fn test_mask_lz() {
-        let actual = NodeId::mask_lz(5);
+    fn test_mask_leading_zeros() {
+        let actual = NodeId::max().mask_leading_zeros(5);
         let mut expected = NodeId::max();
         expected[0] = 0b0000_0111;
-        assert_eq!(5, actual.lz());
+        assert_eq!(5, actual.leading_zeros());
         assert_eq!(expected, actual);
 
-        let actual = NodeId::mask_lz(8);
+        let actual = NodeId::max().mask_leading_zeros(8);
         let mut expected = NodeId::max();
         expected[0] = 0;
-        assert_eq!(8, actual.lz());
+        assert_eq!(8, actual.leading_zeros());
         assert_eq!(expected, actual);
 
-        let actual = NodeId::mask_lz(9);
+        let actual = NodeId::max().mask_leading_zeros(9);
         let mut expected = NodeId::max();
         expected[0] = 0;
         expected[1] = 0b0111_1111;
-        assert_eq!(9, actual.lz());
+        assert_eq!(9, actual.leading_zeros());
         assert_eq!(expected, actual);
     }
 }
