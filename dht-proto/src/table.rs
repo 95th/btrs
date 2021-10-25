@@ -87,7 +87,7 @@ impl RoutingTable {
         }
     }
 
-    pub fn find_closest<'a>(&'a self, target: &NodeId, count: usize) -> Vec<&'a Contact> {
+    pub fn find_closest(&self, target: &NodeId, count: usize) -> Vec<&Contact> {
         let mut out = Vec::with_capacity(count);
 
         let bucket_no = self.find_bucket(target);
