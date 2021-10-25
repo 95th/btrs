@@ -368,7 +368,7 @@ mod tests {
 
         let event = dht.poll_event().unwrap();
 
-        match event {
+        let data = match event {
             Event::Transmit {
                 task_id,
                 data,
@@ -377,20 +377,21 @@ mod tests {
             } => {
                 assert_eq!(task_id, dht.tasks[0].id());
                 assert_eq!(target, router);
-
-                let mut parser = Parser::new();
-                let msg = parser.parse::<Msg>(&data).unwrap();
-
-                match msg {
-                    Msg::Query(query) => {
-                        assert_eq!(query.id, &id);
-                        assert_eq!(query.txn_id, txn_id);
-                        assert!(matches!(query.kind, QueryKind::FindNode { .. }));
-                    }
-                    _ => panic!("Unexpected msg: {:?}", msg),
-                };
+                data
             }
             _ => panic!("Unexpected event: {:?}", event),
+        };
+
+        let mut parser = Parser::new();
+        let msg = parser.parse::<Msg>(&data).unwrap();
+
+        match msg {
+            Msg::Query(query) => {
+                assert_eq!(query.id, &id);
+                assert_eq!(query.txn_id, txn_id);
+                assert!(matches!(query.kind, QueryKind::FindNode { .. }));
+            }
+            _ => panic!("Unexpected msg: {:?}", msg),
         }
     }
 }
