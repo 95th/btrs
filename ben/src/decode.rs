@@ -789,7 +789,10 @@ mod tests {
         let n = parser.parse::<Decoder>(s).unwrap();
         assert!(n.as_bytes().is_some());
         assert!(n.as_ascii_str().is_none());
-        assert_eq!("`Bytes:[1, 1, 1]`", format!("{:?}", n));
+        assert_eq!(
+            format!("'{}'", data_encoding::BASE32.encode(&[1, 1, 1])),
+            format!("{:?}", n)
+        );
     }
 
     #[test]
