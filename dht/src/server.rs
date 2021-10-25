@@ -94,8 +94,6 @@ impl DhtDriver {
 
         let recv_buf: &mut [u8] = &mut [0; 1024];
 
-        self.wait_until_idle(socket, recv_buf).await;
-
         let timer = sleep_until(self.next_timeout());
         tokio::pin!(timer);
 
@@ -151,41 +149,6 @@ impl DhtDriver {
                 complete => break,
             }
         }
-    }
-
-    async fn wait_until_idle(&mut self, socket: &UdpSocket, recv_buf: &mut [u8]) {
-        self.process_events(socket).await;
-
-        let timer = sleep_until(self.next_timeout());
-        tokio::pin!(timer);
-
-        while !self.dht.is_idle() {
-            log::info!("Waiting for DHT to bootstrap");
-            select! {
-                // Check timeouts
-                _ = timer.as_mut().fuse() => {
-                    self.dht.tick(Instant::now());
-                    self.process_events(socket).await;
-                    timer.as_mut().reset(self.next_timeout());
-                },
-
-                // Listen for response
-                resp = socket.recv_from(recv_buf).fuse() => {
-                    let (n, addr) = match resp {
-                        Ok(x) => x,
-                        Err(e) => {
-                            log::warn!("Error: {}", e);
-                            continue;
-                        },
-                    };
-
-                    self.dht.receive(&recv_buf[..n], addr, Instant::now());
-                    self.process_events(socket).await;
-                    timer.as_mut().reset(self.next_timeout());
-                }
-            }
-        }
-        log::info!("Bootstrap done");
     }
 
     async fn process_events(&mut self, socket: &UdpSocket) {

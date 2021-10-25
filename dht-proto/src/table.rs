@@ -1,7 +1,6 @@
 use crate::contact::{CompactNodes, CompactNodesV6, Contact, ContactRef, ContactStatus};
 use crate::id::NodeId;
 use crate::msg::recv::Response;
-use crate::util::to_ipv6;
 use crate::{bucket::Bucket, server::ClientRequest};
 
 use std::collections::HashSet;
@@ -35,7 +34,7 @@ impl RoutingTable {
             root_id,
             buckets,
             timeouts: [next_timeout(now); BUCKETS],
-            router_nodes: router_nodes.into_iter().map(to_ipv6).collect(),
+            router_nodes: router_nodes.into_iter().collect(),
         }
     }
 
