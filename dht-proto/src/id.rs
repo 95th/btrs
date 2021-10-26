@@ -30,6 +30,10 @@ impl NodeId {
         Self([b; 20])
     }
 
+    pub fn from_ref(bytes: &[u8; 20]) -> &Self {
+        unsafe { &*bytes.as_ptr().cast() }
+    }
+
     pub fn gen() -> Self {
         let mut id = Self::new();
         rand::thread_rng().fill(&mut id[..]);

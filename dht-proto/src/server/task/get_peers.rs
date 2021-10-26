@@ -4,6 +4,7 @@ use crate::msg::send::GetPeers;
 use crate::server::rpc::Event;
 use crate::server::RpcManager;
 use crate::table::RoutingTable;
+use crate::util::ArrayReader;
 use ben::{Decoder, Encode};
 use std::collections::HashSet;
 use std::net::SocketAddr;
@@ -86,12 +87,10 @@ impl Task for GetPeersTask {
 fn decode_peer(d: Decoder) -> Option<SocketAddr> {
     if let Some(b) = d.as_bytes() {
         if b.len() == 6 {
-            unsafe {
-                let p = b.as_ptr();
-                let ip = *p.cast::<[u8; 4]>();
-                let port = u16::from_be_bytes(*p.add(4).cast());
-                return Some((ip, port).into());
-            }
+            let mut reader = ArrayReader::new(b);
+            let ip = reader.read::<4>()?;
+            let port = reader.read::<2>()?;
+            return Some((*ip, u16::from_be_bytes(*port)).into());
         } else {
             log::warn!("Incorrect Peer length. Expected: 6, Actual: {}", b.len());
         }

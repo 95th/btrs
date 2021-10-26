@@ -1,4 +1,7 @@
-use crate::{id::NodeId, util};
+use crate::{
+    id::NodeId,
+    util::{self, ArrayReader},
+};
 use ben::{Encode, LazyBytesEncoder};
 use std::net::{IpAddr, SocketAddr};
 
@@ -104,7 +107,7 @@ impl Encode for Contact {
 }
 
 pub struct CompactNodes<'a> {
-    buf: &'a [u8],
+    reader: ArrayReader<'a>,
 }
 
 impl<'a> CompactNodes<'a> {
@@ -115,7 +118,9 @@ impl<'a> CompactNodes<'a> {
             buf.len()
         );
 
-        Ok(Self { buf })
+        Ok(Self {
+            reader: ArrayReader::new(buf),
+        })
     }
 }
 
@@ -123,28 +128,19 @@ impl<'a> Iterator for CompactNodes<'a> {
     type Item = ContactRef<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.buf.len() < 26 {
-            debug_assert!(self.buf.is_empty());
-            return None;
-        }
+        let id = self.reader.read::<20>()?;
+        let addr = self.reader.read::<4>()?;
+        let port = self.reader.read::<2>()?;
 
-        unsafe {
-            let p = self.buf.as_ptr();
-            let id = &*p.cast::<NodeId>();
-            let addr = &*p.add(20).cast::<[u8; 4]>();
-            let port = u16::from_be_bytes(*p.add(36).cast());
-
-            self.buf = &self.buf[26..];
-            Some(ContactRef {
-                id,
-                addr: SocketAddr::from((*addr, port)),
-            })
-        }
+        Some(ContactRef {
+            id: NodeId::from_ref(id),
+            addr: SocketAddr::from((*addr, u16::from_be_bytes(*port))),
+        })
     }
 }
 
 pub struct CompactNodesV6<'a> {
-    buf: &'a [u8],
+    reader: ArrayReader<'a>,
 }
 
 impl<'a> CompactNodesV6<'a> {
@@ -155,7 +151,9 @@ impl<'a> CompactNodesV6<'a> {
             buf.len()
         );
 
-        Ok(Self { buf })
+        Ok(Self {
+            reader: ArrayReader::new(buf),
+        })
     }
 }
 
@@ -163,22 +161,13 @@ impl<'a> Iterator for CompactNodesV6<'a> {
     type Item = ContactRef<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.buf.len() < 38 {
-            debug_assert!(self.buf.is_empty());
-            return None;
-        }
+        let id = self.reader.read::<20>()?;
+        let addr = self.reader.read::<16>()?;
+        let port = self.reader.read::<2>()?;
 
-        unsafe {
-            let p = self.buf.as_ptr();
-            let id = &*p.cast::<NodeId>();
-            let addr = &*p.add(20).cast::<[u8; 16]>();
-            let port = u16::from_be_bytes(*p.add(36).cast());
-
-            self.buf = &self.buf[38..];
-            Some(ContactRef {
-                id,
-                addr: SocketAddr::from((*addr, port)),
-            })
-        }
+        Some(ContactRef {
+            id: NodeId::from_ref(id),
+            addr: SocketAddr::from((*addr, u16::from_be_bytes(*port))),
+        })
     }
 }
