@@ -389,6 +389,40 @@ mod tests {
         assert_eq!(&b"ld1:0i1e1:1i2eed1:xi1e1:y11:Hello worldee"[..], &buf[..]);
     }
 
+    #[test]
+    fn lazy_bytes_empty() {
+        let mut v = vec![];
+        let b = LazyBytesEncoder::<2>::new(&mut v);
+        b.finish();
+        assert_eq!(v, [b'0', b':']);
+    }
+
+    #[test]
+    fn lazy_bytes_partially_filled() {
+        let mut v = vec![];
+        let mut b = LazyBytesEncoder::<2>::new(&mut v);
+        b.extend(&[1]);
+        b.finish();
+        assert_eq!(v, [b'1', b':', 1]);
+    }
+
+    #[test]
+    fn lazy_bytes_filled() {
+        let mut v = vec![];
+        let mut b = LazyBytesEncoder::<2>::new(&mut v);
+        b.extend(&[1, 2]);
+        b.finish();
+        assert_eq!(v, [b'2', b':', 1, 2]);
+    }
+
+    #[test]
+    #[should_panic]
+    fn lazy_bytes_extra() {
+        let mut v = vec![];
+        let mut b = LazyBytesEncoder::<2>::new(&mut v);
+        b.extend(&[1, 2, 3]);
+    }
+
     #[cfg(debug_assertions)]
     mod debug {
         use super::*;
