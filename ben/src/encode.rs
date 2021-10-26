@@ -65,6 +65,12 @@ impl<'a> ListEncoder<'a> {
         self.buf.into()
     }
 
+    /// Create a new `LazyBytesEncoder` in this list.
+    #[inline]
+    pub fn push_bytes_lazy<const N: usize>(&mut self) -> LazyBytesEncoder<'_, N> {
+        self.buf.into()
+    }
+
     /// Finish building this list.
     #[inline]
     pub fn finish(self) {}
@@ -124,6 +130,13 @@ impl<'a> DictEncoder<'a> {
         self.buf.into()
     }
 
+    /// Create a new `LazyBytesEncoder` for given key inside this dictionary.
+    #[inline]
+    pub fn insert_bytes_lazy<const N: usize>(&mut self, key: &str) -> LazyBytesEncoder<'_, N> {
+        self.insert_key(key);
+        self.buf.into()
+    }
+
     fn insert_key(&mut self, key: &str) {
         self.assert_key_ordering(key);
         encode_bytes(self.buf, key);
@@ -163,6 +176,37 @@ impl Drop for DictEncoder<'_> {
     }
 }
 
+pub struct LazyBytesEncoder<'a, const N: usize> {
+    buf: &'a mut Vec<u8>,
+    data: [u8; N],
+    len: usize,
+}
+
+impl<'a, const N: usize> LazyBytesEncoder<'a, N> {
+    pub fn new(buf: &'a mut Vec<u8>) -> Self {
+        Self {
+            buf,
+            data: [0; N],
+            len: 0,
+        }
+    }
+
+    pub fn extend(&mut self, bytes: impl AsRef<[u8]>) {
+        let bytes = bytes.as_ref();
+        let new_len = self.len + bytes.len();
+        self.data[self.len..new_len].copy_from_slice(bytes);
+        self.len = new_len;
+    }
+
+    pub fn finish(self) {}
+}
+
+impl<'a, const N: usize> Drop for LazyBytesEncoder<'a, N> {
+    fn drop(&mut self) {
+        self.data[..self.len].encode(self.buf);
+    }
+}
+
 impl<'a> From<&'a mut Vec<u8>> for ListEncoder<'a> {
     fn from(buf: &'a mut Vec<u8>) -> Self {
         Self::new(buf)
@@ -170,6 +214,12 @@ impl<'a> From<&'a mut Vec<u8>> for ListEncoder<'a> {
 }
 
 impl<'a> From<&'a mut Vec<u8>> for DictEncoder<'a> {
+    fn from(buf: &'a mut Vec<u8>) -> Self {
+        Self::new(buf)
+    }
+}
+
+impl<'a, const N: usize> From<&'a mut Vec<u8>> for LazyBytesEncoder<'a, N> {
     fn from(buf: &'a mut Vec<u8>) -> Self {
         Self::new(buf)
     }

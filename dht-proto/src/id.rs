@@ -5,9 +5,11 @@ use rand::Rng;
 use std::fmt;
 use std::ops::{BitAnd, BitXor, Deref, DerefMut};
 
+type Bytes = [u8; 20];
+
 #[derive(Copy, Clone, Default, PartialEq, PartialOrd, Eq, Ord, Hash)]
 #[repr(transparent)]
-pub struct NodeId([u8; 20]);
+pub struct NodeId(Bytes);
 
 impl fmt::Debug for NodeId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -99,14 +101,14 @@ impl NodeId {
     }
 }
 
-impl From<[u8; 20]> for NodeId {
-    fn from(buf: [u8; 20]) -> Self {
+impl From<Bytes> for NodeId {
+    fn from(buf: Bytes) -> Self {
         Self(buf)
     }
 }
 
 impl Deref for NodeId {
-    type Target = [u8; 20];
+    type Target = Bytes;
 
     fn deref(&self) -> &Self::Target {
         &self.0
@@ -115,6 +117,18 @@ impl Deref for NodeId {
 
 impl DerefMut for NodeId {
     fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl AsRef<[u8]> for NodeId {
+    fn as_ref(&self) -> &[u8] {
+        &self.0
+    }
+}
+
+impl AsMut<[u8]> for NodeId {
+    fn as_mut(&mut self) -> &mut [u8] {
         &mut self.0
     }
 }
