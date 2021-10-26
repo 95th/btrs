@@ -135,7 +135,7 @@ impl AsMut<[u8]> for NodeId {
 
 impl Encode for NodeId {
     fn encode(&self, buf: &mut Vec<u8>) {
-        ben::encode_bytes(buf, &self[..]);
+        ben::encode_bytes(buf, self);
     }
 }
 
