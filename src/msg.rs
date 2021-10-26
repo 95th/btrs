@@ -36,7 +36,7 @@ impl Message {
             Extended { .. } => 20,
             Unknown { .. } => {
                 debug_assert!(false, "Can't be here");
-                u8::max_value()
+                u8::MAX
             }
         }
     }

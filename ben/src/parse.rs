@@ -13,8 +13,8 @@ impl Default for Parser {
     fn default() -> Self {
         Self {
             tokens: vec![],
-            token_limit: usize::max_value(),
-            depth_limit: usize::max_value(),
+            token_limit: usize::MAX,
+            depth_limit: usize::MAX,
         }
     }
 }

@@ -23,7 +23,7 @@ impl NodeId {
     }
 
     pub const fn max() -> Self {
-        Self::all(u8::max_value())
+        Self::all(u8::MAX)
     }
 
     pub const fn all(b: u8) -> Self {
