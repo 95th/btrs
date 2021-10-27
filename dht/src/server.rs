@@ -3,7 +3,7 @@ use proto::{Event, NodeId};
 use futures::{select, FutureExt};
 use std::{
     collections::HashSet,
-    net::{Ipv6Addr, SocketAddr},
+    net::{IpAddr, Ipv6Addr, SocketAddr},
     time::{Duration, Instant},
 };
 use tokio::{
@@ -63,7 +63,7 @@ impl Dht {
                 // Listen for response
                 resp = self.socket.recv_from(&mut self.recv_buf).fuse() => {
                     match resp {
-                        Ok((len, addr)) => self.dht.receive(&self.recv_buf[..len], addr, Instant::now()),
+                        Ok((len, addr)) => self.dht.receive(&self.recv_buf[..len], unmap_ipv4(addr), Instant::now()),
                         Err(e) => {
                             log::warn!("Error: {}", e);
                             continue;
@@ -109,12 +109,22 @@ impl Dht {
     }
 
     fn next_timeout(&self) -> TokioInstant {
-        // 15 mins
-        const DEFAULT_TIMER: Duration = Duration::from_secs(15 * 60);
+        // 10 secs
+        const DEFAULT_TIMER: Duration = Duration::from_secs(10);
 
         match self.dht.poll_timeout() {
             Some(t) => t.into(),
             None => TokioInstant::now() + DEFAULT_TIMER,
         }
     }
+}
+
+fn unmap_ipv4(addr: SocketAddr) -> SocketAddr {
+    if let IpAddr::V6(ip) = addr.ip() {
+        if let Some(ip) = ip.to_ipv4() {
+            return SocketAddr::new(IpAddr::V4(ip), addr.port());
+        }
+    }
+
+    addr
 }

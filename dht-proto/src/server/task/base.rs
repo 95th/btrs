@@ -14,7 +14,7 @@ pub struct BaseTask {
     pub target: NodeId,
     pub nodes: Vec<DhtNode>,
     pub branch_factor: u8,
-    pub invoke_count: u8,
+    pub invoked: u8,
     pub task_id: TaskId,
 }
 
@@ -42,15 +42,11 @@ impl BaseTask {
 
         nodes.sort_unstable_by_key(|n| n.key);
 
-        for i in &nodes {
-            log::trace!("node: {:?}, key: {:?}", i.id, i.key);
-        }
-
         Self {
             target: *target,
             nodes,
             branch_factor: 3,
-            invoke_count: 0,
+            invoked: 0,
             task_id,
         }
     }
@@ -63,14 +59,14 @@ impl BaseTask {
         has_id: bool,
         now: Instant,
     ) {
-        log::trace!("Invoke count: {}", self.invoke_count);
+        log::trace!("Invoked before: {}", self.invoked);
         if has_id {
-            let key = resp.id & self.target;
+            let key = resp.id ^ self.target;
             let result = self.nodes.binary_search_by_key(&key, |n| n.key);
 
             if let Ok(i) = result {
                 self.nodes[i].status.insert(Status::ALIVE);
-                self.invoke_count -= 1;
+                self.invoked -= 1;
             } else {
                 log::warn!(
                     "Received a response, but no corresponding DHT node found. {:?}",
@@ -82,7 +78,7 @@ impl BaseTask {
             node.set_id(resp.id, &self.target);
             node.status.insert(Status::ALIVE);
             self.nodes.sort_unstable_by_key(|n| n.key);
-            self.invoke_count -= 1;
+            self.invoked -= 1;
         }
 
         let result = table.read_nodes_with(resp, now, |c| {
@@ -100,31 +96,29 @@ impl BaseTask {
         }
 
         if self.nodes.len() > 100 {
+            let mask = Status::QUERIED | Status::ALIVE | Status::FAILED;
+
             for n in &self.nodes[100..] {
-                if n.status & (Status::QUERIED | Status::ALIVE | Status::FAILED) == Status::QUERIED
-                {
-                    self.invoke_count = self.invoke_count.saturating_sub(1);
+                if n.status & mask == Status::QUERIED {
+                    self.invoked -= 1;
                 }
             }
         }
 
         self.nodes.truncate(100);
 
-        for i in &self.nodes {
-            log::trace!("node: {:?}, key: {:?}", i.id, i.key);
-        }
-
-        log::trace!("Invoke count after: {}", self.invoke_count);
+        log::trace!("Invoked after: {}", self.invoked);
     }
 
     pub fn set_failed(&mut self, id: &NodeId, addr: &SocketAddr) {
-        if let Some(node) = self
-            .nodes
-            .iter_mut()
-            .find(|node| &node.id == id || &node.addr == addr)
-        {
+        let key = id ^ self.target;
+        if let Ok(i) = self.nodes.binary_search_by_key(&key, |n| n.key) {
+            let node = &mut self.nodes[i];
             node.status.insert(Status::FAILED);
-            self.invoke_count = self.invoke_count.saturating_sub(1);
+            self.invoked -= 1;
+        } else if let Some(node) = self.nodes.iter_mut().find(|n| n.addr == *addr) {
+            node.status.insert(Status::FAILED);
+            self.invoked -= 1;
         }
     }
 
@@ -132,15 +126,18 @@ impl BaseTask {
     where
         F: FnMut(&mut Vec<u8>, &mut RpcManager) -> TxnId,
     {
-        let mut outstanding = 0;
+        let mut pending = 0;
         let mut alive = 0;
+
+        // If newer nodes are found and a pending node falls out of the `branch_factor` window,
+        // it is not considered pending anymore and a new request can be made.
 
         for n in &mut self.nodes {
             if alive == Bucket::MAX_LEN {
                 break;
             }
 
-            if outstanding == self.branch_factor {
+            if pending == self.branch_factor {
                 break;
             }
 
@@ -151,7 +148,7 @@ impl BaseTask {
 
             if n.status.contains(Status::QUERIED) {
                 if !n.status.contains(Status::FAILED) {
-                    outstanding += 1;
+                    pending += 1;
                 }
                 continue;
             };
@@ -164,16 +161,19 @@ impl BaseTask {
             n.status.insert(Status::QUERIED);
             rpc.txns.insert(txn_id, &n.id, &n.addr, self.task_id, now);
 
-            outstanding += 1;
-            self.invoke_count += 1;
+            pending += 1;
+            self.invoked += 1;
         }
 
         log::trace!(
-            "Outstanding: {}, alive; {}, invoke_count: {}",
-            outstanding,
+            "Pending: {}, alive; {}, Invoked: {}",
+            pending,
             alive,
-            self.invoke_count
+            self.invoked
         );
-        (outstanding == 0 && alive == Bucket::MAX_LEN) || self.invoke_count == 0
+
+        // We are done when there are no pending nodes and we found `k` alive nodes
+        // OR there are no queried nodes
+        (pending == 0 && alive == Bucket::MAX_LEN) || self.invoked == 0
     }
 }
