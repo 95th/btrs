@@ -1,11 +1,21 @@
 use std::net::{IpAddr, SocketAddr};
 
 pub fn write_addr(buf: &mut Vec<u8>, addr: &SocketAddr) {
-    match addr.ip() {
-        IpAddr::V4(a) => buf.extend(&a.octets()),
-        IpAddr::V6(a) => buf.extend(&a.octets()),
-    }
+    addr.ip().with_bytes(|b| buf.extend(b));
     buf.extend(&addr.port().to_be_bytes());
+}
+
+pub trait WithBytes {
+    fn with_bytes<R>(&self, f: impl FnOnce(&[u8]) -> R) -> R;
+}
+
+impl WithBytes for IpAddr {
+    fn with_bytes<R>(&self, f: impl FnOnce(&[u8]) -> R) -> R {
+        match self {
+            IpAddr::V4(ip) => f(&ip.octets()),
+            IpAddr::V6(ip) => f(&ip.octets()),
+        }
+    }
 }
 
 pub struct ArrayReader<'a> {

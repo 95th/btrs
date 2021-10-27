@@ -9,12 +9,13 @@ use crate::{
         TxnId,
     },
     table::RoutingTable,
+    util::WithBytes,
 };
 use hashbrown::HashMap;
 use std::{
     collections::{HashSet, VecDeque},
     fmt,
-    net::{IpAddr, SocketAddr},
+    net::SocketAddr,
     time::{Duration, Instant},
 };
 
@@ -163,10 +164,7 @@ impl RpcManager {
 
         let mut buf = Vec::new();
         let mut dict = DictEncoder::new(&mut buf);
-        match addr.ip() {
-            IpAddr::V4(a) => dict.insert("ip", &a.octets()),
-            IpAddr::V6(a) => dict.insert("ip", &a.octets()),
-        }
+        addr.ip().with_bytes(|b| dict.insert("ip", b));
 
         let mut r = dict.insert_dict("r");
         r.insert("id", &self.own_id);

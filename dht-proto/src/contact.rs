@@ -1,9 +1,9 @@
 use crate::{
     id::NodeId,
-    util::{self, ArrayReader},
+    util::{self, ArrayReader, WithBytes},
 };
 use ben::{Encode, LazyBytesEncoder};
-use std::net::{IpAddr, SocketAddr};
+use std::net::SocketAddr;
 
 bitflags::bitflags! {
     pub struct ContactStatus: u8 {
@@ -96,12 +96,7 @@ impl Encode for Contact {
     fn encode(&self, buf: &mut Vec<u8>) {
         let mut bytes = LazyBytesEncoder::<38>::new(buf);
         bytes.extend(self.id);
-
-        match self.addr.ip() {
-            IpAddr::V4(ip) => bytes.extend(ip.octets()),
-            IpAddr::V6(ip) => bytes.extend(ip.octets()),
-        }
-
+        self.addr.ip().with_bytes(|b| bytes.extend(b));
         bytes.extend(self.addr.port().to_be_bytes());
     }
 }
