@@ -55,12 +55,12 @@ impl Dht {
     }
 
     pub fn poll_timeout(&self) -> Option<Instant> {
-        let txn_timeout = self.rpc.next_timeout();
-        let table_timeout = self.table.next_timeout();
+        let a = self.rpc.next_timeout();
+        let b = self.table.next_timeout();
 
-        match (txn_timeout, table_timeout) {
+        match (a, b) {
             (Some(a), Some(b)) => Some(a.min(b)),
-            (a, b) => a.or(b),
+            _ => a.or(b),
         }
     }
 
