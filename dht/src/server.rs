@@ -1,4 +1,4 @@
-use dht_proto::{self as proto, Event, NodeId, TaskId};
+use proto::{Event, NodeId, TaskId};
 
 use futures::{
     channel::{mpsc, oneshot},
