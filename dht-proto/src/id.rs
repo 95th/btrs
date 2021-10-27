@@ -66,16 +66,13 @@ impl NodeId {
 
     /// Returns number of leading zeros.
     pub fn leading_zeros(&self) -> usize {
-        let mut n = 0;
-        for &c in self.iter() {
-            if c == 0 {
-                n += 8;
-            } else {
-                n += c.leading_zeros() as usize;
-                break;
+        for (i, c) in self.into_iter().enumerate() {
+            if c != 0 {
+                return i * 8 + c.leading_zeros() as usize;
             }
         }
-        n
+
+        160
     }
 
     /// Returns number of leading zeros of `XOR` of `self` with given `NodeId`
@@ -83,19 +80,16 @@ impl NodeId {
         (self ^ other).leading_zeros()
     }
 
-    fn mask_leading_zeros(mut self, leading_zeros: usize) -> Self {
-        if leading_zeros >= 160 {
+    fn mask_leading_zeros(mut self, bits: usize) -> Self {
+        if bits >= 160 {
             return Self::new();
         }
 
-        for i in 0..leading_zeros / 8 {
-            self[i] = 0;
-        }
+        let bytes = bits / 8;
+        let remaining_bits = bits % 8;
 
-        if leading_zeros % 8 != 0 {
-            let idx = leading_zeros / 8;
-            self[idx] = 0xff >> (leading_zeros % 8);
-        }
+        self[..bytes].fill(0);
+        self[bytes] &= 0xff >> remaining_bits;
 
         self
     }

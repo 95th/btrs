@@ -116,7 +116,7 @@ impl RoutingTable {
         }
 
         if contact.is_confirmed() {
-            return if bucket.replace_node(&contact) {
+            return if bucket.replace_node(contact) {
                 *timeout = next_timeout(now);
                 true
             } else {
@@ -140,7 +140,7 @@ impl RoutingTable {
             if let Some(i) = bucket.extra.iter().position(|c| !c.is_pinged()) {
                 bucket.extra.remove(i);
             } else {
-                return if bucket.replace_node(&contact) {
+                return if bucket.replace_node(contact) {
                     *timeout = next_timeout(now);
                     true
                 } else {

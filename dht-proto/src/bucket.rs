@@ -28,19 +28,23 @@ impl Bucket {
             .for_each(|c| out.push(c));
     }
 
-    pub fn replace_node(&mut self, contact: &Contact) -> bool {
+    pub fn replace_node(&mut self, contact: Contact) -> bool {
         debug_assert!(self.live.len() >= Bucket::MAX_LEN);
 
-        replace_stale(&mut self.live, contact) || replace_stale(&mut self.extra, contact)
+        let maybe_stale = find_stale(&mut self.live).or_else(|| find_stale(&mut self.extra));
+
+        if let Some(stale) = maybe_stale {
+            *stale = contact;
+            return true;
+        }
+
+        false
     }
 }
 
-fn replace_stale(vec: &mut Vec<Contact>, contact: &Contact) -> bool {
-    if let Some(most_stale) = vec.iter_mut().max_by_key(|c| c.fail_count()) {
-        if most_stale.fail_count() > 0 {
-            *most_stale = contact.clone();
-            return true;
-        }
-    }
-    false
+fn find_stale(contacts: &mut Vec<Contact>) -> Option<&mut Contact> {
+    contacts
+        .iter_mut()
+        .filter(|c| c.fail_count() > 0)
+        .max_by_key(|c| c.fail_count())
 }
