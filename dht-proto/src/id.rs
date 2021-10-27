@@ -36,8 +36,8 @@ impl NodeId {
         id
     }
 
-    pub fn gen_leading_zeros(leading_zeros: usize) -> Self {
-        Self::gen().mask_leading_zeros(leading_zeros)
+    pub fn gen_leading_zeros(bits: usize) -> Self {
+        Self::gen().mask_leading_zeros(bits)
     }
 
     pub fn from_hex(buf: &[u8]) -> anyhow::Result<Self> {
@@ -64,7 +64,7 @@ impl NodeId {
         data_encoding::BASE32.encode(&self.0)
     }
 
-    /// Returns number of leading zeros.
+    /// Returns number of leading zero bits.
     pub fn leading_zeros(&self) -> usize {
         for (i, c) in self.into_iter().enumerate() {
             if c != 0 {
