@@ -78,7 +78,6 @@ impl Task for GetPeersTask {
     fn done(&mut self, rpc: &mut RpcManager) {
         log::info!("Found {} peers", self.peers.len());
         rpc.add_event(Event::FoundPeers {
-            task_id: self.base.task_id,
             peers: std::mem::take(&mut self.peers),
         });
     }

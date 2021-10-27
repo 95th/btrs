@@ -63,8 +63,6 @@ impl Task for BootstrapTask {
     }
 
     fn done(&mut self, rpc: &mut RpcManager) {
-        rpc.add_event(Event::Bootstrapped {
-            task_id: self.base.task_id,
-        })
+        rpc.add_event(Event::Bootstrapped)
     }
 }

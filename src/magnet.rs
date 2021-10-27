@@ -132,7 +132,7 @@ impl MagnetUri {
 
         log::debug!("Got {} v4 peers and {} v6 peers", peers.len(), peers6.len());
 
-        let mut dht_tracker = DhtTracker::new();
+        let mut dht_tracker = DhtTracker::new().await?;
         if peers.is_empty() && peers6.is_empty() {
             if let Ok(p) = dht_tracker.announce(&self.info_hash).await {
                 peers.extend(p);

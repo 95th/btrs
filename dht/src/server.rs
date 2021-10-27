@@ -1,11 +1,8 @@
-use proto::{Event, NodeId, TaskId};
+use proto::{Event, NodeId};
 
-use futures::{
-    channel::{mpsc, oneshot},
-    select, FutureExt, SinkExt, StreamExt,
-};
+use futures::{select, FutureExt};
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashSet,
     net::{Ipv6Addr, SocketAddr},
     time::{Duration, Instant},
 };
@@ -14,167 +11,101 @@ use tokio::{
     time::{sleep_until, Instant as TokioInstant},
 };
 
-pub type PeerSender = oneshot::Sender<HashSet<SocketAddr>>;
-
-pub enum ClientRequest {
-    Announce {
-        info_hash: NodeId,
-        sender: PeerSender,
-    },
-    GetPeers {
-        info_hash: NodeId,
-        sender: PeerSender,
-    },
-}
-
 pub struct Dht {
-    tx: mpsc::Sender<ClientRequest>,
+    dht: proto::Dht,
+    socket: UdpSocket,
+    recv_buf: Vec<u8>,
 }
 
 impl Dht {
-    pub fn new(port: u16, router_nodes: Vec<SocketAddr>) -> (Self, DhtDriver) {
-        let (tx, rx) = mpsc::channel::<ClientRequest>(200);
+    pub async fn new(port: u16, router_nodes: Vec<SocketAddr>) -> anyhow::Result<Self> {
         let id = NodeId::gen();
         let now = Instant::now();
 
         let mut dht = proto::Dht::new(id, router_nodes, now);
+        let socket = UdpSocket::bind((Ipv6Addr::UNSPECIFIED, port)).await?;
+
         dht.add_request(proto::ClientRequest::Bootstrap { target: id }, now);
 
-        let driver = DhtDriver {
-            port,
-            rx,
+        Ok(Self {
             dht,
-            pending: HashMap::new(),
-        };
-
-        (Self { tx }, driver)
+            socket,
+            recv_buf: vec![0; 2048],
+        })
     }
 
     pub async fn get_peers(&mut self, info_hash: NodeId) -> anyhow::Result<HashSet<SocketAddr>> {
-        let (tx, rx) = oneshot::channel();
-        self.tx
-            .send(ClientRequest::GetPeers {
-                info_hash,
-                sender: tx,
-            })
-            .await?;
-
-        Ok(rx.await?)
+        let req = proto::ClientRequest::Announce { info_hash };
+        self.wait_for_peers(req).await
     }
 
     pub async fn announce(&mut self, info_hash: NodeId) -> anyhow::Result<HashSet<SocketAddr>> {
-        let (tx, rx) = oneshot::channel();
-        self.tx
-            .send(ClientRequest::Announce {
-                info_hash,
-                sender: tx,
-            })
-            .await?;
-
-        Ok(rx.await?)
+        let req = proto::ClientRequest::GetPeers { info_hash };
+        self.wait_for_peers(req).await
     }
-}
 
-pub struct DhtDriver {
-    port: u16,
-    rx: mpsc::Receiver<ClientRequest>,
-    dht: proto::Dht,
-    pending: HashMap<TaskId, PeerSender>,
-}
-
-impl DhtDriver {
-    pub async fn run(mut self) {
-        let socket = &match UdpSocket::bind((Ipv6Addr::UNSPECIFIED, self.port)).await {
-            Ok(x) => x,
-            Err(e) => {
-                log::warn!("Cannot open UDP socket: {}", e);
-                return;
-            }
-        };
-
-        let recv_buf: &mut [u8] = &mut [0; 1024];
+    async fn wait_for_peers(
+        &mut self,
+        req: proto::ClientRequest,
+    ) -> anyhow::Result<HashSet<SocketAddr>> {
+        if self.dht.add_request(req, Instant::now()).is_none() {
+            return Ok(HashSet::new());
+        }
 
         let timer = sleep_until(self.next_timeout());
         tokio::pin!(timer);
 
         loop {
             select! {
-                _ = timer.as_mut().fuse() => {
-                    self.dht.tick(Instant::now());
-                    self.process_events(socket).await;
-                    timer.as_mut().reset(self.next_timeout());
-                },
+                // Wait for timer
+                _ = timer.as_mut().fuse() => self.dht.tick(Instant::now()),
 
                 // Listen for response
-                resp = socket.recv_from(recv_buf).fuse() => {
-                    let (n, addr) = match resp {
-                        Ok(x) => x,
+                resp = self.socket.recv_from(&mut self.recv_buf).fuse() => {
+                    match resp {
+                        Ok((len, addr)) => self.dht.receive(&self.recv_buf[..len], addr, Instant::now()),
                         Err(e) => {
                             log::warn!("Error: {}", e);
                             continue;
                         },
-                    };
-
-                    self.dht.receive(&recv_buf[..n], addr, Instant::now());
-                    self.process_events(socket).await;
-                    timer.as_mut().reset(self.next_timeout());
+                    }
                 },
 
-                // Send requests
-                request = self.rx.next() => {
-                    let request = match request {
-                        Some(x) => x,
-
-                        // The channel is closed
-                        None => break,
-                    };
-
-                    match request {
-                        ClientRequest::Announce { info_hash, sender } => {
-                            let req = proto::ClientRequest::Announce { info_hash };
-                            if let Some(id) = self.dht.add_request(req, Instant::now()) {
-                                self.pending.insert(id, sender);
-                            }
-                        },
-                        ClientRequest::GetPeers { info_hash, sender } => {
-                            let req = proto::ClientRequest::GetPeers { info_hash };
-                            if let Some(id) = self.dht.add_request(req, Instant::now()) {
-                                self.pending.insert(id, sender);
-                            }
-                        },
-                    };
-                    self.process_events(socket).await;
-                    timer.as_mut().reset(self.next_timeout());
-                },
                 complete => break,
             }
+
+            if let Some(peers) = self.process_events().await {
+                return Ok(peers);
+            }
+
+            timer.as_mut().reset(self.next_timeout());
         }
+
+        Ok(HashSet::new())
     }
 
-    async fn process_events(&mut self, socket: &UdpSocket) {
+    async fn process_events(&mut self) -> Option<HashSet<SocketAddr>> {
         while let Some(event) = self.dht.poll_event() {
             log::debug!("Received event: {}", event);
             match event {
-                Event::FoundPeers { task_id: id, peers } => {
-                    if let Some(sender) = self.pending.remove(&id) {
-                        let _ = sender.send(peers);
-                    }
-                }
+                Event::FoundPeers { peers } => return Some(peers),
                 Event::Bootstrapped { .. } => {}
                 Event::Transmit {
                     task_id,
                     node_id,
                     data,
                     target,
-                } => match socket.send_to(&data, target).await {
+                } => match self.socket.send_to(&data, target).await {
                     Ok(n) if n == data.len() => {}
                     _ => self.dht.set_failed(task_id, &node_id, &target),
                 },
                 Event::Reply { data, target } => {
-                    socket.send_to(&data, target).await.ok();
+                    self.socket.send_to(&data, target).await.ok();
                 }
             }
         }
+
+        None
     }
 
     fn next_timeout(&self) -> TokioInstant {

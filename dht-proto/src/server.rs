@@ -194,7 +194,7 @@ mod tests {
 
         dht.receive(buf, router, now);
 
-        assert_eq!(Event::Bootstrapped { task_id }, dht.poll_event().unwrap());
+        assert_eq!(Event::Bootstrapped, dht.poll_event().unwrap());
         assert!(dht.is_idle());
         assert_eq!(None, dht.poll_event());
     }
@@ -206,8 +206,7 @@ mod tests {
         let router = SocketAddr::from(([0u8; 16], 0));
 
         let mut dht = Dht::new(id, vec![router], now);
-        let task_id = dht
-            .add_request(ClientRequest::Bootstrap { target: id }, now)
+        dht.add_request(ClientRequest::Bootstrap { target: id }, now)
             .unwrap();
 
         // Discard the transmit event
@@ -218,7 +217,7 @@ mod tests {
 
         dht.tick(now);
 
-        assert_eq!(Event::Bootstrapped { task_id }, dht.poll_event().unwrap());
+        assert_eq!(Event::Bootstrapped, dht.poll_event().unwrap());
         assert!(dht.is_idle());
         assert_eq!(None, dht.poll_event());
     }
@@ -279,7 +278,6 @@ mod tests {
 
         assert_eq!(
             Event::FoundPeers {
-                task_id,
                 peers: [SocketAddr::from(([1, 2, 1, 2], 2))].into_iter().collect()
             },
             dht.poll_event().unwrap()
@@ -296,8 +294,7 @@ mod tests {
         let router = SocketAddr::from(([0u8; 16], 0));
 
         let mut dht = Dht::new(id, vec![router], now);
-        let task_id = dht
-            .add_request(ClientRequest::GetPeers { info_hash }, now)
+        dht.add_request(ClientRequest::GetPeers { info_hash }, now)
             .unwrap();
 
         // Discard the Transmit event
@@ -310,7 +307,6 @@ mod tests {
 
         assert_eq!(
             Event::FoundPeers {
-                task_id,
                 peers: HashSet::new()
             },
             dht.poll_event().unwrap()

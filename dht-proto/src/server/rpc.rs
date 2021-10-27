@@ -314,12 +314,9 @@ impl Transactions {
 #[derive(Debug, PartialEq, Eq)]
 pub enum Event {
     FoundPeers {
-        task_id: TaskId,
         peers: HashSet<SocketAddr>,
     },
-    Bootstrapped {
-        task_id: TaskId,
-    },
+    Bootstrapped,
     Transmit {
         task_id: TaskId,
         node_id: NodeId,
@@ -335,14 +332,8 @@ pub enum Event {
 impl fmt::Display for Event {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::FoundPeers { task_id, .. } => f
-                .debug_struct("FoundPeers")
-                .field("task_id", task_id)
-                .finish(),
-            Self::Bootstrapped { task_id, .. } => f
-                .debug_struct("Bootstrapped")
-                .field("task_id", task_id)
-                .finish(),
+            Self::FoundPeers { .. } => f.debug_struct("FoundPeers").finish(),
+            Self::Bootstrapped { .. } => f.debug_struct("Bootstrapped").finish(),
             Self::Transmit { task_id, .. } => f
                 .debug_struct("Transmit")
                 .field("task_id", task_id)

@@ -48,7 +48,7 @@ pub async fn torrent_file(file: &str) -> anyhow::Result<()> {
 
     log::trace!("Parsed torrent file: {:#?}", torrent_file);
 
-    let torrent = torrent_file.into_torrent();
+    let torrent = torrent_file.into_torrent().await?;
     download(torrent).await
 }
 

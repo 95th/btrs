@@ -11,14 +11,8 @@ pub struct DhtTracker {
     next_announce: Instant,
 }
 
-impl Default for DhtTracker {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl DhtTracker {
-    pub fn new() -> Self {
+    pub async fn new() -> anyhow::Result<Self> {
         let dht_routers = [
             "dht.libtorrent.org:25401",
             "router.utorrent.com:6881",
@@ -31,14 +25,13 @@ impl DhtTracker {
         .filter_map(|a| a.to_socket_addrs().ok())
         .flatten()
         .collect();
-        let (dht, driver) = Dht::new(6881, dht_routers);
 
-        tokio::spawn(driver.run());
+        let dht = Dht::new(6881, dht_routers).await?;
 
-        Self {
+        Ok(Self {
             dht,
             next_announce: Instant::now(),
-        }
+        })
     }
 
     pub async fn announce(&mut self, info_hash: &InfoHash) -> anyhow::Result<Vec<Peer>> {

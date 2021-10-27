@@ -75,10 +75,11 @@ impl TorrentFile {
         Ok(torrent)
     }
 
-    pub fn into_torrent(self) -> Torrent {
+    pub async fn into_torrent(self) -> anyhow::Result<Torrent> {
         let peer_id = peer::generate_peer_id();
+        let dht_tracker = DhtTracker::new().await?;
 
-        Torrent {
+        Ok(Torrent {
             peer_id,
             info_hash: self.info_hash,
             piece_hashes: self.piece_hashes,
@@ -88,8 +89,8 @@ impl TorrentFile {
             tracker_urls: self.tracker_urls,
             peers: hashset![],
             peers6: hashset![],
-            dht_tracker: DhtTracker::new(),
-        }
+            dht_tracker,
+        })
     }
 }
 
