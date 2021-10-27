@@ -97,7 +97,7 @@ impl Dht {
                     target,
                 } => match self.socket.send_to(&data, target).await {
                     Ok(n) if n == data.len() => {}
-                    _ => self.dht.set_failed(task_id, &node_id, &target),
+                    _ => self.dht.set_failed(task_id, node_id, target),
                 },
                 Event::Reply { data, target } => {
                     self.socket.send_to(&data, target).await.ok();

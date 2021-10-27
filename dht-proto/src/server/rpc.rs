@@ -94,8 +94,8 @@ impl RpcManager {
             }
         };
 
-        if req.has_id && &req.id == resp.id {
-            table.heard_from(&req.id, now);
+        if req.has_id && req.id == resp.id {
+            table.heard_from(req.id, now);
         } else if req.has_id {
             log::warn!(
                 "ID mismatch from {}, Expected: {:?}, Actual: {:?}",
@@ -103,10 +103,10 @@ impl RpcManager {
                 &req.id,
                 &resp.id
             );
-            table.failed(&req.id);
+            table.failed(req.id);
 
             if let Some(task) = tasks.get_mut(req.task_id.0) {
-                task.set_failed(&req.id, &addr);
+                task.set_failed(req.id, addr);
                 let done = task.add_requests(self, now);
                 if done {
                     tasks.remove(req.task_id.0).done(self);
@@ -116,7 +116,7 @@ impl RpcManager {
         }
 
         if let Some(task) = tasks.get_mut(req.task_id.0) {
-            task.handle_response(&resp, &addr, table, self, req.has_id, now);
+            task.handle_response(&resp, addr, table, self, req.has_id, now);
             let done = task.add_requests(self, now);
             if done {
                 tasks.remove(req.task_id.0).done(self);
@@ -141,11 +141,11 @@ impl RpcManager {
         };
 
         if req.has_id {
-            table.failed(&req.id);
+            table.failed(req.id);
         }
 
         if let Some(task) = tasks.get_mut(req.task_id.0) {
-            task.set_failed(&req.id, &addr);
+            task.set_failed(req.id, addr);
             let done = task.add_requests(self, now);
             if done {
                 tasks.remove(req.task_id.0).done(self);
@@ -235,11 +235,11 @@ impl RpcManager {
         for (txn_id, req) in timed_out.drain(..) {
             log::trace!("Txn {:?} expired", txn_id);
             if req.has_id {
-                table.failed(&req.id);
+                table.failed(req.id);
             }
 
             if let Some(task) = tasks.get_mut(req.task_id.0) {
-                task.set_failed(&req.id, &req.addr);
+                task.set_failed(req.id, req.addr);
                 let done = task.add_requests(self, now);
                 if done {
                     tasks.remove(req.task_id.0).done(self);
@@ -264,10 +264,10 @@ pub struct Request {
 }
 
 impl Request {
-    pub fn new(id: &NodeId, addr: &SocketAddr, task_id: TaskId, timeout: Instant) -> Self {
+    pub fn new(id: NodeId, addr: SocketAddr, task_id: TaskId, timeout: Instant) -> Self {
         Self {
-            id: if id.is_zero() { NodeId::gen() } else { *id },
-            addr: *addr,
+            id: if id.is_zero() { NodeId::gen() } else { id },
+            addr,
             timeout,
             has_id: !id.is_zero(),
             task_id,
@@ -295,8 +295,8 @@ impl Transactions {
     pub fn insert(
         &mut self,
         txn_id: TxnId,
-        id: &NodeId,
-        addr: &SocketAddr,
+        id: NodeId,
+        addr: SocketAddr,
         task_id: TaskId,
         now: Instant,
     ) {

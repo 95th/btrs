@@ -3,7 +3,7 @@ use data_encoding::HEXUPPER_PERMISSIVE as hex;
 use rand::distributions::uniform::{SampleBorrow, SampleUniform, UniformSampler};
 use rand::Rng;
 use std::fmt;
-use std::ops::{BitAnd, BitXor, Deref, DerefMut};
+use std::ops::{BitAnd, BitAndAssign, BitXor, BitXorAssign, Deref, DerefMut};
 
 type Bytes = [u8; 20];
 
@@ -28,10 +28,6 @@ impl NodeId {
 
     pub const fn all(b: u8) -> Self {
         Self([b; 20])
-    }
-
-    pub fn from_ref(bytes: &[u8; 20]) -> &Self {
-        unsafe { &*bytes.as_ptr().cast() }
     }
 
     pub fn gen() -> Self {
@@ -83,7 +79,7 @@ impl NodeId {
     }
 
     /// Returns number of leading zeros of `XOR` of `self` with given `NodeId`
-    pub fn xor_leading_zeros(&self, other: &Self) -> usize {
+    pub fn xor_leading_zeros(self, other: Self) -> usize {
         (self ^ other).leading_zeros()
     }
 
@@ -143,38 +139,39 @@ impl Encode for NodeId {
     }
 }
 
-macro_rules! bit_ops {
-    ($from_ty:ty, $to_ty:ty) => {
-        impl BitAnd<$from_ty> for $to_ty {
-            type Output = NodeId;
-
-            fn bitand(self, other: $from_ty) -> Self::Output {
-                let mut id = NodeId::new();
-                id.iter_mut()
-                    .zip(self.iter().zip(other.iter()))
-                    .for_each(|(a, (b, c))| *a = b & c);
-                id
-            }
+impl BitAndAssign for NodeId {
+    fn bitand_assign(&mut self, rhs: Self) {
+        for (a, b) in self.iter_mut().zip(rhs.iter()) {
+            *a &= b;
         }
-
-        impl BitXor<$from_ty> for $to_ty {
-            type Output = NodeId;
-
-            fn bitxor(self, other: $from_ty) -> NodeId {
-                let mut id = NodeId::new();
-                id.iter_mut()
-                    .zip(self.iter().zip(other.iter()))
-                    .for_each(|(a, (b, c))| *a = b ^ c);
-                id
-            }
-        }
-    };
+    }
 }
 
-bit_ops!(&NodeId, &NodeId);
-bit_ops!(&NodeId, NodeId);
-bit_ops!(NodeId, &NodeId);
-bit_ops!(NodeId, NodeId);
+impl BitAnd for NodeId {
+    type Output = NodeId;
+
+    fn bitand(mut self, rhs: NodeId) -> NodeId {
+        self &= rhs;
+        self
+    }
+}
+
+impl BitXorAssign for NodeId {
+    fn bitxor_assign(&mut self, rhs: NodeId) {
+        for (a, b) in self.iter_mut().zip(rhs.iter()) {
+            *a ^= b;
+        }
+    }
+}
+
+impl BitXor for NodeId {
+    type Output = NodeId;
+
+    fn bitxor(mut self, rhs: NodeId) -> NodeId {
+        self ^= rhs;
+        self
+    }
+}
 
 impl SampleUniform for NodeId {
     type Sampler = UniformNodeId;

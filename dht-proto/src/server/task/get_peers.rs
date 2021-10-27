@@ -19,7 +19,7 @@ pub struct GetPeersTask {
 }
 
 impl GetPeersTask {
-    pub fn new(info_hash: &NodeId, table: &RoutingTable, task_id: TaskId) -> Self {
+    pub fn new(info_hash: NodeId, table: &RoutingTable, task_id: TaskId) -> Self {
         Self {
             base: BaseTask::new(info_hash, table, task_id),
             peers: HashSet::new(),
@@ -35,7 +35,7 @@ impl Task for GetPeersTask {
     fn handle_response(
         &mut self,
         resp: &Response<'_>,
-        addr: &SocketAddr,
+        addr: SocketAddr,
         table: &mut RoutingTable,
         rpc: &mut RpcManager,
         has_id: bool,
@@ -45,7 +45,7 @@ impl Task for GetPeersTask {
         self.base.handle_response(resp, addr, table, has_id, now);
 
         if let Some(token) = resp.body.get_bytes("token") {
-            rpc.tokens.insert(*addr, token.to_vec());
+            rpc.tokens.insert(addr, token.to_vec());
         }
 
         if let Some(peers) = resp.body.get_list("values") {
@@ -54,7 +54,7 @@ impl Task for GetPeersTask {
         }
     }
 
-    fn set_failed(&mut self, id: &NodeId, addr: &SocketAddr) {
+    fn set_failed(&mut self, id: NodeId, addr: SocketAddr) {
         self.base.set_failed(id, addr);
     }
 
@@ -65,8 +65,8 @@ impl Task for GetPeersTask {
         self.base.add_requests(rpc, now, |buf, rpc| {
             let msg = GetPeers {
                 txn_id: rpc.new_txn(),
-                id: &rpc.own_id,
-                info_hash: &info_hash,
+                id: rpc.own_id,
+                info_hash,
             };
 
             log::trace!("Send {:?}", msg);

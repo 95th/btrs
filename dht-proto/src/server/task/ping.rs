@@ -1,4 +1,4 @@
-use crate::contact::ContactRef;
+use crate::contact::Contact;
 use crate::id::NodeId;
 use crate::msg::recv::Response;
 use crate::msg::send::Ping;
@@ -18,12 +18,12 @@ pub struct PingTask {
 }
 
 impl PingTask {
-    pub fn new(id: &NodeId, addr: &SocketAddr, task_id: TaskId) -> Self {
+    pub fn new(id: NodeId, addr: SocketAddr, task_id: TaskId) -> Self {
         Self {
             node: DhtNode {
-                id: *id,
-                key: *id,
-                addr: *addr,
+                id,
+                key: id,
+                addr,
                 status: Status::INITIAL,
             },
             done: false,
@@ -40,7 +40,7 @@ impl Task for PingTask {
     fn handle_response(
         &mut self,
         resp: &Response<'_>,
-        addr: &SocketAddr,
+        addr: SocketAddr,
         table: &mut RoutingTable,
         _rpc: &mut RpcManager,
         _has_id: bool,
@@ -48,14 +48,8 @@ impl Task for PingTask {
     ) {
         log::trace!("Handle PING response");
 
-        if self.node.id == *resp.id && self.node.addr == *addr {
-            table.add_contact(
-                &ContactRef {
-                    id: resp.id,
-                    addr: *addr,
-                },
-                now,
-            );
+        if self.node.id == resp.id && self.node.addr == addr {
+            table.add_contact(Contact::new(resp.id, addr), now);
         } else {
             table.failed(resp.id);
         }
@@ -63,8 +57,8 @@ impl Task for PingTask {
         self.done = true;
     }
 
-    fn set_failed(&mut self, id: &NodeId, _addr: &SocketAddr) {
-        if &self.node.id == id {
+    fn set_failed(&mut self, id: NodeId, _addr: SocketAddr) {
+        if self.node.id == id {
             self.node.status.insert(Status::FAILED);
         }
         self.done = true;
@@ -81,7 +75,7 @@ impl Task for PingTask {
         let mut buf = Vec::new();
         let msg = Ping {
             txn_id,
-            id: &rpc.own_id,
+            id: rpc.own_id,
         };
 
         msg.encode(&mut buf);
@@ -89,7 +83,7 @@ impl Task for PingTask {
         rpc.transmit(self.id(), self.node.id, buf, self.node.addr);
         self.node.status.insert(Status::QUERIED);
         rpc.txns
-            .insert(txn_id, &self.node.id, &self.node.addr, self.task_id, now);
+            .insert(txn_id, self.node.id, self.node.addr, self.task_id, now);
         false
     }
 }

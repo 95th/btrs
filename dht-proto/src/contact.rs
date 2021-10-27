@@ -18,18 +18,6 @@ bitflags::bitflags! {
     }
 }
 
-#[derive(Debug)]
-pub struct ContactRef<'a> {
-    pub id: &'a NodeId,
-    pub addr: SocketAddr,
-}
-
-impl ContactRef<'_> {
-    pub fn as_owned(&self) -> Contact {
-        Contact::new(*self.id, self.addr)
-    }
-}
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct Contact {
     pub id: NodeId,
@@ -50,7 +38,7 @@ impl Contact {
 
     pub fn write_compact(&self, buf: &mut Vec<u8>) {
         buf.extend(&self.id[..]);
-        util::write_addr(buf, &self.addr);
+        util::write_addr(buf, self.addr);
     }
 
     pub fn is_pinged(&self) -> bool {
@@ -120,17 +108,18 @@ impl<'a> CompactNodes<'a> {
 }
 
 impl<'a> Iterator for CompactNodes<'a> {
-    type Item = ContactRef<'a>;
+    type Item = Contact;
 
     fn next(&mut self) -> Option<Self::Item> {
         let id = self.reader.read::<20>()?;
         let addr = self.reader.read::<4>()?;
         let port = self.reader.read::<2>()?;
 
-        Some(ContactRef {
-            id: NodeId::from_ref(id),
-            addr: SocketAddr::from((*addr, u16::from_be_bytes(*port))),
-        })
+        let id = NodeId::from(*id);
+        let port = u16::from_be_bytes(*port);
+        let addr = SocketAddr::from((*addr, port));
+
+        Some(Contact::new(id, addr))
     }
 }
 
@@ -153,16 +142,17 @@ impl<'a> CompactNodesV6<'a> {
 }
 
 impl<'a> Iterator for CompactNodesV6<'a> {
-    type Item = ContactRef<'a>;
+    type Item = Contact;
 
     fn next(&mut self) -> Option<Self::Item> {
         let id = self.reader.read::<20>()?;
         let addr = self.reader.read::<16>()?;
         let port = self.reader.read::<2>()?;
 
-        Some(ContactRef {
-            id: NodeId::from_ref(id),
-            addr: SocketAddr::from((*addr, u16::from_be_bytes(*port))),
-        })
+        let id = NodeId::from(*id);
+        let port = u16::from_be_bytes(*port);
+        let addr = SocketAddr::from((*addr, port));
+
+        Some(Contact::new(id, addr))
     }
 }

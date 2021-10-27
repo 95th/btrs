@@ -16,7 +16,7 @@ pub struct AnnounceTask {
 }
 
 impl AnnounceTask {
-    pub fn new(info_hash: &NodeId, table: &mut RoutingTable, task_id: TaskId) -> Self {
+    pub fn new(info_hash: NodeId, table: &mut RoutingTable, task_id: TaskId) -> Self {
         Self {
             get_peers: GetPeersTask::new(info_hash, table, task_id),
         }
@@ -31,7 +31,7 @@ impl Task for AnnounceTask {
     fn handle_response(
         &mut self,
         resp: &Response<'_>,
-        addr: &SocketAddr,
+        addr: SocketAddr,
         table: &mut RoutingTable,
         rpc: &mut RpcManager,
         has_id: bool,
@@ -42,7 +42,7 @@ impl Task for AnnounceTask {
             .handle_response(resp, addr, table, rpc, has_id, now);
     }
 
-    fn set_failed(&mut self, id: &NodeId, addr: &SocketAddr) {
+    fn set_failed(&mut self, id: NodeId, addr: SocketAddr) {
         self.get_peers.set_failed(id, addr);
     }
 
@@ -78,8 +78,8 @@ impl Task for AnnounceTask {
             let mut buf = Vec::new();
             let msg = AnnouncePeer {
                 txn_id,
-                id: &rpc.own_id,
-                info_hash: &self.get_peers.base.target,
+                id: rpc.own_id,
+                info_hash: self.get_peers.base.target,
                 port: 0,
                 implied_port: true,
                 token,

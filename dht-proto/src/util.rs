@@ -1,6 +1,6 @@
 use std::net::{IpAddr, SocketAddr};
 
-pub fn write_addr(buf: &mut Vec<u8>, addr: &SocketAddr) {
+pub fn write_addr(buf: &mut Vec<u8>, addr: SocketAddr) {
     addr.ip().with_bytes(|b| buf.extend(b));
     buf.extend(&addr.port().to_be_bytes());
 }

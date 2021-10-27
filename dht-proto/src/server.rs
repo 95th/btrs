@@ -82,10 +82,10 @@ impl Dht {
         let tid = TaskId(entry.key());
         let table = &mut self.table;
         let mut task: Box<dyn Task> = match request {
-            GetPeers { info_hash } => Box::new(GetPeersTask::new(&info_hash, table, tid)),
-            Bootstrap { target } => Box::new(BootstrapTask::new(&target, table, tid)),
-            Announce { info_hash } => Box::new(AnnounceTask::new(&info_hash, table, tid)),
-            Ping { id, addr } => Box::new(PingTask::new(&id, &addr, tid)),
+            GetPeers { info_hash } => Box::new(GetPeersTask::new(info_hash, table, tid)),
+            Bootstrap { target } => Box::new(BootstrapTask::new(target, table, tid)),
+            Announce { info_hash } => Box::new(AnnounceTask::new(info_hash, table, tid)),
+            Ping { id, addr } => Box::new(PingTask::new(id, addr, tid)),
         };
 
         let done = task.add_requests(&mut self.rpc, now);
@@ -97,7 +97,7 @@ impl Dht {
         }
     }
 
-    pub fn set_failed(&mut self, task_id: TaskId, id: &NodeId, addr: &SocketAddr) {
+    pub fn set_failed(&mut self, task_id: TaskId, id: NodeId, addr: SocketAddr) {
         if let Some(t) = self.tasks.get_mut(task_id.0) {
             t.set_failed(id, addr);
         }
@@ -165,8 +165,8 @@ mod tests {
 
         let find_node = FindNode {
             txn_id,
-            id: &id,
-            target: &id,
+            id,
+            target: id,
         };
 
         assert_eq!(
@@ -239,8 +239,8 @@ mod tests {
 
         let find_node = GetPeers {
             txn_id,
-            id: &id,
-            info_hash: &info_hash,
+            id,
+            info_hash,
         };
 
         assert_eq!(
@@ -351,7 +351,7 @@ mod tests {
 
         match msg {
             Msg::Query(query) => {
-                assert_eq!(query.id, &id);
+                assert_eq!(query.id, id);
                 assert_eq!(query.txn_id, txn_id);
                 assert!(matches!(query.kind, QueryKind::FindNode { .. }));
             }

@@ -19,7 +19,7 @@ pub struct BaseTask {
 }
 
 impl BaseTask {
-    pub fn new(target: &NodeId, table: &RoutingTable, task_id: TaskId) -> Self {
+    pub fn new(target: NodeId, table: &RoutingTable, task_id: TaskId) -> Self {
         let closest = table.find_closest(target, Bucket::MAX_LEN);
 
         let mut nodes = vec![];
@@ -33,7 +33,7 @@ impl BaseTask {
             for node in &table.router_nodes {
                 nodes.push(DhtNode {
                     id: NodeId::new(),
-                    key: *target,
+                    key: target,
                     addr: *node,
                     status: Status::INITIAL | Status::NO_ID,
                 });
@@ -43,7 +43,7 @@ impl BaseTask {
         nodes.sort_unstable_by_key(|n| n.key);
 
         Self {
-            target: *target,
+            target,
             nodes,
             branch_factor: 3,
             invoked: 0,
@@ -54,7 +54,7 @@ impl BaseTask {
     pub fn handle_response(
         &mut self,
         resp: &Response<'_>,
-        addr: &SocketAddr,
+        addr: SocketAddr,
         table: &mut RoutingTable,
         has_id: bool,
         now: Instant,
@@ -74,8 +74,8 @@ impl BaseTask {
                 );
                 return;
             }
-        } else if let Some(node) = self.nodes.iter_mut().find(|node| &node.addr == addr) {
-            node.set_id(resp.id, &self.target);
+        } else if let Some(node) = self.nodes.iter_mut().find(|node| node.addr == addr) {
+            node.set_id(resp.id, self.target);
             node.status.insert(Status::ALIVE);
             self.nodes.sort_unstable_by_key(|n| n.key);
             self.invoked -= 1;
@@ -87,7 +87,7 @@ impl BaseTask {
 
             // Insert if not present
             if let Err(i) = search_result {
-                self.nodes.insert(i, DhtNode::with_ref(c, &self.target));
+                self.nodes.insert(i, DhtNode::new(c, self.target));
             }
         });
 
@@ -110,13 +110,13 @@ impl BaseTask {
         log::trace!("Invoked after: {}", self.invoked);
     }
 
-    pub fn set_failed(&mut self, id: &NodeId, addr: &SocketAddr) {
+    pub fn set_failed(&mut self, id: NodeId, addr: SocketAddr) {
         let key = id ^ self.target;
         if let Ok(i) = self.nodes.binary_search_by_key(&key, |n| n.key) {
             let node = &mut self.nodes[i];
             node.status.insert(Status::FAILED);
             self.invoked -= 1;
-        } else if let Some(node) = self.nodes.iter_mut().find(|n| n.addr == *addr) {
+        } else if let Some(node) = self.nodes.iter_mut().find(|n| n.addr == addr) {
             node.status.insert(Status::FAILED);
             self.invoked -= 1;
         }
@@ -159,7 +159,7 @@ impl BaseTask {
 
             rpc.transmit(self.task_id, n.id, buf, n.addr);
             n.status.insert(Status::QUERIED);
-            rpc.txns.insert(txn_id, &n.id, &n.addr, self.task_id, now);
+            rpc.txns.insert(txn_id, n.id, n.addr, self.task_id, now);
 
             pending += 1;
             self.invoked += 1;

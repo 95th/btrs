@@ -16,7 +16,7 @@ pub struct BootstrapTask {
 }
 
 impl BootstrapTask {
-    pub fn new(target: &NodeId, table: &mut RoutingTable, task_id: TaskId) -> Self {
+    pub fn new(target: NodeId, table: &mut RoutingTable, task_id: TaskId) -> Self {
         Self {
             base: BaseTask::new(target, table, task_id),
         }
@@ -31,7 +31,7 @@ impl Task for BootstrapTask {
     fn handle_response(
         &mut self,
         resp: &Response<'_>,
-        addr: &SocketAddr,
+        addr: SocketAddr,
         table: &mut RoutingTable,
         _rpc: &mut RpcManager,
         has_id: bool,
@@ -41,7 +41,7 @@ impl Task for BootstrapTask {
         self.base.handle_response(resp, addr, table, has_id, now);
     }
 
-    fn set_failed(&mut self, id: &NodeId, addr: &SocketAddr) {
+    fn set_failed(&mut self, id: NodeId, addr: SocketAddr) {
         self.base.set_failed(id, addr);
     }
 
@@ -52,8 +52,8 @@ impl Task for BootstrapTask {
         self.base.add_requests(rpc, now, |buf, rpc| {
             let msg = FindNode {
                 txn_id: rpc.new_txn(),
-                target: &target,
-                id: &rpc.own_id,
+                target,
+                id: rpc.own_id,
             };
             log::trace!("Send {:?}", msg);
 

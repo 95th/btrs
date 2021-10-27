@@ -1,4 +1,4 @@
-use crate::contact::{Contact, ContactRef};
+use crate::contact::Contact;
 use crate::id::NodeId;
 use crate::{msg::recv::Response, table::RoutingTable};
 use std::net::SocketAddr;
@@ -22,12 +22,12 @@ pub trait Task: Send {
 
     fn add_requests(&mut self, rpc: &mut RpcManager, now: Instant) -> bool;
 
-    fn set_failed(&mut self, id: &NodeId, addr: &SocketAddr);
+    fn set_failed(&mut self, id: NodeId, addr: SocketAddr);
 
     fn handle_response(
         &mut self,
         resp: &Response<'_>,
-        addr: &SocketAddr,
+        addr: SocketAddr,
         table: &mut RoutingTable,
         rpc: &mut RpcManager,
         has_id: bool,
@@ -48,7 +48,7 @@ pub struct DhtNode {
 }
 
 impl DhtNode {
-    pub fn new(c: &Contact, target: &NodeId) -> Self {
+    pub fn new(c: &Contact, target: NodeId) -> Self {
         Self {
             id: c.id,
             key: c.id ^ target,
@@ -57,17 +57,8 @@ impl DhtNode {
         }
     }
 
-    pub fn with_ref(c: &ContactRef<'_>, target: &NodeId) -> Self {
-        Self {
-            id: *c.id,
-            key: c.id ^ target,
-            addr: c.addr,
-            status: Status::INITIAL,
-        }
-    }
-
-    pub fn set_id(&mut self, id: &NodeId, target: &NodeId) {
-        self.id = *id;
+    pub fn set_id(&mut self, id: NodeId, target: NodeId) {
+        self.id = id;
         self.key = id ^ target;
     }
 }

@@ -7,7 +7,7 @@ use std::convert::TryInto;
 #[derive(Debug)]
 pub struct Query<'a> {
     pub txn_id: TxnId,
-    pub id: &'a NodeId,
+    pub id: NodeId,
     pub kind: QueryKind<'a>,
 }
 
@@ -15,13 +15,13 @@ pub struct Query<'a> {
 pub enum QueryKind<'a> {
     Ping,
     FindNode {
-        target: &'a NodeId,
+        target: NodeId,
     },
     GetPeers {
-        info_hash: &'a NodeId,
+        info_hash: NodeId,
     },
     AnnouncePeer {
-        info_hash: &'a NodeId,
+        info_hash: NodeId,
         implied_port: bool,
         port: u16,
         token: &'a [u8],
@@ -32,7 +32,7 @@ pub enum QueryKind<'a> {
 pub struct Response<'a> {
     pub txn_id: TxnId,
     pub body: Dict<'a>,
-    pub id: &'a NodeId,
+    pub id: NodeId,
 }
 
 #[derive(Debug)]
@@ -65,7 +65,7 @@ macro_rules! node_id {
         };
         if id.len() == 20 {
             let ptr = id.as_ptr().cast::<NodeId>();
-            unsafe { &*ptr }
+            unsafe { *ptr }
         } else {
             return Err(ben::Error::Other("Node ID must be 20 bytes long"));
         }
@@ -154,7 +154,7 @@ mod tests {
 
         match msg {
             Msg::Query(query) => {
-                assert_eq!(query.id, &NodeId::all(1));
+                assert_eq!(query.id, NodeId::all(1));
                 assert_eq!(query.txn_id, TxnId(10));
                 assert_eq!(query.kind, QueryKind::Ping);
             }

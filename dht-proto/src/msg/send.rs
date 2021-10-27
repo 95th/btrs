@@ -4,12 +4,12 @@ use ben::DictEncoder;
 use ben::Encode;
 
 #[derive(Debug)]
-pub struct Ping<'a> {
+pub struct Ping {
     pub txn_id: TxnId,
-    pub id: &'a NodeId,
+    pub id: NodeId,
 }
 
-impl Encode for Ping<'_> {
+impl Encode for Ping {
     fn encode(&self, buf: &mut Vec<u8>) {
         let mut d = DictEncoder::new(buf);
 
@@ -24,13 +24,13 @@ impl Encode for Ping<'_> {
 }
 
 #[derive(Debug)]
-pub struct FindNode<'a> {
+pub struct FindNode {
     pub txn_id: TxnId,
-    pub id: &'a NodeId,
-    pub target: &'a NodeId,
+    pub id: NodeId,
+    pub target: NodeId,
 }
 
-impl Encode for FindNode<'_> {
+impl Encode for FindNode {
     fn encode(&self, buf: &mut Vec<u8>) {
         let mut d = DictEncoder::new(buf);
 
@@ -46,13 +46,13 @@ impl Encode for FindNode<'_> {
 }
 
 #[derive(Debug)]
-pub struct GetPeers<'a> {
+pub struct GetPeers {
     pub txn_id: TxnId,
-    pub id: &'a NodeId,
-    pub info_hash: &'a NodeId,
+    pub id: NodeId,
+    pub info_hash: NodeId,
 }
 
-impl Encode for GetPeers<'_> {
+impl Encode for GetPeers {
     fn encode(&self, buf: &mut Vec<u8>) {
         let mut d = DictEncoder::new(buf);
 
@@ -70,9 +70,9 @@ impl Encode for GetPeers<'_> {
 #[derive(Debug)]
 pub struct AnnouncePeer<'a> {
     pub txn_id: TxnId,
-    pub id: &'a NodeId,
+    pub id: NodeId,
     pub implied_port: bool,
-    pub info_hash: &'a NodeId,
+    pub info_hash: NodeId,
     pub port: u16,
     pub token: &'a [u8],
 }
@@ -136,7 +136,7 @@ mod tests {
     fn request_ping() {
         let request = Ping {
             txn_id: TxnId(10),
-            id: &NodeId::all(1),
+            id: NodeId::all(1),
         };
 
         let encoded = request.encode_to_vec();
@@ -154,8 +154,8 @@ mod tests {
     fn request_find_node() {
         let request = FindNode {
             txn_id: TxnId(10),
-            id: &NodeId::all(1),
-            target: &NodeId::all(2),
+            id: NodeId::all(1),
+            target: NodeId::all(2),
         };
 
         let encoded = request.encode_to_vec();
@@ -173,8 +173,8 @@ mod tests {
     fn request_get_peers() {
         let request = GetPeers {
             txn_id: TxnId(10),
-            id: &NodeId::all(1),
-            info_hash: &NodeId::all(2),
+            id: NodeId::all(1),
+            info_hash: NodeId::all(2),
         };
 
         let encoded = request.encode_to_vec();
@@ -192,8 +192,8 @@ mod tests {
     fn request_announce_peer() {
         let request = AnnouncePeer {
             txn_id: TxnId(10),
-            id: &NodeId::all(1),
-            info_hash: &NodeId::all(2),
+            id: NodeId::all(1),
+            info_hash: NodeId::all(2),
             implied_port: false,
             port: 5000,
             token: &[0, 1, 2],
@@ -214,8 +214,8 @@ mod tests {
     fn request_announce_peer_implied_port() {
         let request = AnnouncePeer {
             txn_id: TxnId(10),
-            id: &NodeId::all(1),
-            info_hash: &NodeId::all(2),
+            id: NodeId::all(1),
+            info_hash: NodeId::all(2),
             implied_port: true,
             port: 5000,
             token: &[0, 1, 2],
