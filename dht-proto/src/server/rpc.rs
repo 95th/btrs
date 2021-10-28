@@ -211,7 +211,6 @@ impl RpcManager {
         &mut self,
         table: &mut RoutingTable,
         tasks: &mut Slab<Box<dyn Task>>,
-        timed_out: &mut Vec<(TxnId, Request)>,
         now: Instant,
     ) {
         if self.txns.pending.is_empty() {
@@ -230,9 +229,9 @@ impl RpcManager {
             assert!(tasks.is_empty());
         }
 
-        timed_out.extend(self.txns.pending.drain_filter(|_, req| req.timeout <= now));
+        self.txns.collect_expired(now);
 
-        for (txn_id, req) in timed_out.drain(..) {
+        while let Some((txn_id, req)) = self.txns.timed_out.pop() {
             log::trace!("Txn {:?} expired", txn_id);
             if req.has_id {
                 table.failed(req.id);
@@ -277,6 +276,7 @@ impl Request {
 
 pub struct Transactions {
     pending: HashMap<TxnId, Request>,
+    timed_out: Vec<(TxnId, Request)>,
     timeout: Duration,
 }
 
@@ -288,6 +288,7 @@ impl Transactions {
     pub fn with_timeout(timeout: Duration) -> Self {
         Self {
             pending: HashMap::new(),
+            timed_out: Vec::new(),
             timeout,
         }
     }
@@ -306,6 +307,11 @@ impl Transactions {
 
     pub fn remove(&mut self, txn_id: TxnId) -> Option<Request> {
         self.pending.remove(&txn_id)
+    }
+
+    pub fn collect_expired(&mut self, now: Instant) {
+        self.timed_out
+            .extend(self.pending.drain_filter(|_, req| req.timeout <= now));
     }
 }
 

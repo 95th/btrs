@@ -1,18 +1,10 @@
-use crate::{
-    id::NodeId,
-    msg::{recv::Msg, TxnId},
-    server::task::Task,
-    table::RoutingTable,
-};
+use crate::{id::NodeId, msg::recv::Msg, server::task::Task, table::RoutingTable};
 use ben::Parser;
 use rpc::RpcManager;
 use slab::Slab;
 use std::{net::SocketAddr, time::Instant};
 
-use self::{
-    rpc::Request,
-    task::{AnnounceTask, BootstrapTask, GetPeersTask, PingTask},
-};
+use self::task::{AnnounceTask, BootstrapTask, GetPeersTask, PingTask};
 
 pub use rpc::Event;
 pub use task::TaskId;
@@ -30,7 +22,6 @@ pub enum ClientRequest {
 pub struct Dht {
     table: RoutingTable,
     tasks: Slab<Box<dyn Task>>,
-    timed_out: Vec<(TxnId, Request)>,
     parser: Parser,
     rpc: RpcManager,
 }
@@ -40,7 +31,6 @@ impl Dht {
         Self {
             table: RoutingTable::new(id, router_nodes, now),
             tasks: Slab::new(),
-            timed_out: vec![],
             parser: Parser::new(),
             rpc: RpcManager::new(id),
         }
@@ -67,7 +57,7 @@ impl Dht {
     pub fn tick(&mut self, now: Instant) {
         log::trace!("Server::tick");
         self.rpc
-            .check_timeouts(&mut self.table, &mut self.tasks, &mut self.timed_out, now);
+            .check_timeouts(&mut self.table, &mut self.tasks, now);
 
         if let Some(refresh) = self.table.next_refresh(now) {
             log::trace!("Time to refresh the routing table");
