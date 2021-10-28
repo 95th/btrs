@@ -1,6 +1,6 @@
 use crate::{
     id::NodeId,
-    util::{self, ArrayReader, WithBytes},
+    util::{self, WithBytes},
 };
 use ben::{Encode, LazyBytesEncoder};
 use std::net::SocketAddr;
@@ -89,70 +89,57 @@ impl Encode for Contact {
     }
 }
 
-pub struct CompactNodes<'a> {
-    reader: ArrayReader<'a>,
+struct CompactNode<const N: usize> {
+    id: NodeId,
+    ip: [u8; N],
+    port: [u8; 2],
 }
 
-impl<'a> CompactNodes<'a> {
+pub struct CompactNodes<'a, const N: usize> {
+    iter: std::slice::Iter<'a, CompactNode<N>>,
+}
+
+impl<'a, const N: usize> CompactNodes<'a, N> {
     pub fn new(buf: &'a [u8]) -> anyhow::Result<Self> {
+        let size = std::mem::size_of::<CompactNode<N>>();
+
         anyhow::ensure!(
-            buf.len() % 26 == 0,
-            "Compact node list must have length multiple of 26, actual: {}",
+            buf.len() % size == 0,
+            "Compact node list must have length multiple of {}, actual: {}",
+            size,
             buf.len()
         );
 
-        Ok(Self {
-            reader: ArrayReader::new(buf),
-        })
+        let iter = unsafe {
+            let ptr = buf.as_ptr().cast::<CompactNode<N>>();
+            let slice = std::slice::from_raw_parts(ptr, buf.len() / size);
+            slice.iter()
+        };
+
+        Ok(Self { iter })
     }
 }
 
-impl<'a> Iterator for CompactNodes<'a> {
+impl<'a> Iterator for CompactNodes<'a, 4> {
     type Item = Contact;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let id = self.reader.read::<20>()?;
-        let addr = self.reader.read::<4>()?;
-        let port = self.reader.read::<2>()?;
+        let node = self.iter.next()?;
+        let port = u16::from_be_bytes(node.port);
+        let addr = SocketAddr::from((node.ip, port));
 
-        let id = NodeId::from(*id);
-        let port = u16::from_be_bytes(*port);
-        let addr = SocketAddr::from((*addr, port));
-
-        Some(Contact::new(id, addr))
+        Some(Contact::new(node.id, addr))
     }
 }
 
-pub struct CompactNodesV6<'a> {
-    reader: ArrayReader<'a>,
-}
-
-impl<'a> CompactNodesV6<'a> {
-    pub fn new(buf: &'a [u8]) -> anyhow::Result<Self> {
-        anyhow::ensure!(
-            buf.len() % 38 == 0,
-            "Compact node list must have length multiple of 38, actual: {}",
-            buf.len()
-        );
-
-        Ok(Self {
-            reader: ArrayReader::new(buf),
-        })
-    }
-}
-
-impl<'a> Iterator for CompactNodesV6<'a> {
+impl<'a> Iterator for CompactNodes<'a, 16> {
     type Item = Contact;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let id = self.reader.read::<20>()?;
-        let addr = self.reader.read::<16>()?;
-        let port = self.reader.read::<2>()?;
+        let node = self.iter.next()?;
+        let port = u16::from_be_bytes(node.port);
+        let addr = SocketAddr::from((node.ip, port));
 
-        let id = NodeId::from(*id);
-        let port = u16::from_be_bytes(*port);
-        let addr = SocketAddr::from((*addr, port));
-
-        Some(Contact::new(id, addr))
+        Some(Contact::new(node.id, addr))
     }
 }
