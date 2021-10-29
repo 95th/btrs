@@ -137,7 +137,7 @@ impl<'a> Entry<'a> {
         unsafe {
             let t = self.token();
             let p = self.buf.add(t.start as usize);
-            std::slice::from_raw_parts(p, t.len())
+            std::slice::from_raw_parts(p, t.len as usize)
         }
     }
 

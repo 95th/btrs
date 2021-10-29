@@ -4,28 +4,28 @@ use std::fmt;
 pub struct Token {
     pub kind: TokenKind,
     pub start: u32,
-    pub end: u32,
+    pub len: u32,
     pub next: u32,
 }
 
 impl fmt::Debug for Token {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}[{}:{}]", self.kind, self.start, self.end)
+        write!(f, "{:?}[{};{}]", self.kind, self.start, self.len)
     }
 }
 
 impl Token {
-    pub fn new(kind: TokenKind, start: u32, end: u32, next: u32) -> Self {
+    pub fn new(kind: TokenKind, start: u32, len: u32, next: u32) -> Self {
         Self {
             kind,
             start,
-            end,
+            len,
             next,
         }
     }
 
-    pub fn len(&self) -> usize {
-        (self.end - self.start) as usize
+    pub fn finish(&mut self, pos: usize) {
+        self.len = pos as u32 - self.start;
     }
 }
 
