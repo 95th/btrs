@@ -17,7 +17,7 @@ pub use ping::PingTask;
 
 use super::rpc::RpcManager;
 
-pub trait Task: Send {
+pub trait Task {
     fn id(&self) -> TaskId;
 
     fn add_requests(&mut self, rpc: &mut RpcManager, now: Instant) -> bool;
