@@ -1,5 +1,5 @@
 use anyhow::Context;
-use ben::{Decoder, DictEncoder, Encode, Parser};
+use ben::{DictEncoder, Encode, Entry, Parser};
 use std::io;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
@@ -262,7 +262,7 @@ impl Message {
 
 pub struct ExtendedMessage<'a> {
     pub id: u8,
-    pub value: Decoder<'a>,
+    pub value: Entry<'a>,
     pub rest: &'a [u8],
 }
 
@@ -275,7 +275,7 @@ mod msg_type {
 impl<'a> ExtendedMessage<'a> {
     pub fn parse(data: &'a [u8], parser: &'a mut Parser) -> anyhow::Result<Self> {
         let id = data[0];
-        let (value, i) = parser.parse_prefix::<Decoder>(&data[1..])?;
+        let (value, i) = parser.parse_prefix::<Entry>(&data[1..])?;
         log::debug!("ext header len: {}", value.as_raw_bytes().len());
 
         let rest = &data[i + 1..];
@@ -287,7 +287,7 @@ impl<'a> ExtendedMessage<'a> {
         self.id == 0
     }
 
-    pub fn body(&self) -> &Decoder<'_> {
+    pub fn body(&self) -> &Entry<'_> {
         &self.value
     }
 

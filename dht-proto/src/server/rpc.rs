@@ -1,4 +1,4 @@
-use ben::{Decoder, DictEncoder, Parser};
+use ben::{DictEncoder, Entry, Parser};
 use slab::Slab;
 
 use crate::{
@@ -196,7 +196,7 @@ impl RpcManager {
 
         if log::log_enabled!(log::Level::Debug) {
             let mut p = Parser::new();
-            let d = p.parse::<Decoder>(&buf).unwrap();
+            let d = p.parse::<Entry>(&buf).unwrap();
             log::debug!("Sending reply: {:?}", d);
         }
 

@@ -4,7 +4,7 @@ use crate::msg::send::GetPeers;
 use crate::server::rpc::Event;
 use crate::server::RpcManager;
 use crate::table::RoutingTable;
-use ben::{Decoder, Encode};
+use ben::{Encode, Entry};
 use std::collections::HashSet;
 use std::net::SocketAddr;
 use std::time::Instant;
@@ -82,7 +82,7 @@ impl Task for GetPeersTask {
     }
 }
 
-fn decode_peer(d: Decoder) -> Option<SocketAddr> {
+fn decode_peer(d: Entry) -> Option<SocketAddr> {
     if let Some(b) = d.as_bytes() {
         if b.len() == 6 {
             let ptr = b.as_ptr().cast::<([u8; 4], [u8; 2])>();

@@ -8,7 +8,7 @@ mod error;
 mod parse;
 mod token;
 
-pub use decode::{Decode, Decoder};
+pub use decode::{Decode, Entry};
 pub use encode::{encode_bytes, encode_int, DictEncoder, Encode, LazyBytesEncoder, ListEncoder};
 pub use error::{Error, Result};
 pub use parse::Parser;

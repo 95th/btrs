@@ -1,4 +1,4 @@
-use crate::decode::{Decode, Decoder};
+use crate::decode::{Decode, Entry};
 use crate::error::{Error, Result};
 use crate::token::{Token, TokenKind};
 
@@ -72,7 +72,7 @@ impl Parser {
         Ok((t, pos))
     }
 
-    fn parse_prefix_impl<'a>(&'a mut self, buf: &'a [u8]) -> Result<(Decoder<'a>, usize)> {
+    fn parse_prefix_impl<'a>(&'a mut self, buf: &'a [u8]) -> Result<(Entry<'a>, usize)> {
         if buf.is_empty() {
             return Err(Error::Eof);
         }
@@ -89,8 +89,8 @@ impl Parser {
 
         state.parse_object()?;
         let pos = state.pos;
-        let d = Decoder::new(buf, &self.tokens).ok_or(Error::Eof)?;
-        Ok((d, pos))
+        let entry = Entry::new(buf, &self.tokens);
+        Ok((entry, pos))
     }
 }
 
@@ -127,7 +127,7 @@ impl<'a> ParserState<'a> {
             b'd' => self.parse_dict(),
             b'l' => self.parse_list(),
             b'i' => self.parse_int(),
-            b'0'..=b'9' => self.parse_string(),
+            b'0'..=b'9' => self.parse_string(false),
             _ => Err(Error::Unexpected { pos: self.pos }),
         };
 
@@ -142,7 +142,7 @@ impl<'a> ParserState<'a> {
         self.next_char()?;
 
         while self.peek_char()? != b'e' {
-            self.parse_string()?;
+            self.parse_string(true)?;
             self.parse_object()?;
         }
 
@@ -213,7 +213,7 @@ impl<'a> ParserState<'a> {
         }
     }
 
-    fn parse_string(&mut self) -> Result<()> {
+    fn parse_string(&mut self, validate_utf8: bool) -> Result<()> {
         let mut len: usize = 0;
 
         loop {
@@ -232,8 +232,19 @@ impl<'a> ParserState<'a> {
 
         if self.pos + len <= self.buf.len() {
             let token_pos = self.create_token(TokenKind::ByteStr)?;
+            let start = self.pos;
             self.pos += len;
             self.tokens[token_pos].end = self.pos as u32;
+
+            if validate_utf8 {
+                let value = &self.buf[start..self.pos];
+
+                std::str::from_utf8(value).map_err(|_| Error::Invalid {
+                    pos: start,
+                    reason: "Dict key must be a valid UTF-8 string",
+                })?;
+            }
+
             Ok(())
         } else {
             Err(Error::Eof)
@@ -260,7 +271,7 @@ mod tests {
     fn parse_int() {
         let s = b"i12e";
         let mut parser = Parser::new();
-        parser.parse::<Decoder>(s).unwrap();
+        parser.parse::<Entry>(s).unwrap();
         assert_eq!(&[Token::new(TokenKind::Int, 1, 3, 1)], &parser.tokens[..]);
     }
 
@@ -268,7 +279,7 @@ mod tests {
     fn parse_string() {
         let s = b"3:abc";
         let mut parser = Parser::new();
-        parser.parse::<Decoder>(s).unwrap();
+        parser.parse::<Entry>(s).unwrap();
         assert_eq!(
             &[Token::new(TokenKind::ByteStr, 2, 5, 1)],
             &parser.tokens[..]
@@ -279,7 +290,7 @@ mod tests {
     fn parse_string_too_long() {
         let s = b"3:abcd";
         let mut parser = Parser::new();
-        let err = parser.parse::<Decoder>(s).unwrap_err();
+        let err = parser.parse::<Entry>(s).unwrap_err();
         assert_eq!(
             Error::Invalid {
                 reason: "Extra bytes at the end",
@@ -293,7 +304,7 @@ mod tests {
     fn parse_string_too_short() {
         let s = b"3:ab";
         let mut parser = Parser::new();
-        let err = parser.parse::<Decoder>(s).unwrap_err();
+        let err = parser.parse::<Entry>(s).unwrap_err();
         assert_eq!(Error::Eof, err);
     }
 
@@ -301,28 +312,28 @@ mod tests {
     fn empty_dict() {
         let s = b"de";
         let mut parser = Parser::new();
-        parser.parse::<Decoder>(s).unwrap();
+        parser.parse::<Entry>(s).unwrap();
         assert_eq!(&[Token::new(TokenKind::Dict, 0, 2, 1)], &parser.tokens[..]);
     }
 
     #[test]
     fn unclosed_dict() {
         let s = b"d";
-        let err = Parser::new().parse::<Decoder>(s).unwrap_err();
+        let err = Parser::new().parse::<Entry>(s).unwrap_err();
         assert_eq!(Error::Eof, err);
     }
 
     #[test]
     fn key_only_dict() {
         let s = b"d1:ae";
-        let err = Parser::new().parse::<Decoder>(s).unwrap_err();
+        let err = Parser::new().parse::<Entry>(s).unwrap_err();
         assert_eq!(Error::Unexpected { pos: 4 }, err);
     }
 
     #[test]
     fn key_only_dict_2() {
         let s = b"d1:a1:a1:ae";
-        let err = Parser::new().parse::<Decoder>(s).unwrap_err();
+        let err = Parser::new().parse::<Entry>(s).unwrap_err();
         assert_eq!(Error::Unexpected { pos: 10 }, err);
     }
 
@@ -330,7 +341,7 @@ mod tests {
     fn dict_string_values() {
         let s = b"d1:a2:ab3:abc4:abcde";
         let mut parser = Parser::new();
-        parser.parse::<Decoder>(s).unwrap();
+        parser.parse::<Entry>(s).unwrap();
         assert_eq!(
             &[
                 Token::new(TokenKind::Dict, 0, 20, 5),
@@ -344,10 +355,24 @@ mod tests {
     }
 
     #[test]
+    fn dict_non_utf8_key() {
+        let s = &[b'd', b'1', b':', 0x80, b'2', b':', b'a', b'b', b'e'];
+        let mut parser = Parser::new();
+        let err = parser.parse::<Entry>(s).unwrap_err();
+        assert_eq!(
+            err,
+            Error::Invalid {
+                pos: 3,
+                reason: "Dict key must be a valid UTF-8 string"
+            }
+        );
+    }
+
+    #[test]
     fn dict_mixed_values() {
         let s = b"d1:a1:b1:ci1e1:x1:y1:dde1:fle1:g1:he";
         let mut parser = Parser::new();
-        parser.parse::<Decoder>(s).unwrap();
+        parser.parse::<Entry>(s).unwrap();
         assert_eq!(
             &[
                 Token::new(TokenKind::Dict, 0, 36, 13),
@@ -372,14 +397,14 @@ mod tests {
     fn empty_list() {
         let s = b"le";
         let mut parser = Parser::new();
-        parser.parse::<Decoder>(s).unwrap();
+        parser.parse::<Entry>(s).unwrap();
         assert_eq!(&[Token::new(TokenKind::List, 0, 2, 1)], &parser.tokens[..]);
     }
 
     #[test]
     fn unclosed_list() {
         let s = b"l";
-        let err = Parser::new().parse::<Decoder>(s).unwrap_err();
+        let err = Parser::new().parse::<Entry>(s).unwrap_err();
         assert_eq!(Error::Eof, err);
     }
 
@@ -387,7 +412,7 @@ mod tests {
     fn list_string_values() {
         let s = b"l1:a2:ab3:abc4:abcde";
         let mut parser = Parser::new();
-        parser.parse::<Decoder>(s).unwrap();
+        parser.parse::<Entry>(s).unwrap();
         assert_eq!(
             &[
                 Token::new(TokenKind::List, 0, 20, 5),
@@ -404,7 +429,7 @@ mod tests {
     fn list_nested() {
         let s = b"lllleeee";
         let mut parser = Parser::new();
-        parser.parse::<Decoder>(s).unwrap();
+        parser.parse::<Entry>(s).unwrap();
         assert_eq!(
             &[
                 Token::new(TokenKind::List, 0, 8, 4),
@@ -420,7 +445,7 @@ mod tests {
     fn list_nested_complex() {
         let s = b"ld1:ald2:ablleeeeee";
         let mut parser = Parser::new();
-        parser.parse::<Decoder>(s).unwrap();
+        parser.parse::<Entry>(s).unwrap();
         assert_eq!(
             &[
                 Token::new(TokenKind::List, 0, 19, 8),
@@ -442,11 +467,11 @@ mod tests {
         parser.token_limit(3);
 
         let s = b"l1:a2:ab3:abc4:abcde";
-        let err = parser.parse::<Decoder>(s).unwrap_err();
+        let err = parser.parse::<Entry>(s).unwrap_err();
         assert_eq!(Error::TokenLimit { limit: 3 }, err);
 
-        let decoder = parser.parse::<Decoder>(b"le").unwrap();
-        assert_eq!(b"le", decoder.as_raw_bytes());
+        let entry = parser.parse::<Entry>(b"le").unwrap();
+        assert_eq!(b"le", entry.as_raw_bytes());
     }
 
     #[test]
@@ -454,14 +479,14 @@ mod tests {
         let mut parser = Parser::new();
         parser.depth_limit(3);
 
-        let err = parser.parse::<Decoder>(b"lllleeee").unwrap_err();
+        let err = parser.parse::<Entry>(b"lllleeee").unwrap_err();
         assert_eq!(Error::DepthLimit { limit: 3 }, err);
 
-        let decoder = parser.parse::<Decoder>(b"llleee").unwrap();
-        assert_eq!(b"llleee", decoder.as_raw_bytes());
+        let entry = parser.parse::<Entry>(b"llleee").unwrap();
+        assert_eq!(b"llleee", entry.as_raw_bytes());
 
-        let decoder = parser.parse::<Decoder>(b"ld1:aleee").unwrap();
-        assert_eq!(b"ld1:aleee", decoder.as_raw_bytes());
+        let entry = parser.parse::<Entry>(b"ld1:aleee").unwrap();
+        assert_eq!(b"ld1:aleee", entry.as_raw_bytes());
     }
 
     #[test]
@@ -472,28 +497,28 @@ mod tests {
                 reason: "Extra bytes at the end",
                 pos: 3,
             },
-            parser.parse::<Decoder>(b"1:a1:b").unwrap_err()
+            parser.parse::<Entry>(b"1:a1:b").unwrap_err()
         );
         assert_eq!(
             Error::Invalid {
                 reason: "Extra bytes at the end",
                 pos: 3,
             },
-            parser.parse::<Decoder>(b"i1e1:b").unwrap_err()
+            parser.parse::<Entry>(b"i1e1:b").unwrap_err()
         );
         assert_eq!(
             Error::Invalid {
                 reason: "Extra bytes at the end",
                 pos: 5,
             },
-            parser.parse::<Decoder>(b"l1:aede").unwrap_err()
+            parser.parse::<Entry>(b"l1:aede").unwrap_err()
         );
         assert_eq!(
             Error::Invalid {
                 reason: "Extra bytes at the end",
                 pos: 2,
             },
-            parser.parse::<Decoder>(b"lel1:ae").unwrap_err()
+            parser.parse::<Entry>(b"lel1:ae").unwrap_err()
         );
     }
 
@@ -501,7 +526,7 @@ mod tests {
     fn parse_prefix() {
         let s = b"lede";
         let mut parser = Parser::new();
-        let (_, len) = parser.parse_prefix::<Decoder>(s).unwrap();
+        let (_, len) = parser.parse_prefix::<Entry>(s).unwrap();
         assert_eq!(&[Token::new(TokenKind::List, 0, 2, 1)], &parser.tokens[..]);
         assert_eq!(2, len);
     }
@@ -510,7 +535,7 @@ mod tests {
     fn parse_prefix_in() {
         let s = b"lede";
         let mut parser = Parser::new();
-        let (_, len) = parser.parse_prefix::<Decoder>(s).unwrap();
+        let (_, len) = parser.parse_prefix::<Entry>(s).unwrap();
         assert_eq!(&[Token::new(TokenKind::List, 0, 2, 1)], &parser.tokens[..]);
         assert_eq!(2, len);
     }
@@ -519,7 +544,7 @@ mod tests {
     fn parse_empty_string() {
         let s = b"0:";
         let mut parser = Parser::new();
-        parser.parse::<Decoder>(s).unwrap();
+        parser.parse::<Entry>(s).unwrap();
         assert_eq!(
             &[Token::new(TokenKind::ByteStr, 2, 2, 1)],
             &parser.tokens[..]

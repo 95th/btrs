@@ -6,7 +6,7 @@ use crate::client::handshake::Handshake;
 use crate::metainfo::InfoHash;
 use crate::msg::{Message, MetadataMsg};
 use crate::peer::PeerId;
-use ben::decode::Decoder;
+use ben::decode::Entry;
 use ben::Encode;
 pub use conn::{AsyncStream, Connection};
 use std::io;
@@ -162,7 +162,7 @@ impl<C: AsyncStream> Client<C> {
             log::trace!(
                 "Send extended message : {:?} ; payload: {:?}",
                 msg,
-                parser.parse::<Decoder>(&data).unwrap()
+                parser.parse::<Entry>(&data).unwrap()
             );
         }
         msg.write_ext(&mut self.conn, id, &data).await

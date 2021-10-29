@@ -2,20 +2,20 @@ use crate::error::{Error, Result};
 use crate::token::{Token, TokenKind};
 use std::fmt;
 
-/// Decode to given type using provided `Decoder` object
+/// Decode to given type using provided `Entry` object
 pub trait Decode<'a>: Sized {
-    fn decode(decoder: Decoder<'a>) -> Result<Self>;
+    fn decode(entry: Entry<'a>) -> Result<Self>;
 }
 
-impl<'a> Decode<'a> for Decoder<'a> {
-    fn decode(decoder: Decoder<'a>) -> Result<Self> {
-        Ok(decoder)
+impl<'a> Decode<'a> for Entry<'a> {
+    fn decode(entry: Entry<'a>) -> Result<Self> {
+        Ok(entry)
     }
 }
 
 impl<'a> Decode<'a> for List<'a> {
-    fn decode(decoder: Decoder<'a>) -> Result<Self> {
-        match decoder.into_list() {
+    fn decode(entry: Entry<'a>) -> Result<Self> {
+        match entry.into_list() {
             Some(dict) => Ok(dict),
             None => Err(Error::TypeMismatch("Not a list")),
         }
@@ -23,8 +23,8 @@ impl<'a> Decode<'a> for List<'a> {
 }
 
 impl<'a> Decode<'a> for Dict<'a> {
-    fn decode(decoder: Decoder<'a>) -> Result<Self> {
-        match decoder.into_dict() {
+    fn decode(entry: Entry<'a>) -> Result<Self> {
+        match entry.into_dict() {
             Some(dict) => Ok(dict),
             None => Err(Error::TypeMismatch("Not a dictionary")),
         }
@@ -32,8 +32,8 @@ impl<'a> Decode<'a> for Dict<'a> {
 }
 
 impl<'a> Decode<'a> for &'a [u8] {
-    fn decode(decoder: Decoder<'a>) -> Result<Self> {
-        match decoder.as_bytes() {
+    fn decode(entry: Entry<'a>) -> Result<Self> {
+        match entry.as_bytes() {
             Some(val) => Ok(val),
             None => Err(Error::TypeMismatch("Not a byte string")),
         }
@@ -41,8 +41,8 @@ impl<'a> Decode<'a> for &'a [u8] {
 }
 
 impl<'a> Decode<'a> for Vec<u8> {
-    fn decode(decoder: Decoder<'a>) -> Result<Self> {
-        match decoder.as_bytes() {
+    fn decode(entry: Entry<'a>) -> Result<Self> {
+        match entry.as_bytes() {
             Some(val) => Ok(val.to_vec()),
             None => Err(Error::TypeMismatch("Not a byte string")),
         }
@@ -50,8 +50,8 @@ impl<'a> Decode<'a> for Vec<u8> {
 }
 
 impl<'a> Decode<'a> for &'a str {
-    fn decode(decoder: Decoder<'a>) -> Result<Self> {
-        match decoder.as_str() {
+    fn decode(entry: Entry<'a>) -> Result<Self> {
+        match entry.as_str() {
             Some(val) => Ok(val),
             None => Err(Error::TypeMismatch("Not a UTF-8 string")),
         }
@@ -59,8 +59,8 @@ impl<'a> Decode<'a> for &'a str {
 }
 
 impl<'a> Decode<'a> for i64 {
-    fn decode(decoder: Decoder<'a>) -> Result<Self> {
-        match decoder.as_int() {
+    fn decode(entry: Entry<'a>) -> Result<Self> {
+        match entry.as_int() {
             Some(val) => Ok(val),
             None => Err(Error::TypeMismatch("Not a integer")),
         }
@@ -68,8 +68,8 @@ impl<'a> Decode<'a> for i64 {
 }
 
 impl<'a> Decode<'a> for String {
-    fn decode(decoder: Decoder<'a>) -> Result<Self> {
-        match decoder.as_str() {
+    fn decode(entry: Entry<'a>) -> Result<Self> {
+        match entry.as_str() {
             Some(val) => Ok(String::from(val)),
             None => Err(Error::TypeMismatch("Not a UTF-8 string")),
         }
@@ -78,15 +78,14 @@ impl<'a> Decode<'a> for String {
 
 #[derive(PartialEq)]
 #[repr(C)]
-pub struct Decoder<'a> {
+pub struct Entry<'a> {
     pub(crate) buf: &'a [u8],
-    pub(crate) token: &'a Token,
-    pub(crate) rest: &'a [Token],
+    pub(crate) tokens: &'a [Token],
 }
 
-impl fmt::Debug for Decoder<'_> {
+impl fmt::Debug for Entry<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.token.kind {
+        match self.tokens[0].kind {
             TokenKind::Int => write!(f, "{}", self.as_int().unwrap()),
             TokenKind::ByteStr => match self.as_ascii_str() {
                 Some(s) => write!(f, "\"{}\"", s),
@@ -98,16 +97,16 @@ impl fmt::Debug for Decoder<'_> {
     }
 }
 
-impl<'a> Decoder<'a> {
-    pub(crate) fn new(buf: &'a [u8], tokens: &'a [Token]) -> Option<Self> {
-        if let [token, rest @ ..] = tokens {
-            Some(Decoder { buf, token, rest })
-        } else {
-            None
-        }
+impl<'a> Entry<'a> {
+    pub(crate) fn new(buf: &'a [u8], tokens: &'a [Token]) -> Self {
+        Entry { buf, tokens }
     }
 
-    /// Returns raw bytes of this decoder.
+    fn token(&self) -> &Token {
+        unsafe { self.tokens.get_unchecked(0) }
+    }
+
+    /// Returns raw bytes of this entry.
     ///
     /// This returns complete raw bytes for dict and list, but remove the headers
     /// from string and int.
@@ -116,51 +115,51 @@ impl<'a> Decoder<'a> {
     ///
     /// Basic usage:
     /// ```
-    /// use ben::{Parser, Decoder};
+    /// use ben::{Parser, Entry};
     ///
     /// let bytes = b"l1:a2:bce";
     /// let parser = &mut Parser::new();
-    /// let decoder = parser.parse::<Decoder>(bytes).unwrap();
-    /// assert_eq!(b"l1:a2:bce", decoder.as_raw_bytes());
+    /// let entry = parser.parse::<Entry>(bytes).unwrap();
+    /// assert_eq!(b"l1:a2:bce", entry.as_raw_bytes());
     /// ```
     pub fn as_raw_bytes(&self) -> &'a [u8] {
         // Safety: Tokens are always in-bounds (ensured by parser)
-        unsafe { self.buf.get_unchecked(self.token.range()) }
+        unsafe { self.buf.get_unchecked(self.token().range()) }
     }
 
-    /// Returns true if this decoder is a list.
+    /// Returns true if this entry is a list.
     pub fn is_list(&self) -> bool {
-        self.token.kind == TokenKind::List
+        self.token().kind == TokenKind::List
     }
 
-    /// Returns true if this decoder is a dictionary.
+    /// Returns true if this entry is a dictionary.
     pub fn is_dict(&self) -> bool {
-        self.token.kind == TokenKind::Dict
+        self.token().kind == TokenKind::Dict
     }
 
-    /// Returns true if this decoder is a string.
+    /// Returns true if this entry is a string.
     pub fn is_bytes(&self) -> bool {
-        self.token.kind == TokenKind::ByteStr
+        self.token().kind == TokenKind::ByteStr
     }
 
-    /// Returns true if this decoder is a integer.
+    /// Returns true if this entry is a integer.
     pub fn is_int(&self) -> bool {
-        self.token.kind == TokenKind::Int
+        self.token().kind == TokenKind::Int
     }
 
-    /// Return this decoder as a `List` which provides further
+    /// Return this entry as a `List` which provides further
     /// list operations such as `get`, `iter` etc.
     ///
     /// # Examples
     ///
     /// Basic usage:
     /// ```
-    /// use ben::{Parser, Decoder};
+    /// use ben::{Parser, Entry};
     ///
     /// let bytes = b"l1:a2:bce";
     /// let parser = &mut Parser::new();
-    /// let decoder = parser.parse::<Decoder>(bytes).unwrap();
-    /// let list = decoder.into_list().unwrap();
+    /// let entry = parser.parse::<Entry>(bytes).unwrap();
+    /// let list = entry.into_list().unwrap();
     /// assert_eq!(b"a", list.get_bytes(0).unwrap());
     /// assert_eq!(b"bc", list.get_bytes(1).unwrap());
     /// ```
@@ -168,34 +167,33 @@ impl<'a> Decoder<'a> {
         if self.is_list() {
             Some(List {
                 buf: self.buf,
-                token: self.token,
-                rest: self.rest,
+                tokens: self.tokens,
             })
         } else {
             None
         }
     }
 
-    /// Return this decoder as a `List` which provides further
+    /// Return this entry as a `List` which provides further
     /// list operations such as `get`, `iter` etc.
     ///
     /// # Examples
     ///
     /// Basic usage:
     /// ```
-    /// use ben::{Parser, Decoder};
+    /// use ben::{Parser, Entry};
     ///
     /// let bytes = b"l1:a2:bce";
     /// let parser = &mut Parser::new();
-    /// let decoder = parser.parse::<Decoder>(bytes).unwrap();
-    /// let list = decoder.as_list().unwrap();
+    /// let entry = parser.parse::<Entry>(bytes).unwrap();
+    /// let list = entry.as_list().unwrap();
     /// assert_eq!(b"a", list.get_bytes(0).unwrap());
     /// assert_eq!(b"bc", list.get_bytes(1).unwrap());
     /// ```
     pub fn as_list(&self) -> Option<&List<'a>> {
         if self.is_list() {
             // Safety: Objects with exact same layout
-            let p = self as *const Decoder;
+            let p = self as *const Entry;
             let list = unsafe { &*p.cast() };
             Some(list)
         } else {
@@ -203,52 +201,51 @@ impl<'a> Decoder<'a> {
         }
     }
 
-    /// Return this decoder as a `Dict` which provides further
+    /// Return this entry as a `Dict` which provides further
     /// dictionary operations such as `get`, `iter` etc.
     ///
     /// # Examples
     ///
     /// Basic usage:
     /// ```
-    /// use ben::{Parser, Decoder};
+    /// use ben::{Parser, Entry};
     ///
     /// let bytes = b"d1:a2:bce";
     /// let parser = &mut Parser::new();
-    /// let decoder = parser.parse::<Decoder>(bytes).unwrap();
-    /// let dict = decoder.into_dict().unwrap();
+    /// let entry = parser.parse::<Entry>(bytes).unwrap();
+    /// let dict = entry.into_dict().unwrap();
     /// assert_eq!(b"bc", dict.get_bytes("a").unwrap());
     /// ```
     pub fn into_dict(self) -> Option<Dict<'a>> {
         if self.is_dict() {
             Some(Dict {
                 buf: self.buf,
-                token: self.token,
-                rest: self.rest,
+                tokens: self.tokens,
             })
         } else {
             None
         }
     }
 
-    /// Return this decoder as a `Dict` which provides further
+    /// Return this entry as a `Dict` which provides further
     /// dictionary operations such as `get`, `iter` etc.
     ///
     /// # Examples
     ///
     /// Basic usage:
     /// ```
-    /// use ben::{Parser, Decoder};
+    /// use ben::{Parser, Entry};
     ///
     /// let bytes = b"d1:a2:bce";
     /// let parser = &mut Parser::new();
-    /// let decoder = parser.parse::<Decoder>(bytes).unwrap();
-    /// let dict = decoder.as_dict().unwrap();
+    /// let entry = parser.parse::<Entry>(bytes).unwrap();
+    /// let dict = entry.as_dict().unwrap();
     /// assert_eq!(b"bc", dict.get_bytes("a").unwrap());
     /// ```
     pub fn as_dict(&self) -> Option<&Dict<'a>> {
         if self.is_dict() {
             // Safety: Objects with exact same layout
-            let p = self as *const Decoder;
+            let p = self as *const Entry;
             let dict = unsafe { &*p.cast() };
             Some(dict)
         } else {
@@ -256,18 +253,18 @@ impl<'a> Decoder<'a> {
         }
     }
 
-    /// Return this decoder as a `i64`.
+    /// Return this entry as a `i64`.
     ///
     /// # Examples
     ///
     /// Basic usage:
     /// ```
-    /// use ben::{Parser, Decoder};
+    /// use ben::{Parser, Entry};
     ///
     /// let bytes = b"i123e";
     /// let parser = &mut Parser::new();
-    /// let decoder = parser.parse::<Decoder>(bytes).unwrap();
-    /// assert_eq!(123, decoder.as_int().unwrap());
+    /// let entry = parser.parse::<Entry>(bytes).unwrap();
+    /// assert_eq!(123, entry.as_int().unwrap());
     /// ```
     pub fn as_int(&self) -> Option<i64> {
         if !self.is_int() {
@@ -289,18 +286,18 @@ impl<'a> Decoder<'a> {
         Some(val)
     }
 
-    /// Return this decoder as a byte slice.
+    /// Return this entry as a byte slice.
     ///
     /// # Examples
     ///
     /// Basic usage:
     /// ```
-    /// use ben::{Parser, Decoder};
+    /// use ben::{Parser, Entry};
     ///
     /// let bytes = b"3:abc";
     /// let parser = &mut Parser::new();
-    /// let decoder = parser.parse::<Decoder>(bytes).unwrap();
-    /// assert_eq!(b"abc", decoder.as_bytes().unwrap());
+    /// let entry = parser.parse::<Entry>(bytes).unwrap();
+    /// assert_eq!(b"abc", entry.as_bytes().unwrap());
     /// ```
     pub fn as_bytes(&self) -> Option<&'a [u8]> {
         if self.is_bytes() {
@@ -310,29 +307,29 @@ impl<'a> Decoder<'a> {
         }
     }
 
-    /// Return this decoder as a string slice.
+    /// Return this entry as a string slice.
     ///
-    /// Returns None if this decoder is not a valid UTF-8 byte string
+    /// Returns None if this entry is not a valid UTF-8 byte string
     ///
     /// # Examples
     ///
     /// Basic usage:
     /// ```
-    /// use ben::{Parser, Decoder};
+    /// use ben::{Parser, Entry};
     ///
     /// let bytes = b"3:abc";
     /// let parser = &mut Parser::new();
-    /// let decoder = parser.parse::<Decoder>(bytes).unwrap();
-    /// assert_eq!("abc", decoder.as_str().unwrap());
+    /// let entry = parser.parse::<Entry>(bytes).unwrap();
+    /// assert_eq!("abc", entry.as_str().unwrap());
     /// ```
     pub fn as_str(&self) -> Option<&'a str> {
         let bytes = self.as_bytes()?;
         std::str::from_utf8(bytes).ok()
     }
 
-    /// Return this decoder as a string slice.
+    /// Return this entry as a string slice.
     ///
-    /// Returns None if this decoder
+    /// Returns None if this entry
     /// 1. is not a valid UTF-8 string.
     /// 2. contains characters except ASCII alphanumeric, punctuation and whitespace.
     ///
@@ -340,14 +337,14 @@ impl<'a> Decoder<'a> {
     ///
     /// Basic usage:
     /// ```
-    /// use ben::{Parser, Decoder};
+    /// use ben::{Parser, Entry};
     ///
     /// let parser = &mut Parser::new();
-    /// let decoder = parser.parse::<Decoder>(b"3:abc").unwrap();
-    /// assert_eq!("abc", decoder.as_ascii_str().unwrap());
+    /// let entry = parser.parse::<Entry>(b"3:abc").unwrap();
+    /// assert_eq!("abc", entry.as_ascii_str().unwrap());
     ///
-    /// let decoder = parser.parse::<Decoder>(b"3:\x01\x01\x01").unwrap();
-    /// assert!(decoder.as_ascii_str().is_none());
+    /// let entry = parser.parse::<Entry>(b"3:\x01\x01\x01").unwrap();
+    /// assert!(entry.as_ascii_str().is_none());
     /// ```
     pub fn as_ascii_str(&self) -> Option<&'a str> {
         let s = self.as_str()?;
@@ -366,8 +363,7 @@ impl<'a> Decoder<'a> {
 #[repr(C)]
 pub struct List<'a> {
     buf: &'a [u8],
-    token: &'a Token,
-    rest: &'a [Token],
+    tokens: &'a [Token],
 }
 
 impl fmt::Debug for List<'_> {
@@ -377,7 +373,7 @@ impl fmt::Debug for List<'_> {
 }
 
 impl<'a> IntoIterator for List<'a> {
-    type Item = Decoder<'a>;
+    type Item = Entry<'a>;
     type IntoIter = ListIter<'a>;
 
     fn into_iter(self) -> Self::IntoIter {
@@ -390,10 +386,14 @@ impl<'a> List<'a> {
     pub fn iter(&self) -> ListIter<'a> {
         ListIter {
             buf: self.buf,
-            tokens: self.rest,
+            tokens: self.tokens,
             index: 0,
-            end: self.token.next as usize - 1,
+            end: self.token().next as usize - 1,
         }
+    }
+
+    fn token(&self) -> &Token {
+        unsafe { self.tokens.get_unchecked(0) }
     }
 
     /// Returns raw bytes of this list.
@@ -402,20 +402,20 @@ impl<'a> List<'a> {
     ///
     /// Basic usage:
     /// ```
-    /// use ben::{Parser, Decoder};
+    /// use ben::{Parser, Entry};
     ///
     /// let bytes = b"l1:a1:be";
     /// let parser = &mut Parser::new();
-    /// let dict = parser.parse::<Decoder>(bytes).unwrap().into_list().unwrap();
+    /// let dict = parser.parse::<Entry>(bytes).unwrap().into_list().unwrap();
     /// assert_eq!(b"l1:a1:be", dict.as_raw_bytes());
     /// ```
     pub fn as_raw_bytes(&self) -> &'a [u8] {
         // Safety: Tokens are always in-bounds (ensured by parser)
-        unsafe { self.buf.get_unchecked(self.token.range()) }
+        unsafe { self.buf.get_unchecked(self.token().range()) }
     }
 
-    /// Returns the `Decoder` at the given index.
-    pub fn get(&self, i: usize) -> Option<Decoder<'a>> {
+    /// Returns the `Entry` at the given index.
+    pub fn get(&self, i: usize) -> Option<Entry<'a>> {
         self.iter().nth(i)
     }
 
@@ -451,7 +451,7 @@ impl<'a> List<'a> {
 
     /// Returns true if the list is empty
     pub fn is_empty(&self) -> bool {
-        self.token.next == 1
+        self.token().next == 1
     }
 }
 
@@ -463,7 +463,7 @@ pub struct ListIter<'a> {
 }
 
 impl<'a> Iterator for ListIter<'a> {
-    type Item = Decoder<'a>;
+    type Item = Entry<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.index >= self.end {
@@ -472,11 +472,11 @@ impl<'a> Iterator for ListIter<'a> {
 
         debug_assert!(self.index < self.tokens.len());
         let tokens = self.tokens.get(self.index..)?;
-        let decoder = Decoder::new(self.buf, tokens)?;
+        let entry = Entry::new(self.buf, tokens);
 
-        self.index += decoder.token.next as usize;
+        self.index += entry.token().next as usize;
 
-        Some(decoder)
+        Some(entry)
     }
 }
 
@@ -484,8 +484,7 @@ impl<'a> Iterator for ListIter<'a> {
 #[repr(C)]
 pub struct Dict<'a> {
     buf: &'a [u8],
-    token: &'a Token,
-    rest: &'a [Token],
+    tokens: &'a [Token],
 }
 
 impl fmt::Debug for Dict<'_> {
@@ -495,7 +494,7 @@ impl fmt::Debug for Dict<'_> {
 }
 
 impl<'a> IntoIterator for Dict<'a> {
-    type Item = (&'a str, Decoder<'a>);
+    type Item = (&'a str, Entry<'a>);
     type IntoIter = DictIter<'a>;
 
     fn into_iter(self) -> Self::IntoIter {
@@ -508,10 +507,14 @@ impl<'a> Dict<'a> {
     pub fn iter(&self) -> DictIter<'a> {
         DictIter {
             buf: self.buf,
-            tokens: self.rest,
+            tokens: self.tokens,
             index: 0,
-            end: self.token.next as usize - 1,
+            end: self.token().next as usize - 1,
         }
+    }
+
+    fn token(&self) -> &Token {
+        unsafe { self.tokens.get_unchecked(0) }
     }
 
     /// Returns raw bytes of this dictionary.
@@ -520,20 +523,20 @@ impl<'a> Dict<'a> {
     ///
     /// Basic usage:
     /// ```
-    /// use ben::{Parser, Decoder};
+    /// use ben::{Parser, Entry};
     ///
     /// let bytes = b"d1:a1:be";
     /// let parser = &mut Parser::new();
-    /// let dict = parser.parse::<Decoder>(bytes).unwrap().into_dict().unwrap();
+    /// let dict = parser.parse::<Entry>(bytes).unwrap().into_dict().unwrap();
     /// assert_eq!(b"d1:a1:be", dict.as_raw_bytes());
     /// ```
     pub fn as_raw_bytes(&self) -> &'a [u8] {
         // Safety: Tokens are always in-bounds (ensured by parser)
-        unsafe { self.buf.get_unchecked(self.token.range()) }
+        unsafe { self.buf.get_unchecked(self.token().range()) }
     }
 
-    /// Returns the `Decoder` for the given key.
-    pub fn get(&self, key: &str) -> Option<Decoder<'a>> {
+    /// Returns the `Entry` for the given key.
+    pub fn get(&self, key: &str) -> Option<Entry<'a>> {
         self.iter()
             .find_map(|(k, v)| if k == key { Some(v) } else { None })
     }
@@ -570,7 +573,7 @@ impl<'a> Dict<'a> {
 
     /// Returns true if the dictionary is empty
     pub fn is_empty(&self) -> bool {
-        self.token.next == 1
+        self.token().next == 1
     }
 }
 
@@ -581,28 +584,34 @@ pub struct DictIter<'a> {
     end: usize,
 }
 
+impl<'a> DictIter<'a> {
+    unsafe fn next_entry_unchecked(&mut self) -> Entry<'a> {
+        debug_assert!(self.index < self.tokens.len());
+        let tokens = self.tokens.get_unchecked(self.index..);
+        let entry = Entry::new(self.buf, tokens);
+        self.index += entry.token().next as usize;
+        entry
+    }
+}
+
 impl<'a> Iterator for DictIter<'a> {
-    type Item = (&'a str, Decoder<'a>);
+    type Item = (&'a str, Entry<'a>);
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.index >= self.end {
             return None;
         }
 
-        debug_assert!(self.index < self.tokens.len());
-        let tokens = self.tokens.get(self.index..)?;
-        let key = Decoder::new(self.buf, tokens)?;
+        // Safety: All validated by the parser
+        unsafe {
+            let key = self.next_entry_unchecked();
+            debug_assert_eq!(TokenKind::ByteStr, key.token().kind);
 
-        debug_assert_eq!(TokenKind::ByteStr, key.token.kind);
-        self.index += key.token.next as usize;
+            let key = std::str::from_utf8_unchecked(key.as_raw_bytes());
+            let val = self.next_entry_unchecked();
 
-        debug_assert!(self.index < self.tokens.len());
-        let tokens = self.tokens.get(self.index..)?;
-        let val = Decoder::new(self.buf, tokens)?;
-
-        self.index += val.token.next as usize;
-
-        Some((key.as_str()?, val))
+            Some((key, val))
+        }
     }
 }
 
@@ -778,7 +787,7 @@ mod tests {
     #[test]
     fn decode_empty() {
         let parser = &mut Parser::new();
-        let err = parser.parse::<Decoder>(&[]).unwrap_err();
+        let err = parser.parse::<Entry>(&[]).unwrap_err();
         assert_eq!(err, Error::Eof);
     }
 
@@ -786,7 +795,7 @@ mod tests {
     fn decode_debug_bytes() {
         let s = b"3:\x01\x01\x01";
         let parser = &mut Parser::new();
-        let n = parser.parse::<Decoder>(s).unwrap();
+        let n = parser.parse::<Entry>(s).unwrap();
         assert!(n.as_bytes().is_some());
         assert!(n.as_ascii_str().is_none());
         assert_eq!(
@@ -799,7 +808,7 @@ mod tests {
     fn decode_debug_str() {
         let s = b"3:abc";
         let parser = &mut Parser::new();
-        let n = parser.parse::<Decoder>(s).unwrap();
+        let n = parser.parse::<Entry>(s).unwrap();
         assert!(n.as_bytes().is_some());
         assert!(n.as_ascii_str().is_some());
         assert_eq!("\"abc\"", format!("{:?}", n));
