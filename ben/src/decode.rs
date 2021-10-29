@@ -400,15 +400,15 @@ impl<'a> List<'a> {
 
 pub struct ListIter<'a> {
     entry: Entry<'a>,
-    index: usize,
-    end: usize,
+    index: u32,
+    end: u32,
 }
 
 impl<'a> ListIter<'a> {
     fn new(entry: Entry<'a>) -> Self {
         Self {
             index: 1,
-            end: entry.token().next as usize,
+            end: entry.token().next,
             entry,
         }
     }
@@ -423,9 +423,9 @@ impl<'a> Iterator for ListIter<'a> {
         }
 
         // Safety: Validated by the parser
-        let token = unsafe { self.entry.token.add(self.index) };
+        let token = unsafe { self.entry.token.add(self.index as usize) };
         let entry = Entry::from_raw(self.entry.buf, token);
-        self.index += entry.token().next as usize;
+        self.index += entry.token().next;
 
         Some(entry)
     }
