@@ -53,7 +53,7 @@ impl TorrentFile {
         let mut tracker_urls = hashset![announce.to_owned()];
         if let Some(list) = dict.get_list("announce-list") {
             for v in list.iter() {
-                for v in v.as_list().context("`announce-list` is not a list")?.iter() {
+                for v in v.into_list().context("`announce-list` is not a list")?.iter() {
                     tracker_urls.insert(
                         v.as_str()
                             .context("URL in `announce-list` is not a valid string")?

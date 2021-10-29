@@ -34,8 +34,8 @@ pub async fn announce(req: AnnounceRequest<'_>) -> anyhow::Result<AnnounceRespon
     let peers = match value.get("peers") {
         Some(peers) if peers.is_list() => {
             let mut v = hashset![];
-            for peer in peers.as_list().unwrap().iter() {
-                let peer = peer.as_dict().context("Peer not a dict")?;
+            for peer in peers.into_list().unwrap().iter() {
+                let peer = peer.into_dict().context("Peer not a dict")?;
                 let ip = peer
                     .get_str("ip")
                     .context("IP not present")

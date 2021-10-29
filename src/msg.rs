@@ -293,7 +293,7 @@ impl<'a> ExtendedMessage<'a> {
 
     pub fn metadata(&self) -> Option<Metadata> {
         log::trace!("metadata: {:#?}", self.value);
-        let dict = self.value.as_dict()?;
+        let dict = self.value.into_dict()?;
         let m = dict.get_dict("m")?;
         let id = m.get_int("ut_metadata")? as u8;
         let len = dict.get_int("metadata_size")? as usize;
@@ -302,7 +302,7 @@ impl<'a> ExtendedMessage<'a> {
 
     pub fn data(&self, expected_piece: i64) -> anyhow::Result<&[u8]> {
         log::trace!("data: {:#?}", self.value);
-        let dict = self.value.as_dict().context("Not a dict")?;
+        let dict = self.value.into_dict().context("Not a dict")?;
 
         let msg_type = dict.get_int("msg_type").context("`msg_type` not found")?;
         anyhow::ensure!(msg_type == msg_type::DATA, "Not a DATA message");

@@ -77,8 +77,7 @@ impl<'a> Decode<'a> for String {
     }
 }
 
-#[derive(PartialEq)]
-#[repr(C)]
+#[derive(Clone, Copy, PartialEq)]
 pub struct Entry<'a> {
     pub(crate) buf: *const u8,
     pub(crate) token: *const Token,
@@ -93,8 +92,8 @@ impl fmt::Debug for Entry<'_> {
                 Some(s) => write!(f, "\"{}\"", s),
                 None => write!(f, "'{}'", data_encoding::BASE32.encode(self.as_raw_bytes())),
             },
-            TokenKind::List => self.as_list().unwrap().fmt(f),
-            TokenKind::Dict => self.as_dict().unwrap().fmt(f),
+            TokenKind::List => self.into_list().unwrap().fmt(f),
+            TokenKind::Dict => self.into_dict().unwrap().fmt(f),
         }
     }
 }
@@ -113,6 +112,7 @@ impl<'a> Entry<'a> {
     }
 
     fn token(&self) -> &Token {
+        // Safety: Validated by the parser
         unsafe { &*self.token }
     }
 
@@ -134,7 +134,11 @@ impl<'a> Entry<'a> {
     /// ```
     pub fn as_raw_bytes(&self) -> &'a [u8] {
         // Safety: Tokens are always in-bounds (ensured by parser)
-        unsafe { slice(self.buf, self.token()) }
+        unsafe {
+            let t = self.token();
+            let p = self.buf.add(t.start as usize);
+            std::slice::from_raw_parts(p, t.len())
+        }
     }
 
     /// Returns true if this entry is a list.
@@ -175,38 +179,7 @@ impl<'a> Entry<'a> {
     /// ```
     pub fn into_list(self) -> Option<List<'a>> {
         if self.is_list() {
-            Some(List {
-                buf: self.buf,
-                token: self.token,
-                _marker: PhantomData,
-            })
-        } else {
-            None
-        }
-    }
-
-    /// Return this entry as a `List` which provides further
-    /// list operations such as `get`, `iter` etc.
-    ///
-    /// # Examples
-    ///
-    /// Basic usage:
-    /// ```
-    /// use ben::{Parser, Entry};
-    ///
-    /// let bytes = b"l1:a2:bce";
-    /// let parser = &mut Parser::new();
-    /// let entry = parser.parse::<Entry>(bytes).unwrap();
-    /// let list = entry.as_list().unwrap();
-    /// assert_eq!(b"a", list.get_bytes(0).unwrap());
-    /// assert_eq!(b"bc", list.get_bytes(1).unwrap());
-    /// ```
-    pub fn as_list(&self) -> Option<&List<'a>> {
-        if self.is_list() {
-            // Safety: Objects with exact same layout
-            let p = self as *const Entry;
-            let list = unsafe { &*p.cast() };
-            Some(list)
+            Some(List { entry: self })
         } else {
             None
         }
@@ -229,37 +202,7 @@ impl<'a> Entry<'a> {
     /// ```
     pub fn into_dict(self) -> Option<Dict<'a>> {
         if self.is_dict() {
-            Some(Dict {
-                buf: self.buf,
-                token: self.token,
-                _marker: PhantomData,
-            })
-        } else {
-            None
-        }
-    }
-
-    /// Return this entry as a `Dict` which provides further
-    /// dictionary operations such as `get`, `iter` etc.
-    ///
-    /// # Examples
-    ///
-    /// Basic usage:
-    /// ```
-    /// use ben::{Parser, Entry};
-    ///
-    /// let bytes = b"d1:a2:bce";
-    /// let parser = &mut Parser::new();
-    /// let entry = parser.parse::<Entry>(bytes).unwrap();
-    /// let dict = entry.as_dict().unwrap();
-    /// assert_eq!(b"bc", dict.get_bytes("a").unwrap());
-    /// ```
-    pub fn as_dict(&self) -> Option<&Dict<'a>> {
-        if self.is_dict() {
-            // Safety: Objects with exact same layout
-            let p = self as *const Entry;
-            let dict = unsafe { &*p.cast() };
-            Some(dict)
+            Some(Dict { entry: self })
         } else {
             None
         }
@@ -374,9 +317,7 @@ impl<'a> Entry<'a> {
 /// A bencode list
 #[repr(C)]
 pub struct List<'a> {
-    buf: *const u8,
-    token: *const Token,
-    _marker: PhantomData<&'a ()>,
+    entry: Entry<'a>,
 }
 
 impl fmt::Debug for List<'_> {
@@ -397,17 +338,7 @@ impl<'a> IntoIterator for List<'a> {
 impl<'a> List<'a> {
     /// Gets an iterator over the entries of the list
     pub fn iter(&self) -> ListIter<'a> {
-        ListIter {
-            buf: self.buf,
-            token: self.token,
-            index: 1,
-            end: self.token().next as usize,
-            _marker: PhantomData,
-        }
-    }
-
-    fn token(&self) -> &Token {
-        unsafe { &*self.token }
+        ListIter::new(self.entry)
     }
 
     /// Returns raw bytes of this list.
@@ -424,8 +355,7 @@ impl<'a> List<'a> {
     /// assert_eq!(b"l1:a1:be", dict.as_raw_bytes());
     /// ```
     pub fn as_raw_bytes(&self) -> &'a [u8] {
-        // Safety: Tokens are always in-bounds (ensured by parser)
-        unsafe { slice(self.buf, self.token()) }
+        self.entry.as_raw_bytes()
     }
 
     /// Returns the `Entry` at the given index.
@@ -465,16 +395,24 @@ impl<'a> List<'a> {
 
     /// Returns true if the list is empty
     pub fn is_empty(&self) -> bool {
-        self.token().next == 1
+        self.entry.token().next == 1
     }
 }
 
 pub struct ListIter<'a> {
-    buf: *const u8,
-    token: *const Token,
+    entry: Entry<'a>,
     index: usize,
     end: usize,
-    _marker: PhantomData<&'a ()>,
+}
+
+impl<'a> ListIter<'a> {
+    fn new(entry: Entry<'a>) -> Self {
+        Self {
+            index: 1,
+            end: entry.token().next as usize,
+            entry,
+        }
+    }
 }
 
 impl<'a> Iterator for ListIter<'a> {
@@ -485,8 +423,9 @@ impl<'a> Iterator for ListIter<'a> {
             return None;
         }
 
-        let tokens = unsafe { self.token.add(self.index) };
-        let entry = Entry::from_raw(self.buf, tokens);
+        // Safety: Validated by the parser
+        let token = unsafe { self.entry.token.add(self.index) };
+        let entry = Entry::from_raw(self.entry.buf, token);
         self.index += entry.token().next as usize;
 
         Some(entry)
@@ -494,11 +433,8 @@ impl<'a> Iterator for ListIter<'a> {
 }
 
 /// A bencode dictionary
-#[repr(C)]
 pub struct Dict<'a> {
-    buf: *const u8,
-    token: *const Token,
-    _marker: PhantomData<&'a ()>,
+    entry: Entry<'a>,
 }
 
 impl fmt::Debug for Dict<'_> {
@@ -519,17 +455,7 @@ impl<'a> IntoIterator for Dict<'a> {
 impl<'a> Dict<'a> {
     /// Gets an iterator over the entries of the dictionary.
     pub fn iter(&self) -> DictIter<'a> {
-        DictIter {
-            buf: self.buf,
-            token: self.token,
-            index: 1,
-            end: self.token().next as usize,
-            _marker: PhantomData,
-        }
-    }
-
-    fn token(&self) -> &Token {
-        unsafe { &*self.token }
+        DictIter::new(self.entry)
     }
 
     /// Returns raw bytes of this dictionary.
@@ -546,8 +472,7 @@ impl<'a> Dict<'a> {
     /// assert_eq!(b"d1:a1:be", dict.as_raw_bytes());
     /// ```
     pub fn as_raw_bytes(&self) -> &'a [u8] {
-        // Safety: Tokens are always in-bounds (ensured by parser)
-        unsafe { slice(self.buf, self.token()) }
+        self.entry.as_raw_bytes()
     }
 
     /// Returns the `Entry` for the given key.
@@ -588,24 +513,19 @@ impl<'a> Dict<'a> {
 
     /// Returns true if the dictionary is empty
     pub fn is_empty(&self) -> bool {
-        self.token().next == 1
+        self.entry.token().next == 1
     }
 }
 
 pub struct DictIter<'a> {
-    buf: *const u8,
-    token: *const Token,
-    index: usize,
-    end: usize,
-    _marker: PhantomData<&'a ()>,
+    iter: ListIter<'a>,
 }
 
 impl<'a> DictIter<'a> {
-    unsafe fn next_entry_unchecked(&mut self) -> Entry<'a> {
-        let tokens = self.token.add(self.index);
-        let entry = Entry::from_raw(self.buf, tokens);
-        self.index += entry.token().next as usize;
-        entry
+    fn new(entry: Entry<'a>) -> Self {
+        Self {
+            iter: ListIter::new(entry),
+        }
     }
 }
 
@@ -613,26 +533,14 @@ impl<'a> Iterator for DictIter<'a> {
     type Item = (&'a str, Entry<'a>);
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.index >= self.end {
-            return None;
-        }
+        let key = self.iter.next()?;
+        let value = self.iter.next()?;
 
-        // Safety: All validated by the parser
-        unsafe {
-            let key = self.next_entry_unchecked();
-            debug_assert_eq!(TokenKind::ByteStr, key.token().kind);
+        // Safety: Validated by the parser
+        let key = unsafe { std::str::from_utf8_unchecked(key.as_raw_bytes()) };
 
-            let key = std::str::from_utf8_unchecked(key.as_raw_bytes());
-            let val = self.next_entry_unchecked();
-
-            Some((key, val))
-        }
+        Some((key, value))
     }
-}
-
-unsafe fn slice<'a>(p: *const u8, token: &Token) -> &'a [u8] {
-    let p = p.add(token.start as usize);
-    std::slice::from_raw_parts(p, token.len())
 }
 
 #[cfg(test)]
@@ -737,7 +645,7 @@ mod tests {
         assert_eq!(b"a", list_iter.next().unwrap().as_raw_bytes());
         assert_eq!(None, list_iter.next());
 
-        let mut iter = dict.as_dict().unwrap().iter();
+        let mut iter = dict.into_dict().unwrap().iter();
 
         let (k, v) = iter.next().unwrap();
         assert_eq!("a", k);
