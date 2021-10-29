@@ -387,8 +387,8 @@ impl<'a> List<'a> {
         ListIter {
             buf: self.buf,
             tokens: self.tokens,
-            index: 0,
-            end: self.token().next as usize - 1,
+            index: 1,
+            end: self.token().next as usize,
         }
     }
 
@@ -508,8 +508,8 @@ impl<'a> Dict<'a> {
         DictIter {
             buf: self.buf,
             tokens: self.tokens,
-            index: 0,
-            end: self.token().next as usize - 1,
+            index: 1,
+            end: self.token().next as usize,
         }
     }
 
