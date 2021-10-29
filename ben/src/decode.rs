@@ -1,6 +1,7 @@
 use crate::error::{Error, Result};
 use crate::token::{Token, TokenKind};
 use std::fmt;
+use std::marker::PhantomData;
 
 /// Decode to given type using provided `Entry` object
 pub trait Decode<'a>: Sized {
@@ -79,13 +80,14 @@ impl<'a> Decode<'a> for String {
 #[derive(PartialEq)]
 #[repr(C)]
 pub struct Entry<'a> {
-    pub(crate) buf: &'a [u8],
-    pub(crate) tokens: &'a [Token],
+    pub(crate) buf: *const u8,
+    pub(crate) token: *const Token,
+    _marker: PhantomData<&'a ()>,
 }
 
 impl fmt::Debug for Entry<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.tokens[0].kind {
+        match self.token().kind {
             TokenKind::Int => write!(f, "{}", self.as_int().unwrap()),
             TokenKind::ByteStr => match self.as_ascii_str() {
                 Some(s) => write!(f, "\"{}\"", s),
@@ -99,11 +101,19 @@ impl fmt::Debug for Entry<'_> {
 
 impl<'a> Entry<'a> {
     pub(crate) fn new(buf: &'a [u8], tokens: &'a [Token]) -> Self {
-        Entry { buf, tokens }
+        Entry::from_raw(buf.as_ptr(), tokens.as_ptr())
+    }
+
+    fn from_raw(buf: *const u8, token: *const Token) -> Self {
+        Entry {
+            buf,
+            token,
+            _marker: PhantomData,
+        }
     }
 
     fn token(&self) -> &Token {
-        unsafe { self.tokens.get_unchecked(0) }
+        unsafe { &*self.token }
     }
 
     /// Returns raw bytes of this entry.
@@ -124,7 +134,7 @@ impl<'a> Entry<'a> {
     /// ```
     pub fn as_raw_bytes(&self) -> &'a [u8] {
         // Safety: Tokens are always in-bounds (ensured by parser)
-        unsafe { self.buf.get_unchecked(self.token().range()) }
+        unsafe { slice(self.buf, self.token()) }
     }
 
     /// Returns true if this entry is a list.
@@ -167,7 +177,8 @@ impl<'a> Entry<'a> {
         if self.is_list() {
             Some(List {
                 buf: self.buf,
-                tokens: self.tokens,
+                token: self.token,
+                _marker: PhantomData,
             })
         } else {
             None
@@ -220,7 +231,8 @@ impl<'a> Entry<'a> {
         if self.is_dict() {
             Some(Dict {
                 buf: self.buf,
-                tokens: self.tokens,
+                token: self.token,
+                _marker: PhantomData,
             })
         } else {
             None
@@ -362,8 +374,9 @@ impl<'a> Entry<'a> {
 /// A bencode list
 #[repr(C)]
 pub struct List<'a> {
-    buf: &'a [u8],
-    tokens: &'a [Token],
+    buf: *const u8,
+    token: *const Token,
+    _marker: PhantomData<&'a ()>,
 }
 
 impl fmt::Debug for List<'_> {
@@ -386,14 +399,15 @@ impl<'a> List<'a> {
     pub fn iter(&self) -> ListIter<'a> {
         ListIter {
             buf: self.buf,
-            tokens: self.tokens,
+            token: self.token,
             index: 1,
             end: self.token().next as usize,
+            _marker: PhantomData,
         }
     }
 
     fn token(&self) -> &Token {
-        unsafe { self.tokens.get_unchecked(0) }
+        unsafe { &*self.token }
     }
 
     /// Returns raw bytes of this list.
@@ -411,7 +425,7 @@ impl<'a> List<'a> {
     /// ```
     pub fn as_raw_bytes(&self) -> &'a [u8] {
         // Safety: Tokens are always in-bounds (ensured by parser)
-        unsafe { self.buf.get_unchecked(self.token().range()) }
+        unsafe { slice(self.buf, self.token()) }
     }
 
     /// Returns the `Entry` at the given index.
@@ -456,10 +470,11 @@ impl<'a> List<'a> {
 }
 
 pub struct ListIter<'a> {
-    buf: &'a [u8],
-    tokens: &'a [Token],
+    buf: *const u8,
+    token: *const Token,
     index: usize,
     end: usize,
+    _marker: PhantomData<&'a ()>,
 }
 
 impl<'a> Iterator for ListIter<'a> {
@@ -470,10 +485,8 @@ impl<'a> Iterator for ListIter<'a> {
             return None;
         }
 
-        debug_assert!(self.index < self.tokens.len());
-        let tokens = self.tokens.get(self.index..)?;
-        let entry = Entry::new(self.buf, tokens);
-
+        let tokens = unsafe { self.token.add(self.index) };
+        let entry = Entry::from_raw(self.buf, tokens);
         self.index += entry.token().next as usize;
 
         Some(entry)
@@ -483,8 +496,9 @@ impl<'a> Iterator for ListIter<'a> {
 /// A bencode dictionary
 #[repr(C)]
 pub struct Dict<'a> {
-    buf: &'a [u8],
-    tokens: &'a [Token],
+    buf: *const u8,
+    token: *const Token,
+    _marker: PhantomData<&'a ()>,
 }
 
 impl fmt::Debug for Dict<'_> {
@@ -507,14 +521,15 @@ impl<'a> Dict<'a> {
     pub fn iter(&self) -> DictIter<'a> {
         DictIter {
             buf: self.buf,
-            tokens: self.tokens,
+            token: self.token,
             index: 1,
             end: self.token().next as usize,
+            _marker: PhantomData,
         }
     }
 
     fn token(&self) -> &Token {
-        unsafe { self.tokens.get_unchecked(0) }
+        unsafe { &*self.token }
     }
 
     /// Returns raw bytes of this dictionary.
@@ -532,7 +547,7 @@ impl<'a> Dict<'a> {
     /// ```
     pub fn as_raw_bytes(&self) -> &'a [u8] {
         // Safety: Tokens are always in-bounds (ensured by parser)
-        unsafe { self.buf.get_unchecked(self.token().range()) }
+        unsafe { slice(self.buf, self.token()) }
     }
 
     /// Returns the `Entry` for the given key.
@@ -578,17 +593,17 @@ impl<'a> Dict<'a> {
 }
 
 pub struct DictIter<'a> {
-    buf: &'a [u8],
-    tokens: &'a [Token],
+    buf: *const u8,
+    token: *const Token,
     index: usize,
     end: usize,
+    _marker: PhantomData<&'a ()>,
 }
 
 impl<'a> DictIter<'a> {
     unsafe fn next_entry_unchecked(&mut self) -> Entry<'a> {
-        debug_assert!(self.index < self.tokens.len());
-        let tokens = self.tokens.get_unchecked(self.index..);
-        let entry = Entry::new(self.buf, tokens);
+        let tokens = self.token.add(self.index);
+        let entry = Entry::from_raw(self.buf, tokens);
         self.index += entry.token().next as usize;
         entry
     }
@@ -613,6 +628,11 @@ impl<'a> Iterator for DictIter<'a> {
             Some((key, val))
         }
     }
+}
+
+unsafe fn slice<'a>(p: *const u8, token: &Token) -> &'a [u8] {
+    let p = p.add(token.start as usize);
+    std::slice::from_raw_parts(p, token.len())
 }
 
 #[cfg(test)]

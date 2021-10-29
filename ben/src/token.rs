@@ -1,5 +1,4 @@
 use std::fmt;
-use std::ops::Range;
 
 #[derive(Clone, PartialEq)]
 pub struct Token {
@@ -25,11 +24,8 @@ impl Token {
         }
     }
 
-    /// Returns this token's bounds in the original buffer.
-    pub fn range(&self) -> Range<usize> {
-        debug_assert!(self.end >= self.start);
-
-        self.start as usize..self.end as usize
+    pub fn len(&self) -> usize {
+        (self.end - self.start) as usize
     }
 }
 
