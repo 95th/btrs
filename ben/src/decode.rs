@@ -315,7 +315,6 @@ impl<'a> Entry<'a> {
 }
 
 /// A bencode list
-#[repr(C)]
 pub struct List<'a> {
     entry: Entry<'a>,
 }
