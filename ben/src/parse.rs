@@ -204,7 +204,7 @@ impl<'a> ParserState<'a> {
                     self.pos += 1;
                     return Ok(());
                 }
-                _ => return Err(Error::Unexpected { pos: self.pos - 1 }),
+                _ => return Err(Error::Unexpected { pos: self.pos }),
             }
         }
     }
