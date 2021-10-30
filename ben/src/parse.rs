@@ -149,10 +149,7 @@ impl<'a> ParserState<'a> {
         // Consume the closing 'e'
         self.next_char()?;
 
-        let next = self.tokens.len() - t;
-        let token = &mut self.tokens[t];
-        token.finish(self.pos);
-        token.next = next as u32;
+        self.finish_token(t);
 
         Ok(())
     }
@@ -170,10 +167,7 @@ impl<'a> ParserState<'a> {
         // Consume the closing 'e'
         self.next_char()?;
 
-        let next = self.tokens.len() - t;
-        let token = &mut self.tokens[t];
-        token.finish(self.pos);
-        token.next = next as u32;
+        self.finish_token(t);
 
         Ok(())
     }
@@ -261,6 +255,13 @@ impl<'a> ParserState<'a> {
 
         self.tokens.push(Token::new(kind, self.pos as u32, 0, 1));
         Ok(self.tokens.len() - 1)
+    }
+
+    fn finish_token(&mut self, idx: usize) {
+        let next = self.tokens.len() - idx;
+        let token = &mut self.tokens[idx];
+        token.finish(self.pos);
+        token.next = next as u32;
     }
 }
 
