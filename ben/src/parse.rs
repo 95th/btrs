@@ -190,16 +190,18 @@ impl<'a> ParserState<'a> {
         let mut val: i64 = 0;
 
         loop {
-            match self.next_char()? {
+            match self.peek_char()? {
                 c @ b'0'..=b'9' => {
                     let digit = i64::from(c - b'0');
                     match val.checked_mul(10).and_then(|n| n.checked_add(digit)) {
                         Some(n) => val = n,
                         None => return Err(Error::Overflow { pos: self.pos }),
                     }
+                    self.pos += 1;
                 }
                 b'e' => {
-                    self.tokens[t].finish(self.pos - 1);
+                    self.finish_token(t);
+                    self.pos += 1;
                     return Ok(());
                 }
                 _ => return Err(Error::Unexpected { pos: self.pos - 1 }),
@@ -232,10 +234,11 @@ impl<'a> ParserState<'a> {
         let start = self.pos;
         self.pos += len;
 
-        self.tokens[t].finish(self.pos);
+        self.finish_token(t);
 
         if validate_utf8 {
-            let value = &self.buf[start..self.pos];
+            // Safety: We just went through this data.
+            let value = unsafe { self.buf.get_unchecked(start..self.pos) };
 
             std::str::from_utf8(value).map_err(|_| Error::Invalid {
                 pos: start,
@@ -259,7 +262,8 @@ impl<'a> ParserState<'a> {
 
     fn finish_token(&mut self, idx: usize) {
         let next = self.tokens.len() - idx;
-        let token = &mut self.tokens[idx];
+        // Safety: Index is obtained by pushing a token. We never pop. It's always valid.
+        let token = unsafe { self.tokens.get_unchecked_mut(idx) };
         token.finish(self.pos);
         token.next = next as u32;
     }
