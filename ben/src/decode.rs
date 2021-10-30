@@ -225,20 +225,22 @@ impl<'a> Entry<'a> {
         if !self.is_int() {
             return None;
         }
+
+        let mut iter = self.as_raw_bytes().iter();
         let mut val = 0;
-        let mut negative = false;
-        for &c in self.as_raw_bytes() {
-            if c == b'-' {
-                negative = true;
-            } else {
-                let digit = i64::from(c - b'0');
-                val = (val * 10) + digit;
-            }
+        let mut sign = 1;
+
+        match iter.next() {
+            Some(b'-') => sign = -1,
+            Some(c) => val = (c - b'0') as i64,
+            None => {}
         }
-        if negative {
-            val *= -1;
+
+        for c in iter {
+            val = val * 10 + (c - b'0') as i64;
         }
-        Some(val)
+
+        Some(val * sign)
     }
 
     /// Return this entry as a byte slice.
