@@ -196,7 +196,7 @@ impl<'a> ParserState<'a> {
         self.next_char()?;
 
         let start = self.pos;
-        let mut sign = 1;
+        let mut sign: i8 = 1;
 
         // Can be negative
         if self.peek_char()? == b'-' {
@@ -208,11 +208,11 @@ impl<'a> ParserState<'a> {
             return Err(Error::Unexpected { pos: self.pos });
         }
 
-        let mut val = 0_i64;
+        let mut val = 0_u64;
         loop {
             match self.peek_char()? {
                 c @ b'0'..=b'9' => {
-                    let d = i64::from(c - b'0');
+                    let d = u64::from(c - b'0');
                     match val.checked_mul(10).and_then(|n| n.checked_add(d)) {
                         Some(n) => val = n,
                         None => return Err(Error::Overflow { pos: self.pos }),
@@ -224,7 +224,7 @@ impl<'a> ParserState<'a> {
             }
         }
 
-        if val.checked_mul(sign).is_none() {
+        if i64::try_from(val as i128 * sign as i128).is_err() {
             return Err(Error::Overflow { pos: self.pos });
         }
 
@@ -315,11 +315,27 @@ mod tests {
     }
 
     #[test]
-    fn parse_int_overflow() {
+    fn parse_int_positive_max() {
+        let s = b"i9223372036854775807e";
+        let mut parser = Parser::new();
+        parser.parse::<Entry>(s).unwrap();
+        assert_eq!(&[Token::new(TokenKind::Int, 1, 19, 1)], &parser.tokens[..]);
+    }
+
+    #[test]
+    fn parse_int_negative_max() {
+        let s = b"i-9223372036854775808e";
+        let mut parser = Parser::new();
+        parser.parse::<Entry>(s).unwrap();
+        assert_eq!(&[Token::new(TokenKind::Int, 1, 20, 1)], &parser.tokens[..]);
+    }
+
+    #[test]
+    fn parse_int_overflow_positive() {
         let s = b"i9223372036854775808e";
         let mut parser = Parser::new();
         let err = parser.parse::<Entry>(s).unwrap_err();
-        assert_eq!(err, Error::Overflow { pos: 19 });
+        assert_eq!(err, Error::Overflow { pos: 20 });
     }
 
     #[test]
@@ -327,7 +343,7 @@ mod tests {
         let s = b"i-9223372036854775809e";
         let mut parser = Parser::new();
         let err = parser.parse::<Entry>(s).unwrap_err();
-        assert_eq!(err, Error::Overflow { pos: 20 });
+        assert_eq!(err, Error::Overflow { pos: 21 });
     }
 
     #[test]
