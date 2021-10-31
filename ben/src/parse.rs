@@ -82,15 +82,36 @@ impl Parser {
             buf,
             pos: 0,
             tokens: &mut self.tokens,
+            scopes: vec![],
             token_limit: self.token_limit,
             depth_limit: self.depth_limit,
-            current_depth: 0,
         };
 
-        state.parse_object()?;
+        state.parse()?;
         let pos = state.pos;
         let entry = Entry::new(buf, &self.tokens);
         Ok((entry, pos))
+    }
+}
+
+struct Scope {
+    /// Token index
+    index: u32,
+
+    /// Token is a dict
+    is_dict: bool,
+
+    /// We're expecting a key
+    need_key: bool,
+}
+
+impl Scope {
+    fn new(index: usize, dict: bool) -> Self {
+        Self {
+            index: index as u32,
+            is_dict: dict,
+            need_key: true,
+        }
     }
 }
 
@@ -98,9 +119,9 @@ struct ParserState<'a> {
     buf: &'a [u8],
     pos: usize,
     tokens: &'a mut Vec<Token>,
+    scopes: Vec<Scope>,
     token_limit: usize,
     depth_limit: usize,
-    current_depth: usize,
 }
 
 impl<'a> ParserState<'a> {
@@ -114,60 +135,69 @@ impl<'a> ParserState<'a> {
         Ok(c)
     }
 
-    fn parse_object(&mut self) -> Result<()> {
-        self.current_depth += 1;
+    fn parse(&mut self) -> Result<()> {
+        loop {
+            let c = self.peek_char()?;
 
-        if self.current_depth > self.depth_limit {
-            return Err(Error::DepthLimit {
-                limit: self.depth_limit,
-            });
+            if let Some(s) = self.scopes.last() {
+                if s.is_dict && s.need_key && c != b'e' {
+                    self.parse_string(true)?;
+                    self.scopes.last_mut().unwrap().need_key = false;
+                    continue;
+                }
+            }
+
+            let cur_scope = self.scopes.len();
+
+            match c {
+                b'd' => {
+                    let t = Token::new(TokenKind::Dict, self.pos as u32, 2, 1);
+                    self.create_token(t)?;
+                    self.pos += 1;
+                }
+                b'l' => {
+                    let t = Token::new(TokenKind::List, self.pos as u32, 2, 1);
+                    self.create_token(t)?;
+                    self.pos += 1;
+                }
+                b'i' => self.parse_int()?,
+                b'0'..=b'9' => self.parse_string(false)?,
+                b'e' => {
+                    let s = self
+                        .scopes
+                        .pop()
+                        .ok_or_else(|| Error::Unexpected { pos: self.pos })?;
+
+                    if !s.need_key {
+                        return Err(Error::Unexpected { pos: self.pos });
+                    }
+
+                    self.pos += 1;
+
+                    let next = self.tokens.len() - s.index as usize;
+                    let t = &mut self.tokens[s.index as usize];
+                    t.finish(self.pos);
+                    t.next = next as u32;
+                }
+                _ => return Err(Error::Unexpected { pos: self.pos }),
+            }
+
+            if cur_scope > 0 {
+                if let Some(s) = self.scopes.get_mut(cur_scope - 1) {
+                    if s.is_dict {
+                        s.need_key = true;
+                    }
+                }
+            }
+
+            if self.scopes.is_empty() {
+                break;
+            }
         }
 
-        let result = match self.peek_char()? {
-            b'd' => self.parse_dict(),
-            b'l' => self.parse_list(),
-            b'i' => self.parse_int(),
-            b'0'..=b'9' => self.parse_string(false),
-            _ => Err(Error::Unexpected { pos: self.pos }),
-        };
-
-        self.current_depth -= 1;
-        result
-    }
-
-    fn parse_dict(&mut self) -> Result<()> {
-        let t = self.create_token(TokenKind::Dict)?;
-
-        // Consume the opening 'd'
-        self.next_char()?;
-
-        while self.peek_char()? != b'e' {
-            self.parse_string(true)?;
-            self.parse_object()?;
+        if !self.scopes.is_empty() {
+            return Err(Error::Unexpected { pos: self.pos });
         }
-
-        // Consume the closing 'e'
-        self.next_char()?;
-
-        self.finish_token(t);
-
-        Ok(())
-    }
-
-    fn parse_list(&mut self) -> Result<()> {
-        let t = self.create_token(TokenKind::List)?;
-
-        // Consume the opening 'l'
-        self.next_char()?;
-
-        while self.peek_char()? != b'e' {
-            self.parse_object()?;
-        }
-
-        // Consume the closing 'e'
-        self.next_char()?;
-
-        self.finish_token(t);
 
         Ok(())
     }
@@ -176,10 +206,12 @@ impl<'a> ParserState<'a> {
         // Consume the opening 'i'
         self.next_char()?;
 
-        let t = self.create_token(TokenKind::Int)?;
+        let start = self.pos;
+        let mut sign = 1;
 
         // Can be negative
         if self.peek_char()? == b'-' {
+            sign = -1;
             self.pos += 1;
         }
 
@@ -187,30 +219,40 @@ impl<'a> ParserState<'a> {
             return Err(Error::Unexpected { pos: self.pos });
         }
 
-        let mut val: i64 = 0;
-
+        let mut val = 0_i64;
         loop {
             match self.peek_char()? {
                 c @ b'0'..=b'9' => {
-                    let digit = i64::from(c - b'0');
-                    match val.checked_mul(10).and_then(|n| n.checked_add(digit)) {
+                    let d = i64::from(c - b'0');
+                    match val.checked_mul(10).and_then(|n| n.checked_add(d)) {
                         Some(n) => val = n,
                         None => return Err(Error::Overflow { pos: self.pos }),
                     }
                     self.pos += 1;
                 }
-                b'e' => {
-                    self.finish_token(t);
-                    self.pos += 1;
-                    return Ok(());
-                }
+                b'e' => break,
                 _ => return Err(Error::Unexpected { pos: self.pos }),
             }
         }
+
+        if val.checked_mul(sign).is_none() {
+            return Err(Error::Overflow { pos: self.pos });
+        }
+
+        // Consume the closing 'e'
+        self.next_char()?;
+
+        let len = self.pos - start - 1;
+        let t = Token::new(TokenKind::Int, start as u32, len as u32, 1);
+        self.create_token(t)
     }
 
     fn parse_string(&mut self, validate_utf8: bool) -> Result<()> {
         let mut len: usize = 0;
+
+        if !self.peek_char()?.is_ascii_digit() {
+            return Err(Error::Unexpected { pos: self.pos });
+        }
 
         loop {
             match self.next_char()? {
@@ -230,15 +272,14 @@ impl<'a> ParserState<'a> {
             return Err(Error::Eof);
         }
 
-        let t = self.create_token(TokenKind::ByteStr)?;
+        let t = Token::new(TokenKind::ByteStr, self.pos as u32, len as u32, 1);
+        self.create_token(t)?;
+
         let start = self.pos;
         self.pos += len;
 
-        self.finish_token(t);
-
         if validate_utf8 {
-            // Safety: We just went through this data.
-            let value = unsafe { self.buf.get_unchecked(start..self.pos) };
+            let value = &self.buf[start..self.pos];
 
             std::str::from_utf8(value).map_err(|_| Error::Invalid {
                 pos: start,
@@ -249,23 +290,26 @@ impl<'a> ParserState<'a> {
         Ok(())
     }
 
-    fn create_token(&mut self, kind: TokenKind) -> Result<usize> {
-        if self.tokens.len() == self.token_limit {
+    fn create_token(&mut self, token: Token) -> Result<()> {
+        if self.tokens.len() >= self.token_limit {
             return Err(Error::TokenLimit {
                 limit: self.token_limit,
             });
         }
 
-        self.tokens.push(Token::new(kind, self.pos as u32, 0, 1));
-        Ok(self.tokens.len() - 1)
-    }
+        if let TokenKind::Dict | TokenKind::List = token.kind {
+            if self.scopes.len() >= self.depth_limit {
+                return Err(Error::DepthLimit {
+                    limit: self.depth_limit,
+                });
+            }
 
-    fn finish_token(&mut self, idx: usize) {
-        let next = self.tokens.len() - idx;
-        // Safety: Index is obtained by pushing a token. We never pop. It's always valid.
-        let token = unsafe { self.tokens.get_unchecked_mut(idx) };
-        token.finish(self.pos);
-        token.next = next as u32;
+            let s = Scope::new(self.tokens.len(), token.kind == TokenKind::Dict);
+            self.scopes.push(s);
+        }
+
+        self.tokens.push(token);
+        Ok(())
     }
 }
 
@@ -279,6 +323,30 @@ mod tests {
         let mut parser = Parser::new();
         parser.parse::<Entry>(s).unwrap();
         assert_eq!(&[Token::new(TokenKind::Int, 1, 2, 1)], &parser.tokens[..]);
+    }
+
+    #[test]
+    fn parse_int_overflow() {
+        let s = b"i9223372036854775808e";
+        let mut parser = Parser::new();
+        let err = parser.parse::<Entry>(s).unwrap_err();
+        assert_eq!(err, Error::Overflow { pos: 19 });
+    }
+
+    #[test]
+    fn parse_int_overflow_negative() {
+        let s = b"i-9223372036854775809e";
+        let mut parser = Parser::new();
+        let err = parser.parse::<Entry>(s).unwrap_err();
+        assert_eq!(err, Error::Overflow { pos: 20 });
+    }
+
+    #[test]
+    fn parse_int_empty_token() {
+        let s = b"ie";
+        let mut parser = Parser::new();
+        let err = parser.parse::<Entry>(s).unwrap_err();
+        assert_eq!(err, Error::Unexpected { pos: 1 });
     }
 
     #[test]
