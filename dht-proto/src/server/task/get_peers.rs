@@ -51,6 +51,11 @@ impl Task for GetPeersTask {
             let peers = peers.into_iter().flat_map(decode_peer);
             self.peers.extend(peers);
         }
+
+        if let Some(peers) = resp.body.get_list("values6") {
+            let peers = peers.into_iter().flat_map(decode_peer);
+            self.peers.extend(peers);
+        }
     }
 
     fn set_failed(&mut self, id: NodeId, addr: SocketAddr) {
@@ -88,8 +93,12 @@ fn decode_peer(d: Entry) -> Option<SocketAddr> {
             let ptr = b.as_ptr().cast::<([u8; 4], [u8; 2])>();
             let (ip, port) = unsafe { *ptr };
             return Some((ip, u16::from_be_bytes(port)).into());
+        } else if b.len() == 18 {
+            let ptr = b.as_ptr().cast::<([u8; 16], [u8; 2])>();
+            let (ip, port) = unsafe { *ptr };
+            return Some((ip, u16::from_be_bytes(port)).into());
         } else {
-            log::warn!("Incorrect Peer length. Expected: 6, Actual: {}", b.len());
+            log::warn!("Incorrect Peer length. Expected: 6/18, Actual: {}", b.len());
         }
     } else {
         log::warn!("Unexpected Peer format: {:?}", d);
