@@ -268,7 +268,7 @@ impl<'a> ParserState<'a> {
             }
         }
 
-        if self.pos + len > self.buf.len() {
+        if len > self.buf.len() - self.pos {
             return Err(Error::Eof);
         }
 
@@ -380,6 +380,14 @@ mod tests {
         let mut parser = Parser::new();
         let err = parser.parse::<Entry>(s).unwrap_err();
         assert_eq!(Error::Eof, err);
+    }
+
+    #[test]
+    fn parse_string_length_overflow() {
+        let s = format!("{}:", (usize::MAX as u128 + 1));
+        let mut parser = Parser::new();
+        let err = parser.parse::<Entry>(s.as_bytes()).unwrap_err();
+        assert_eq!(Error::Overflow { pos: s.len() - 1 }, err);
     }
 
     #[test]
