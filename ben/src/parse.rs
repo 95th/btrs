@@ -141,6 +141,12 @@ impl<'a> ParserState<'a> {
 
             if let Some(s) = self.scopes.last() {
                 if s.dict && c != b'e' {
+                    // The key must be a string
+                    if !c.is_ascii_digit() {
+                        return Err(Error::unexpected(self.pos));
+                    }
+
+                    // Parse key as a valid UTF-8 string
                     self.parse_string(true)?;
 
                     c = self.peek_char()?;
@@ -238,10 +244,6 @@ impl<'a> ParserState<'a> {
 
     fn parse_string(&mut self, validate_utf8: bool) -> Result<()> {
         let mut len: usize = 0;
-
-        if !self.peek_char()?.is_ascii_digit() {
-            return Err(Error::unexpected(self.pos));
-        }
 
         loop {
             match self.next_char()? {
