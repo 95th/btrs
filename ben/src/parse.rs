@@ -145,7 +145,7 @@ impl<'a> ParserState<'a> {
 
                     c = self.peek_char()?;
                     if c == b'e' {
-                        return Err(Error::Unexpected { pos: self.pos });
+                        return Err(Error::unexpected(self.pos));
                     }
                 }
             }
@@ -167,7 +167,7 @@ impl<'a> ParserState<'a> {
                     let s = self
                         .scopes
                         .pop()
-                        .ok_or_else(|| Error::Unexpected { pos: self.pos })?;
+                        .ok_or_else(|| Error::unexpected(self.pos))?;
 
                     self.pos += 1;
 
@@ -176,7 +176,7 @@ impl<'a> ParserState<'a> {
                     t.finish(self.pos);
                     t.next = next as u32;
                 }
-                _ => return Err(Error::Unexpected { pos: self.pos }),
+                _ => return Err(Error::unexpected(self.pos)),
             }
 
             if self.scopes.is_empty() {
@@ -185,7 +185,7 @@ impl<'a> ParserState<'a> {
         }
 
         if !self.scopes.is_empty() {
-            return Err(Error::Unexpected { pos: self.pos });
+            return Err(Error::unexpected(self.pos));
         }
 
         Ok(())
@@ -205,7 +205,7 @@ impl<'a> ParserState<'a> {
         }
 
         if self.peek_char()? == b'e' {
-            return Err(Error::Unexpected { pos: self.pos });
+            return Err(Error::unexpected(self.pos));
         }
 
         let mut val = 0_u64;
@@ -215,17 +215,17 @@ impl<'a> ParserState<'a> {
                     let d = u64::from(c - b'0');
                     match val.checked_mul(10).and_then(|n| n.checked_add(d)) {
                         Some(n) => val = n,
-                        None => return Err(Error::Overflow { pos: self.pos }),
+                        None => return Err(Error::overflow(self.pos)),
                     }
                     self.pos += 1;
                 }
                 b'e' => break,
-                _ => return Err(Error::Unexpected { pos: self.pos }),
+                _ => return Err(Error::unexpected(self.pos)),
             }
         }
 
         if i64::try_from(val as i128 * sign as i128).is_err() {
-            return Err(Error::Overflow { pos: self.pos });
+            return Err(Error::overflow(self.pos));
         }
 
         // Consume the closing 'e'
@@ -240,7 +240,7 @@ impl<'a> ParserState<'a> {
         let mut len: usize = 0;
 
         if !self.peek_char()?.is_ascii_digit() {
-            return Err(Error::Unexpected { pos: self.pos });
+            return Err(Error::unexpected(self.pos));
         }
 
         loop {
@@ -249,11 +249,11 @@ impl<'a> ParserState<'a> {
                     let digit = (c - b'0') as usize;
                     match len.checked_mul(10).and_then(|n| n.checked_add(digit)) {
                         Some(n) => len = n,
-                        None => return Err(Error::Overflow { pos: self.pos }),
+                        None => return Err(Error::overflow(self.pos)),
                     }
                 }
                 b':' => break,
-                _ => return Err(Error::Unexpected { pos: self.pos }),
+                _ => return Err(Error::unexpected(self.pos)),
             }
         }
 

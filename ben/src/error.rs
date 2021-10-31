@@ -29,6 +29,16 @@ pub enum Error {
     Other(&'static str),
 }
 
+impl Error {
+    pub fn unexpected(pos: usize) -> Self {
+        Self::Unexpected { pos }
+    }
+
+    pub fn overflow(pos: usize) -> Self {
+        Self::Overflow { pos }
+    }
+}
+
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
