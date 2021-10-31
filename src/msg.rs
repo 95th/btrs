@@ -262,7 +262,7 @@ impl Message {
 
 pub struct ExtendedMessage<'a> {
     pub id: u8,
-    pub value: Entry<'a>,
+    pub value: Entry<'a, 'a>,
     pub rest: &'a [u8],
 }
 
@@ -287,7 +287,7 @@ impl<'a> ExtendedMessage<'a> {
         self.id == 0
     }
 
-    pub fn body(&self) -> &Entry<'_> {
+    pub fn body(&self) -> &Entry<'_, '_> {
         &self.value
     }
 

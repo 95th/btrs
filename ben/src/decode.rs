@@ -4,18 +4,18 @@ use std::fmt;
 use std::marker::PhantomData;
 
 /// Decode to given type using provided `Entry` object
-pub trait Decode<'a>: Sized {
-    fn decode(entry: Entry<'a>) -> Result<Self>;
+pub trait Decode<'buf, 'parser>: Sized {
+    fn decode(entry: Entry<'buf, 'parser>) -> Result<Self>;
 }
 
-impl<'a> Decode<'a> for Entry<'a> {
-    fn decode(entry: Entry<'a>) -> Result<Self> {
+impl<'buf, 'parser> Decode<'buf, 'parser> for Entry<'buf, 'parser> {
+    fn decode(entry: Entry<'buf, 'parser>) -> Result<Self> {
         Ok(entry)
     }
 }
 
-impl<'a> Decode<'a> for List<'a> {
-    fn decode(entry: Entry<'a>) -> Result<Self> {
+impl<'buf, 'parser> Decode<'buf, 'parser> for List<'buf, 'parser> {
+    fn decode(entry: Entry<'buf, 'parser>) -> Result<Self> {
         match entry.as_list() {
             Some(dict) => Ok(dict),
             None => Err(Error::TypeMismatch("Not a list")),
@@ -23,8 +23,8 @@ impl<'a> Decode<'a> for List<'a> {
     }
 }
 
-impl<'a> Decode<'a> for Dict<'a> {
-    fn decode(entry: Entry<'a>) -> Result<Self> {
+impl<'buf, 'parser> Decode<'buf, 'parser> for Dict<'buf, 'parser> {
+    fn decode(entry: Entry<'buf, 'parser>) -> Result<Self> {
         match entry.as_dict() {
             Some(dict) => Ok(dict),
             None => Err(Error::TypeMismatch("Not a dictionary")),
@@ -32,8 +32,8 @@ impl<'a> Decode<'a> for Dict<'a> {
     }
 }
 
-impl<'a> Decode<'a> for &'a [u8] {
-    fn decode(entry: Entry<'a>) -> Result<Self> {
+impl<'buf, 'parser> Decode<'buf, 'parser> for &'buf [u8] {
+    fn decode(entry: Entry<'buf, 'parser>) -> Result<Self> {
         match entry.as_bytes() {
             Some(val) => Ok(val),
             None => Err(Error::TypeMismatch("Not a byte string")),
@@ -41,8 +41,8 @@ impl<'a> Decode<'a> for &'a [u8] {
     }
 }
 
-impl<'a> Decode<'a> for Vec<u8> {
-    fn decode(entry: Entry<'a>) -> Result<Self> {
+impl<'buf, 'parser> Decode<'buf, 'parser> for Vec<u8> {
+    fn decode(entry: Entry<'buf, 'parser>) -> Result<Self> {
         match entry.as_bytes() {
             Some(val) => Ok(val.to_vec()),
             None => Err(Error::TypeMismatch("Not a byte string")),
@@ -50,8 +50,8 @@ impl<'a> Decode<'a> for Vec<u8> {
     }
 }
 
-impl<'a> Decode<'a> for &'a str {
-    fn decode(entry: Entry<'a>) -> Result<Self> {
+impl<'buf, 'parser> Decode<'buf, 'parser> for &'buf str {
+    fn decode(entry: Entry<'buf, 'parser>) -> Result<Self> {
         match entry.as_str() {
             Some(val) => Ok(val),
             None => Err(Error::TypeMismatch("Not a UTF-8 string")),
@@ -59,8 +59,8 @@ impl<'a> Decode<'a> for &'a str {
     }
 }
 
-impl<'a> Decode<'a> for i64 {
-    fn decode(entry: Entry<'a>) -> Result<Self> {
+impl<'buf, 'parser> Decode<'buf, 'parser> for i64 {
+    fn decode(entry: Entry<'buf, 'parser>) -> Result<Self> {
         match entry.as_int() {
             Some(val) => Ok(val),
             None => Err(Error::TypeMismatch("Not a integer")),
@@ -68,8 +68,8 @@ impl<'a> Decode<'a> for i64 {
     }
 }
 
-impl<'a> Decode<'a> for String {
-    fn decode(entry: Entry<'a>) -> Result<Self> {
+impl<'buf, 'parser> Decode<'buf, 'parser> for String {
+    fn decode(entry: Entry<'buf, 'parser>) -> Result<Self> {
         match entry.as_str() {
             Some(val) => Ok(String::from(val)),
             None => Err(Error::TypeMismatch("Not a UTF-8 string")),
@@ -78,13 +78,13 @@ impl<'a> Decode<'a> for String {
 }
 
 #[derive(Clone, Copy, PartialEq)]
-pub struct Entry<'a> {
+pub struct Entry<'buf, 'parser> {
     pub(crate) buf: *const u8,
     pub(crate) token: *const Token,
-    _marker: PhantomData<&'a ()>,
+    _marker: PhantomData<(&'buf (), &'parser ())>,
 }
 
-impl fmt::Debug for Entry<'_> {
+impl fmt::Debug for Entry<'_, '_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.token().kind {
             TokenKind::Int => write!(f, "{}", self.as_int().unwrap()),
@@ -98,8 +98,8 @@ impl fmt::Debug for Entry<'_> {
     }
 }
 
-impl<'a> Entry<'a> {
-    pub(crate) fn new(buf: &'a [u8], tokens: &'a [Token]) -> Self {
+impl<'buf, 'parser> Entry<'buf, 'parser> {
+    pub(crate) fn new(buf: &'buf [u8], tokens: &'parser [Token]) -> Self {
         Entry::from_raw(buf.as_ptr(), tokens.as_ptr())
     }
 
@@ -132,7 +132,7 @@ impl<'a> Entry<'a> {
     /// let entry = parser.parse::<Entry>(bytes).unwrap();
     /// assert_eq!(b"l1:a2:bce", entry.as_raw_bytes());
     /// ```
-    pub fn as_raw_bytes(&self) -> &'a [u8] {
+    pub fn as_raw_bytes(&self) -> &'buf [u8] {
         // Safety: Tokens are always in-bounds (ensured by parser)
         unsafe {
             let t = self.token();
@@ -177,7 +177,7 @@ impl<'a> Entry<'a> {
     /// assert_eq!(b"a", list.get_bytes(0).unwrap());
     /// assert_eq!(b"bc", list.get_bytes(1).unwrap());
     /// ```
-    pub fn as_list(&self) -> Option<List<'a>> {
+    pub fn as_list(&self) -> Option<List<'buf, 'parser>> {
         if self.is_list() {
             Some(List { entry: *self })
         } else {
@@ -200,7 +200,7 @@ impl<'a> Entry<'a> {
     /// let dict = entry.as_dict().unwrap();
     /// assert_eq!(b"bc", dict.get_bytes("a").unwrap());
     /// ```
-    pub fn as_dict(&self) -> Option<Dict<'a>> {
+    pub fn as_dict(&self) -> Option<Dict<'buf, 'parser>> {
         if self.is_dict() {
             Some(Dict { entry: *self })
         } else {
@@ -256,7 +256,7 @@ impl<'a> Entry<'a> {
     /// let entry = parser.parse::<Entry>(bytes).unwrap();
     /// assert_eq!(b"abc", entry.as_bytes().unwrap());
     /// ```
-    pub fn as_bytes(&self) -> Option<&'a [u8]> {
+    pub fn as_bytes(&self) -> Option<&'buf [u8]> {
         if self.is_bytes() {
             Some(self.as_raw_bytes())
         } else {
@@ -279,7 +279,7 @@ impl<'a> Entry<'a> {
     /// let entry = parser.parse::<Entry>(bytes).unwrap();
     /// assert_eq!("abc", entry.as_str().unwrap());
     /// ```
-    pub fn as_str(&self) -> Option<&'a str> {
+    pub fn as_str(&self) -> Option<&'buf str> {
         let bytes = self.as_bytes()?;
         std::str::from_utf8(bytes).ok()
     }
@@ -303,7 +303,7 @@ impl<'a> Entry<'a> {
     /// let entry = parser.parse::<Entry>(b"3:\x01\x01\x01").unwrap();
     /// assert!(entry.as_ascii_str().is_none());
     /// ```
-    pub fn as_ascii_str(&self) -> Option<&'a str> {
+    pub fn as_ascii_str(&self) -> Option<&'buf str> {
         let s = self.as_str()?;
         let is_ascii = |c: char| {
             c.is_ascii_alphanumeric() || c.is_ascii_punctuation() || c.is_ascii_whitespace()
@@ -317,28 +317,28 @@ impl<'a> Entry<'a> {
 }
 
 /// A bencode list
-pub struct List<'a> {
-    entry: Entry<'a>,
+pub struct List<'buf, 'parser> {
+    entry: Entry<'buf, 'parser>,
 }
 
-impl fmt::Debug for List<'_> {
+impl fmt::Debug for List<'_, '_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_list().entries(self.iter()).finish()
     }
 }
 
-impl<'a> IntoIterator for List<'a> {
-    type Item = Entry<'a>;
-    type IntoIter = ListIter<'a>;
+impl<'buf, 'parser> IntoIterator for List<'buf, 'parser> {
+    type Item = Entry<'buf, 'parser>;
+    type IntoIter = ListIter<'buf, 'parser>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.iter()
     }
 }
 
-impl<'a> List<'a> {
+impl<'buf, 'parser> List<'buf, 'parser> {
     /// Gets an iterator over the entries of the list
-    pub fn iter(&self) -> ListIter<'a> {
+    pub fn iter(&self) -> ListIter<'buf, 'parser> {
         ListIter::new(self.entry)
     }
 
@@ -355,37 +355,37 @@ impl<'a> List<'a> {
     /// let dict = parser.parse::<Entry>(bytes).unwrap().as_list().unwrap();
     /// assert_eq!(b"l1:a1:be", dict.as_raw_bytes());
     /// ```
-    pub fn as_raw_bytes(&self) -> &'a [u8] {
+    pub fn as_raw_bytes(&self) -> &'buf [u8] {
         self.entry.as_raw_bytes()
     }
 
     /// Returns the `Entry` at the given index.
-    pub fn get(&self, i: usize) -> Option<Entry<'a>> {
+    pub fn get(&self, i: usize) -> Option<Entry<'buf, 'parser>> {
         self.iter().nth(i)
     }
 
     /// Returns the `Dict` at the given index.
-    pub fn get_dict(&self, i: usize) -> Option<Dict<'a>> {
+    pub fn get_dict(&self, i: usize) -> Option<Dict<'buf, 'parser>> {
         self.get(i)?.as_dict()
     }
 
     /// Returns the `List` at the given index.
-    pub fn get_list(&self, i: usize) -> Option<List<'a>> {
+    pub fn get_list(&self, i: usize) -> Option<List<'buf, 'parser>> {
         self.get(i)?.as_list()
     }
 
     /// Returns the byte slice at the given index.
-    pub fn get_bytes(&self, i: usize) -> Option<&'a [u8]> {
+    pub fn get_bytes(&self, i: usize) -> Option<&'buf [u8]> {
         self.get(i)?.as_bytes()
     }
 
     /// Returns the string slice at the given index.
-    pub fn get_str(&self, i: usize) -> Option<&'a str> {
+    pub fn get_str(&self, i: usize) -> Option<&'buf str> {
         self.get(i)?.as_str()
     }
 
     /// Returns the printable ASCII string slice at the given index.
-    pub fn get_ascii_str(&self, i: usize) -> Option<&'a str> {
+    pub fn get_ascii_str(&self, i: usize) -> Option<&'buf str> {
         self.get(i)?.as_ascii_str()
     }
 
@@ -400,14 +400,14 @@ impl<'a> List<'a> {
     }
 }
 
-pub struct ListIter<'a> {
-    entry: Entry<'a>,
+pub struct ListIter<'buf, 'parser> {
+    entry: Entry<'buf, 'parser>,
     index: u32,
     end: u32,
 }
 
-impl<'a> ListIter<'a> {
-    fn new(entry: Entry<'a>) -> Self {
+impl<'buf, 'parser> ListIter<'buf, 'parser> {
+    fn new(entry: Entry<'buf, 'parser>) -> Self {
         Self {
             index: 1,
             end: entry.token().next,
@@ -416,8 +416,8 @@ impl<'a> ListIter<'a> {
     }
 }
 
-impl<'a> Iterator for ListIter<'a> {
-    type Item = Entry<'a>;
+impl<'buf, 'parser> Iterator for ListIter<'buf, 'parser> {
+    type Item = Entry<'buf, 'parser>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.index >= self.end {
@@ -434,28 +434,28 @@ impl<'a> Iterator for ListIter<'a> {
 }
 
 /// A bencode dictionary
-pub struct Dict<'a> {
-    entry: Entry<'a>,
+pub struct Dict<'buf, 'parser> {
+    entry: Entry<'buf, 'parser>,
 }
 
-impl fmt::Debug for Dict<'_> {
+impl fmt::Debug for Dict<'_, '_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_map().entries(self.iter()).finish()
     }
 }
 
-impl<'a> IntoIterator for Dict<'a> {
-    type Item = (&'a str, Entry<'a>);
-    type IntoIter = DictIter<'a>;
+impl<'buf, 'parser> IntoIterator for Dict<'buf, 'parser> {
+    type Item = (&'buf str, Entry<'buf, 'parser>);
+    type IntoIter = DictIter<'buf, 'parser>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.iter()
     }
 }
 
-impl<'a> Dict<'a> {
+impl<'buf, 'parser> Dict<'buf, 'parser> {
     /// Gets an iterator over the entries of the dictionary.
-    pub fn iter(&self) -> DictIter<'a> {
+    pub fn iter(&self) -> DictIter<'buf, 'parser> {
         DictIter::new(self.entry)
     }
 
@@ -472,38 +472,38 @@ impl<'a> Dict<'a> {
     /// let dict = parser.parse::<Entry>(bytes).unwrap().as_dict().unwrap();
     /// assert_eq!(b"d1:a1:be", dict.as_raw_bytes());
     /// ```
-    pub fn as_raw_bytes(&self) -> &'a [u8] {
+    pub fn as_raw_bytes(&self) -> &'buf [u8] {
         self.entry.as_raw_bytes()
     }
 
     /// Returns the `Entry` for the given key.
-    pub fn get(&self, key: &str) -> Option<Entry<'a>> {
+    pub fn get(&self, key: &str) -> Option<Entry<'buf, 'parser>> {
         self.iter()
             .find_map(|(k, v)| if k == key { Some(v) } else { None })
     }
 
     /// Returns the `Dict` for the given key.
-    pub fn get_dict(&self, key: &str) -> Option<Dict<'a>> {
+    pub fn get_dict(&self, key: &str) -> Option<Dict<'buf, 'parser>> {
         self.get(key)?.as_dict()
     }
 
     /// Returns the `List` for the given key.
-    pub fn get_list(&self, key: &str) -> Option<List<'a>> {
+    pub fn get_list(&self, key: &str) -> Option<List<'buf, 'parser>> {
         self.get(key)?.as_list()
     }
 
     /// Returns the byte slice for the given key.
-    pub fn get_bytes(&self, key: &str) -> Option<&'a [u8]> {
+    pub fn get_bytes(&self, key: &str) -> Option<&'buf [u8]> {
         self.get(key)?.as_bytes()
     }
 
     /// Returns the string slice for the given key.
-    pub fn get_str(&self, key: &str) -> Option<&'a str> {
+    pub fn get_str(&self, key: &str) -> Option<&'buf str> {
         self.get(key)?.as_str()
     }
 
     /// Returns the printable ASCII string slice for the given key.
-    pub fn get_ascii_str(&self, key: &str) -> Option<&'a str> {
+    pub fn get_ascii_str(&self, key: &str) -> Option<&'buf str> {
         self.get(key)?.as_ascii_str()
     }
 
@@ -518,20 +518,20 @@ impl<'a> Dict<'a> {
     }
 }
 
-pub struct DictIter<'a> {
-    iter: ListIter<'a>,
+pub struct DictIter<'buf, 'parser> {
+    iter: ListIter<'buf, 'parser>,
 }
 
-impl<'a> DictIter<'a> {
-    fn new(entry: Entry<'a>) -> Self {
+impl<'buf, 'parser> DictIter<'buf, 'parser> {
+    fn new(entry: Entry<'buf, 'parser>) -> Self {
         Self {
             iter: ListIter::new(entry),
         }
     }
 }
 
-impl<'a> Iterator for DictIter<'a> {
-    type Item = (&'a str, Entry<'a>);
+impl<'buf, 'parser> Iterator for DictIter<'buf, 'parser> {
+    type Item = (&'buf str, Entry<'buf, 'parser>);
 
     fn next(&mut self) -> Option<Self::Item> {
         let key = self.iter.next()?;
@@ -795,5 +795,15 @@ mod tests {
         assert_eq!(list.get_str(0).unwrap(), "a");
         assert_eq!(list.get(1).unwrap().as_raw_bytes(), b"d1:al1:aee");
         assert_eq!(list.get_str(2).unwrap(), "b");
+    }
+
+    #[test]
+    fn str_decode_lifetime() {
+        let s = b"5:abcde";
+        let val = {
+            let parser = &mut Parser::new();
+            parser.parse::<&str>(s).unwrap()
+        };
+        assert_eq!("abcde", val);
     }
 }

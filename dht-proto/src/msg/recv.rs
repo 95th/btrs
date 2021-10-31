@@ -31,14 +31,14 @@ pub enum QueryKind<'a> {
 #[derive(Debug)]
 pub struct Response<'a> {
     pub txn_id: TxnId,
-    pub body: Dict<'a>,
+    pub body: Dict<'a, 'a>,
     pub id: NodeId,
 }
 
 #[derive(Debug)]
 pub struct ErrorResponse<'a> {
     pub txn_id: TxnId,
-    pub list: Option<List<'a>>,
+    pub list: Option<List<'a, 'a>>,
 }
 
 #[derive(Debug)]
@@ -72,8 +72,8 @@ macro_rules! node_id {
     }};
 }
 
-impl<'a> Decode<'a> for Msg<'a> {
-    fn decode(entry: Entry<'a>) -> ben::Result<Self> {
+impl<'a> Decode<'a, 'a> for Msg<'a> {
+    fn decode(entry: Entry<'a, 'a>) -> ben::Result<Self> {
         use ben::Error::Other;
 
         let dict = check!(entry.as_dict(), "Not a dict");
