@@ -102,28 +102,17 @@ struct Scope {
     /// Token index
     index: u32,
 
-    /// Scope state
-    state: ScopeState,
+    /// Token is dictionary
+    dict: bool,
 }
 
 impl Scope {
     fn new(index: usize, dict: bool) -> Self {
         Self {
             index: index as u32,
-            state: if dict {
-                ScopeState::Dict
-            } else {
-                ScopeState::List
-            },
+            dict,
         }
     }
-}
-
-#[derive(PartialEq)]
-enum ScopeState {
-    List,
-    Dict,
-    DictNeedValue,
 }
 
 struct ParserState<'a> {
@@ -148,17 +137,18 @@ impl<'a> ParserState<'a> {
 
     fn parse(&mut self) -> Result<()> {
         loop {
-            let c = self.peek_char()?;
+            let mut c = self.peek_char()?;
 
             if let Some(s) = self.scopes.last() {
-                if s.state == ScopeState::Dict && c != b'e' {
+                if s.dict && c != b'e' {
                     self.parse_string(true)?;
-                    self.scopes.last_mut().unwrap().state = ScopeState::DictNeedValue;
-                    continue;
+
+                    c = self.peek_char()?;
+                    if c == b'e' {
+                        return Err(Error::Unexpected { pos: self.pos });
+                    }
                 }
             }
-
-            let cur_scope = self.scopes.len();
 
             match c {
                 b'd' => {
@@ -179,10 +169,6 @@ impl<'a> ParserState<'a> {
                         .pop()
                         .ok_or_else(|| Error::Unexpected { pos: self.pos })?;
 
-                    if s.state == ScopeState::DictNeedValue {
-                        return Err(Error::Unexpected { pos: self.pos });
-                    }
-
                     self.pos += 1;
 
                     let next = self.tokens.len() - s.index as usize;
@@ -191,14 +177,6 @@ impl<'a> ParserState<'a> {
                     t.next = next as u32;
                 }
                 _ => return Err(Error::Unexpected { pos: self.pos }),
-            }
-
-            if cur_scope > 0 {
-                if let Some(s) = self.scopes.get_mut(cur_scope - 1) {
-                    if s.state == ScopeState::DictNeedValue {
-                        s.state = ScopeState::Dict;
-                    }
-                }
             }
 
             if self.scopes.is_empty() {
