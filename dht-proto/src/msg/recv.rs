@@ -76,7 +76,7 @@ impl<'a> Decode<'a> for Msg<'a> {
     fn decode(entry: Entry<'a>) -> ben::Result<Self> {
         use ben::Error::Other;
 
-        let dict = check!(entry.into_dict(), "Not a dict");
+        let dict = check!(entry.as_dict(), "Not a dict");
         let msg_type = check!(dict.get_bytes("y"), "Message type is required");
         let txn_id = check!(dict.get_bytes("t"), "Transaction ID is required");
         let txn_id = check!(txn_id.try_into().ok(), "Transaction ID must be 2 bytes");

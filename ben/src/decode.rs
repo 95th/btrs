@@ -16,7 +16,7 @@ impl<'a> Decode<'a> for Entry<'a> {
 
 impl<'a> Decode<'a> for List<'a> {
     fn decode(entry: Entry<'a>) -> Result<Self> {
-        match entry.into_list() {
+        match entry.as_list() {
             Some(dict) => Ok(dict),
             None => Err(Error::TypeMismatch("Not a list")),
         }
@@ -25,7 +25,7 @@ impl<'a> Decode<'a> for List<'a> {
 
 impl<'a> Decode<'a> for Dict<'a> {
     fn decode(entry: Entry<'a>) -> Result<Self> {
-        match entry.into_dict() {
+        match entry.as_dict() {
             Some(dict) => Ok(dict),
             None => Err(Error::TypeMismatch("Not a dictionary")),
         }
@@ -92,8 +92,8 @@ impl fmt::Debug for Entry<'_> {
                 Some(s) => write!(f, "\"{}\"", s),
                 None => write!(f, "'{}'", data_encoding::BASE32.encode(self.as_raw_bytes())),
             },
-            TokenKind::List => self.into_list().unwrap().fmt(f),
-            TokenKind::Dict => self.into_dict().unwrap().fmt(f),
+            TokenKind::List => self.as_list().unwrap().fmt(f),
+            TokenKind::Dict => self.as_dict().unwrap().fmt(f),
         }
     }
 }
@@ -173,13 +173,13 @@ impl<'a> Entry<'a> {
     /// let bytes = b"l1:a2:bce";
     /// let parser = &mut Parser::new();
     /// let entry = parser.parse::<Entry>(bytes).unwrap();
-    /// let list = entry.into_list().unwrap();
+    /// let list = entry.as_list().unwrap();
     /// assert_eq!(b"a", list.get_bytes(0).unwrap());
     /// assert_eq!(b"bc", list.get_bytes(1).unwrap());
     /// ```
-    pub fn into_list(self) -> Option<List<'a>> {
+    pub fn as_list(&self) -> Option<List<'a>> {
         if self.is_list() {
-            Some(List { entry: self })
+            Some(List { entry: *self })
         } else {
             None
         }
@@ -197,12 +197,12 @@ impl<'a> Entry<'a> {
     /// let bytes = b"d1:a2:bce";
     /// let parser = &mut Parser::new();
     /// let entry = parser.parse::<Entry>(bytes).unwrap();
-    /// let dict = entry.into_dict().unwrap();
+    /// let dict = entry.as_dict().unwrap();
     /// assert_eq!(b"bc", dict.get_bytes("a").unwrap());
     /// ```
-    pub fn into_dict(self) -> Option<Dict<'a>> {
+    pub fn as_dict(&self) -> Option<Dict<'a>> {
         if self.is_dict() {
-            Some(Dict { entry: self })
+            Some(Dict { entry: *self })
         } else {
             None
         }
@@ -352,7 +352,7 @@ impl<'a> List<'a> {
     ///
     /// let bytes = b"l1:a1:be";
     /// let parser = &mut Parser::new();
-    /// let dict = parser.parse::<Entry>(bytes).unwrap().into_list().unwrap();
+    /// let dict = parser.parse::<Entry>(bytes).unwrap().as_list().unwrap();
     /// assert_eq!(b"l1:a1:be", dict.as_raw_bytes());
     /// ```
     pub fn as_raw_bytes(&self) -> &'a [u8] {
@@ -366,12 +366,12 @@ impl<'a> List<'a> {
 
     /// Returns the `Dict` at the given index.
     pub fn get_dict(&self, i: usize) -> Option<Dict<'a>> {
-        self.get(i)?.into_dict()
+        self.get(i)?.as_dict()
     }
 
     /// Returns the `List` at the given index.
     pub fn get_list(&self, i: usize) -> Option<List<'a>> {
-        self.get(i)?.into_list()
+        self.get(i)?.as_list()
     }
 
     /// Returns the byte slice at the given index.
@@ -469,7 +469,7 @@ impl<'a> Dict<'a> {
     ///
     /// let bytes = b"d1:a1:be";
     /// let parser = &mut Parser::new();
-    /// let dict = parser.parse::<Entry>(bytes).unwrap().into_dict().unwrap();
+    /// let dict = parser.parse::<Entry>(bytes).unwrap().as_dict().unwrap();
     /// assert_eq!(b"d1:a1:be", dict.as_raw_bytes());
     /// ```
     pub fn as_raw_bytes(&self) -> &'a [u8] {
@@ -484,12 +484,12 @@ impl<'a> Dict<'a> {
 
     /// Returns the `Dict` for the given key.
     pub fn get_dict(&self, key: &str) -> Option<Dict<'a>> {
-        self.get(key)?.into_dict()
+        self.get(key)?.as_dict()
     }
 
     /// Returns the `List` for the given key.
     pub fn get_list(&self, key: &str) -> Option<List<'a>> {
-        self.get(key)?.into_list()
+        self.get(key)?.as_list()
     }
 
     /// Returns the byte slice for the given key.
@@ -646,7 +646,7 @@ mod tests {
         assert_eq!(b"a", list_iter.next().unwrap().as_raw_bytes());
         assert_eq!(None, list_iter.next());
 
-        let mut iter = dict.into_dict().unwrap().iter();
+        let mut iter = dict.as_dict().unwrap().iter();
 
         let (k, v) = iter.next().unwrap();
         assert_eq!("a", k);

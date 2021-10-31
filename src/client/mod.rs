@@ -368,7 +368,7 @@ mod tests {
             .unwrap();
         assert_eq!(1, ext_msg.id);
 
-        let list = ext_msg.body().into_list().unwrap();
+        let list = ext_msg.body().as_list().unwrap();
         assert_eq!(
             vec![1, 2, 3],
             list.iter()
