@@ -5,6 +5,7 @@ use crate::token::{Token, TokenKind};
 /// Bencode Parser
 pub struct Parser {
     tokens: Vec<Token>,
+    scopes: Vec<Scope>,
     token_limit: usize,
     depth_limit: usize,
 }
@@ -13,6 +14,7 @@ impl Default for Parser {
     fn default() -> Self {
         Self {
             tokens: vec![],
+            scopes: vec![],
             token_limit: usize::MAX,
             depth_limit: usize::MAX,
         }
@@ -78,11 +80,13 @@ impl Parser {
         }
 
         self.tokens.clear();
+        self.scopes.clear();
+
         let mut state = ParserState {
             buf,
             pos: 0,
             tokens: &mut self.tokens,
-            scopes: vec![],
+            scopes: &mut self.scopes,
             token_limit: self.token_limit,
             depth_limit: self.depth_limit,
         };
@@ -126,7 +130,7 @@ struct ParserState<'a> {
     buf: &'a [u8],
     pos: usize,
     tokens: &'a mut Vec<Token>,
-    scopes: Vec<Scope>,
+    scopes: &'a mut Vec<Scope>,
     token_limit: usize,
     depth_limit: usize,
 }
