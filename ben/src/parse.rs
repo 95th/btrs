@@ -46,9 +46,9 @@ impl Parser {
     }
 
     /// Parse a bencoded slice and returns the parsed object
-    pub fn parse<'buf, 'parser, T>(&'parser mut self, buf: &'buf [u8]) -> Result<T>
+    pub fn parse<'b, 'p, T>(&'p mut self, buf: &'b [u8]) -> Result<T>
     where
-        T: Decode<'buf, 'parser>,
+        T: Decode<'b, 'p>,
     {
         let (dec, len) = self.parse_prefix_impl(buf)?;
         if len == buf.len() {
@@ -65,19 +65,16 @@ impl Parser {
     /// number of bytes processed.
     ///
     /// It's useful when there is trailing data after the bencoded bytes.
-    pub fn parse_prefix<'buf, 'parser, T>(&'parser mut self, buf: &'buf [u8]) -> Result<(T, usize)>
+    pub fn parse_prefix<'b, 'p, T>(&'p mut self, buf: &'b [u8]) -> Result<(T, usize)>
     where
-        T: Decode<'buf, 'parser>,
+        T: Decode<'b, 'p>,
     {
         let (dec, pos) = self.parse_prefix_impl(buf)?;
         let t = T::decode(dec)?;
         Ok((t, pos))
     }
 
-    fn parse_prefix_impl<'buf, 'parser>(
-        &'parser mut self,
-        buf: &'buf [u8],
-    ) -> Result<(Entry<'buf, 'parser>, usize)> {
+    fn parse_prefix_impl<'b, 'p>(&'p mut self, buf: &'b [u8]) -> Result<(Entry<'b, 'p>, usize)> {
         if buf.is_empty() {
             return Err(Error::Eof);
         }
