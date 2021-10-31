@@ -98,21 +98,28 @@ struct Scope {
     /// Token index
     index: u32,
 
-    /// Token is a dict
-    is_dict: bool,
-
-    /// We're expecting a key
-    need_key: bool,
+    /// Scope state
+    state: ScopeState,
 }
 
 impl Scope {
     fn new(index: usize, dict: bool) -> Self {
         Self {
             index: index as u32,
-            is_dict: dict,
-            need_key: true,
+            state: if dict {
+                ScopeState::Dict
+            } else {
+                ScopeState::List
+            },
         }
     }
+}
+
+#[derive(PartialEq)]
+enum ScopeState {
+    List,
+    Dict,
+    DictNeedValue,
 }
 
 struct ParserState<'a> {
@@ -140,9 +147,9 @@ impl<'a> ParserState<'a> {
             let c = self.peek_char()?;
 
             if let Some(s) = self.scopes.last() {
-                if s.is_dict && s.need_key && c != b'e' {
+                if s.state == ScopeState::Dict && c != b'e' {
                     self.parse_string(true)?;
-                    self.scopes.last_mut().unwrap().need_key = false;
+                    self.scopes.last_mut().unwrap().state = ScopeState::DictNeedValue;
                     continue;
                 }
             }
@@ -168,7 +175,7 @@ impl<'a> ParserState<'a> {
                         .pop()
                         .ok_or_else(|| Error::Unexpected { pos: self.pos })?;
 
-                    if !s.need_key {
+                    if s.state == ScopeState::DictNeedValue {
                         return Err(Error::Unexpected { pos: self.pos });
                     }
 
@@ -184,8 +191,8 @@ impl<'a> ParserState<'a> {
 
             if cur_scope > 0 {
                 if let Some(s) = self.scopes.get_mut(cur_scope - 1) {
-                    if s.is_dict {
-                        s.need_key = true;
+                    if s.state == ScopeState::DictNeedValue {
+                        s.state = ScopeState::Dict;
                     }
                 }
             }
