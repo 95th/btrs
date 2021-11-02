@@ -80,11 +80,12 @@ impl Connection {
         self.send_buf.put_u32(len);
     }
 
-    pub fn send_piece(&mut self, index: u32, begin: u32, len: u32) {
-        self.send_buf.put_u32(9 + len);
+    pub fn send_piece(&mut self, index: u32, begin: u32, data: &[u8]) {
+        self.send_buf.put_u32(9 + data.len() as u32);
         self.send_buf.put_u8(PIECE);
         self.send_buf.put_u32(index);
         self.send_buf.put_u32(begin);
+        self.send_buf.extend(data);
     }
 
     pub fn send_cancel(&mut self, index: u32, begin: u32, len: u32) {

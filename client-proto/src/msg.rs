@@ -76,7 +76,7 @@ mod tests {
     #[test]
     fn parse_piece() {
         let mut c = Connection::new();
-        c.send_piece(1, 2, 0);
+        c.send_piece(1, 2, &[]);
         let mut b = &c.get_send_buf()[..];
 
         let len = b.get_u32();
