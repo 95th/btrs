@@ -11,15 +11,6 @@ pub const PIECE: u8 = 7;
 pub const CANCEL: u8 = 8;
 pub const EXTENDED: u8 = 20;
 
-pub fn packet_header_len(id: u8) -> usize {
-    match id {
-        PIECE => 8,
-        HAVE => 4,
-        REQUEST | CANCEL => 12,
-        _ => 0,
-    }
-}
-
 #[derive(Debug, PartialEq)]
 pub enum Packet {
     Keepalive,
