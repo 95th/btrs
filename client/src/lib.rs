@@ -104,7 +104,7 @@ where
                 let data = ext.data(piece)?;
                 anyhow::ensure!(data.len() <= remaining, "Incorrect data length received");
 
-                buf.extend(data);
+                buf.extend_from_slice(data);
                 remaining -= data.len();
                 piece += 1;
             }
