@@ -1,12 +1,14 @@
 use std::ops::Deref;
 
-use bytes::BufMut;
+use ben::Encode;
+use bytes::{Buf, BufMut, BytesMut};
 
 use crate::bitfield::Bitfield;
 use crate::msg::*;
 
 pub struct Connection {
     send_buf: Vec<u8>,
+    encode_buf: Vec<u8>,
     bitfield: Bitfield,
     choked: bool,
     interested: bool,
@@ -16,6 +18,7 @@ impl Connection {
     pub fn new() -> Self {
         Self {
             send_buf: Vec::with_capacity(1024),
+            encode_buf: Vec::with_capacity(1024),
             bitfield: Bitfield::new(),
             choked: true,
             interested: false,
@@ -83,12 +86,15 @@ impl Connection {
         self.send_buf.put_u32(len);
     }
 
-    pub fn send_extended(&mut self, id: u8, payload: &[u8]) {
-        let len = 2 + payload.len() as u32;
+    pub fn send_extended(&mut self, id: u8, payload: &impl Encode) {
+        self.encode_buf.clear();
+        payload.encode(&mut self.encode_buf);
+
+        let len = 2 + self.encode_buf.len() as u32;
         self.send_buf.put_u32(len);
         self.send_buf.put_u8(EXTENDED);
         self.send_buf.put_u8(id);
-        self.send_buf.extend(payload);
+        self.send_buf.extend(&self.encode_buf);
     }
 
     pub fn get_send_buf(&mut self) -> SendBuf<'_> {
@@ -97,26 +103,55 @@ impl Connection {
         }
     }
 
-    pub fn recv_have(&mut self, index: u32) {
-        self.bitfield.set_bit(index as usize);
-    }
+    pub fn read_packet(&mut self, data: &mut BytesMut) -> Option<Packet> {
+        let id = data.get_u8();
 
-    pub fn recv_choke(&mut self) {
-        self.choked = true;
-    }
+        match id {
+            CHOKE => self.choked = true,
+            UNCHOKE => self.choked = false,
+            INTERESTED => {
+                self.interested = true;
+                self.send_unchoke();
+            }
+            NOT_INTERESTED => {
+                self.interested = false;
+                self.send_choke();
+            }
+            HAVE => {
+                let index = data.get_u32();
+                self.bitfield.set_bit(index as usize);
+            }
+            BITFIELD => {
+                let len = data.len();
+                self.bitfield.copy_from_slice(len * 8, &data);
+                data.clear();
+            }
+            REQUEST => {
+                return Some(Packet::Request {
+                    index: data.get_u32(),
+                    begin: data.get_u32(),
+                    len: data.get_u32(),
+                })
+            }
+            PIECE => {
+                return Some(Packet::Piece {
+                    index: data.get_u32(),
+                    begin: data.get_u32(),
+                    data: data.split(),
+                })
+            }
+            CANCEL => {
+                return Some(Packet::Cancel {
+                    index: data.get_u32(),
+                    begin: data.get_u32(),
+                    len: data.get_u32(),
+                })
+            }
+            EXTENDED => return Some(Packet::Extended { data: data.split() }),
+            _ => data.clear(),
+        }
 
-    pub fn recv_unchoke(&mut self) {
-        self.choked = false;
-    }
-
-    pub fn recv_interested(&mut self) {
-        self.interested = true;
-        self.send_unchoke();
-    }
-
-    pub fn recv_not_interested(&mut self) {
-        self.interested = false;
-        self.send_choke();
+        None
     }
 }
 

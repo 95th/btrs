@@ -1,0 +1,11 @@
+[package]
+name = "client"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0.45"
+ben = { path = "../ben" }
+bytes = "1.1.0"
+futures = "0.3.17"
+proto = { package = "client-proto", path = "../client-proto" }
