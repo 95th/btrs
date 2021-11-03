@@ -36,19 +36,6 @@ impl Connection {
         self.send_buf.put_u8(UNCHOKE);
     }
 
-    pub fn set_choked(&mut self, choked: bool) {
-        self.choked = choked;
-    }
-
-    pub fn set_interested(&mut self, interested: bool) {
-        self.interested = interested;
-        if interested {
-            self.send_unchoke();
-        } else {
-            self.send_choke();
-        }
-    }
-
     pub fn send_interested(&mut self) {
         self.send_buf.put_u32(1);
         self.send_buf.put_u8(INTERESTED);
