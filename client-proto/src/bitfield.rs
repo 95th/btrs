@@ -40,6 +40,11 @@ impl Bitfield {
         unsafe { std::slice::from_raw_parts(ptr, self.len_bytes()) }
     }
 
+    pub fn as_bytes_mut(&mut self) -> &mut [u8] {
+        let ptr = self.buf.as_mut_ptr().cast();
+        unsafe { std::slice::from_raw_parts_mut(ptr, self.len_bytes()) }
+    }
+
     pub fn copy_from_slice(&mut self, bits: usize, buf: &[u8]) {
         self.resize(bits);
         assert_eq!(buf.len(), self.len_bytes());
@@ -89,15 +94,16 @@ impl Bitfield {
     }
 
     pub fn is_all_set(&self) -> bool {
-        let words = self.bits / 32;
+        let words = self.buf.len().min(self.bits / 32);
+
         for i in 0..words {
             if self.buf[i] != u32::MAX {
                 return false;
             }
         }
 
-        let bits = self.bits % 32;
-        if bits > 0 {
+        if words < self.buf.len() {
+            let bits = self.bits % 32;
             let mask = u32::MAX << (32 - bits);
             return self.buf[words] & mask == mask;
         }
