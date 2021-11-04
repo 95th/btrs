@@ -44,12 +44,35 @@ impl Torrent {
         }
 
         Ok(Torrent {
-            tracker_urls,
             info_hash,
             piece_hashes: pieces.to_vec(),
             piece_len: piece_len as usize,
             length: length as usize,
             name: name.to_owned(),
+            tracker_urls,
+        })
+    }
+
+    pub fn parse_metainfo(
+        data: &[u8],
+        info_hash: InfoHash,
+        parser: &mut Parser,
+    ) -> anyhow::Result<Self> {
+        use ParseError::*;
+        let info = parser.parse::<Dict>(data)?;
+
+        let length = info.get_int("length").context(LengthRequired)?;
+        let name = info.get_str("name").unwrap_or_default();
+        let piece_len = info.get_int("piece length").context(PieceLengthRequired)?;
+        let pieces = info.get_bytes("pieces").context(PiecesRequired)?;
+
+        Ok(Torrent {
+            info_hash,
+            piece_hashes: pieces.to_vec(),
+            piece_len: piece_len as usize,
+            length: length as usize,
+            name: name.to_owned(),
+            tracker_urls: HashSet::new(),
         })
     }
 }
