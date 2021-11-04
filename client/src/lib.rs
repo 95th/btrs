@@ -70,7 +70,7 @@ where
         }
     }
 
-    pub async fn read_metadata(&mut self) -> anyhow::Result<BytesMut> {
+    pub async fn get_metadata(&mut self) -> anyhow::Result<BytesMut> {
         loop {
             if let Packet::Extended { data } = self.read_packet().await? {
                 let ext = ExtendedMessage::parse(&data, &mut self.parser)?;
@@ -82,12 +82,12 @@ where
                     .send_extended(metadata.id, &MetadataMsg::Handshake(metadata.id));
                 self.flush().await?;
 
-                return self.read_metadata_inner(metadata).await;
+                return self.read_metadata(metadata).await;
             }
         }
     }
 
-    async fn read_metadata_inner(&mut self, metadata: Metadata) -> anyhow::Result<BytesMut> {
+    async fn read_metadata(&mut self, metadata: Metadata) -> anyhow::Result<BytesMut> {
         let mut remaining = metadata.len;
         let mut piece = 0;
         let mut buf = BytesMut::new();
