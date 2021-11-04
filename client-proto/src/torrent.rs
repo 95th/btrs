@@ -27,7 +27,7 @@ impl Torrent {
         let announce = dict.get_str("announce").context(AnnounceRequired)?;
         let info = dict.get_dict("info").context(InfoDictRequired)?;
         let info_bytes = info.as_raw_bytes();
-        let info_hash = Sha1::from(info_bytes).digest().bytes().into();
+        let info_hash = Sha1::from(info_bytes).digest().bytes();
 
         let length = info.get_int("length").context(LengthRequired)?;
         let name = info.get_str("name").unwrap_or_default();
