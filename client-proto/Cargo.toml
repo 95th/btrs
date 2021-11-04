@@ -10,3 +10,5 @@ ben = { path = "../ben" }
 bytes = "1.1.0"
 sha1 = "0.6.0"
 thiserror = "1.0.30"
+url = "2.2.2"
+data-encoding = "2.3.2"

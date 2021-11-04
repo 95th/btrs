@@ -161,9 +161,11 @@ dependencies = [
  "anyhow",
  "ben",
  "bytes",
+ "data-encoding",
  "log",
  "sha1",
  "thiserror",
+ "url",
 ]
 
 [[package]]
