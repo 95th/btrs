@@ -8,3 +8,5 @@ log = "0.4.13"
 anyhow = "1.0.38"
 ben = { path = "../ben" }
 bytes = "1.1.0"
+sha1 = "0.6.0"
+thiserror = "1.0.30"

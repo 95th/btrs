@@ -7,3 +7,4 @@ pub mod conn;
 pub mod ext;
 pub mod handshake;
 pub mod msg;
+pub mod torrent;
