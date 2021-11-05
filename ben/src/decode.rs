@@ -305,10 +305,8 @@ impl<'b, 'p> Entry<'b, 'p> {
     /// ```
     pub fn as_ascii_str(&self) -> Option<&'b str> {
         let s = self.as_str()?;
-        let is_ascii = |c: char| {
-            c.is_ascii_alphanumeric() || c.is_ascii_punctuation() || c.is_ascii_whitespace()
-        };
-        if s.chars().all(is_ascii) {
+
+        if s.is_ascii() {
             Some(s)
         } else {
             None
