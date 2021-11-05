@@ -103,6 +103,10 @@ impl Connection {
         }
     }
 
+    pub fn is_choked(&self) -> bool {
+        self.choked
+    }
+
     pub fn read_packet<'a>(&mut self, mut data: &'a [u8]) -> Option<Packet<'a>> {
         let id = data.get_u8();
         match id {

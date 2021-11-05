@@ -136,11 +136,206 @@ where
         self.conn.send_interested();
     }
 
+    pub fn send_not_interested(&mut self) {
+        self.conn.send_not_interested();
+    }
+
+    pub fn send_piece(&mut self, index: u32, begin: u32, data: &[u8]) {
+        self.conn.send_piece(index, begin, data);
+    }
+
     pub async fn flush(&mut self) -> anyhow::Result<()> {
         let send_buf = self.conn.get_send_buf();
         if !send_buf.is_empty() {
             self.stream.write_all(&send_buf).await?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        io,
+        pin::Pin,
+        task::{Context, Poll},
+    };
+
+    use futures::{
+        channel::mpsc::{self, Receiver, Sender},
+        executor::block_on,
+        join, ready, AsyncRead, AsyncWrite, SinkExt, StreamExt,
+    };
+    use proto::msg::Packet;
+
+    use crate::Client;
+
+    struct Peer {
+        tx: Sender<Vec<u8>>,
+        rx: Receiver<Vec<u8>>,
+        remaining: Vec<u8>,
+    }
+
+    impl Peer {
+        pub fn create_pair() -> (Peer, Peer) {
+            let (t1, r1) = mpsc::channel(200);
+            let (t2, r2) = mpsc::channel(200);
+            let p1 = Peer {
+                tx: t1,
+                rx: r2,
+                remaining: vec![],
+            };
+            let p2 = Peer {
+                tx: t2,
+                rx: r1,
+                remaining: vec![],
+            };
+            (p1, p2)
+        }
+    }
+
+    impl AsyncRead for Peer {
+        fn poll_read(
+            mut self: Pin<&mut Self>,
+            cx: &mut Context<'_>,
+            buf: &mut [u8],
+        ) -> Poll<io::Result<usize>> {
+            let data = if self.remaining.is_empty() {
+                match ready!(self.rx.poll_next_unpin(cx)) {
+                    Some(data) => data,
+                    None => return Poll::Ready(Ok(0)),
+                }
+            } else {
+                std::mem::take(&mut self.remaining)
+            };
+
+            if data.len() <= buf.len() {
+                buf[..data.len()].copy_from_slice(&data);
+                Poll::Ready(Ok(data.len()))
+            } else {
+                buf.copy_from_slice(&data[..buf.len()]);
+                self.remaining = data[buf.len()..].to_vec();
+                cx.waker().wake_by_ref();
+                Poll::Ready(Ok(buf.len()))
+            }
+        }
+    }
+
+    fn err() -> io::Error {
+        io::Error::from(io::ErrorKind::BrokenPipe)
+    }
+
+    impl AsyncWrite for Peer {
+        fn poll_write(
+            mut self: Pin<&mut Self>,
+            cx: &mut Context<'_>,
+            buf: &[u8],
+        ) -> Poll<io::Result<usize>> {
+            ready!(self.tx.poll_ready(cx)).map_err(|_| err())?;
+            self.tx.start_send_unpin(buf.to_vec()).map_err(|_| err())?;
+            Poll::Ready(Ok(buf.len()))
+        }
+
+        fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+            self.tx.poll_flush_unpin(cx).map_err(|_| err())
+        }
+
+        fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+            self.tx.poll_close_unpin(cx).map_err(|_| err())
+        }
+    }
+
+    #[test]
+    fn handshake() {
+        block_on(async {
+            let (a, b) = Peer::create_pair();
+            let f1 = async move {
+                let mut c = Client::new(a);
+                c.handshake([0; 20], [1; 20]).await.unwrap();
+            };
+
+            let f2 = async move {
+                let mut c = Client::new(b);
+                c.handshake([0; 20], [2; 20]).await.unwrap();
+            };
+
+            join!(f1, f2);
+        })
+    }
+
+    #[test]
+    fn send_piece() {
+        block_on(async {
+            let (a, b) = Peer::create_pair();
+            let f1 = async move {
+                let mut c = Client::new(a);
+                c.send_piece(1, 2, b"hello");
+                c.flush().await.unwrap();
+            };
+
+            let f2 = async move {
+                let mut c = Client::new(b);
+                let b = &mut vec![];
+                let p = c.read_packet(b).await.unwrap().unwrap();
+                assert_eq!(
+                    p,
+                    Packet::Piece {
+                        index: 1,
+                        begin: 2,
+                        data: b"hello"
+                    }
+                )
+            };
+
+            join!(f1, f2);
+        })
+    }
+
+    #[test]
+    fn send_interested_and_receive_unchoke() {
+        block_on(async {
+            let (a, b) = Peer::create_pair();
+            let f1 = async move {
+                let mut c = Client::new(a);
+                assert!(c.conn.is_choked());
+                c.send_interested();
+                c.flush().await.unwrap();
+                c.read_packet(&mut vec![]).await.unwrap();
+                assert!(!c.conn.is_choked());
+            };
+
+            let f2 = async move {
+                let mut c = Client::new(b);
+                c.read_packet(&mut vec![]).await.unwrap();
+            };
+
+            join!(f1, f2);
+        })
+    }
+    #[test]
+    fn send_not_interested_and_receive_choke() {
+        block_on(async {
+            let (a, b) = Peer::create_pair();
+            let f1 = async move {
+                let mut c = Client::new(a);
+                assert!(c.conn.is_choked());
+                c.send_interested();
+                c.flush().await.unwrap();
+                c.read_packet(&mut vec![]).await.unwrap();
+                assert!(!c.conn.is_choked());
+                c.send_not_interested();
+                c.flush().await.unwrap();
+                c.read_packet(&mut vec![]).await.unwrap();
+                assert!(c.conn.is_choked());
+            };
+
+            let f2 = async move {
+                let mut c = Client::new(b);
+                c.read_packet(&mut vec![]).await.unwrap();
+                c.read_packet(&mut vec![]).await.unwrap();
+            };
+
+            join!(f1, f2);
+        })
     }
 }
