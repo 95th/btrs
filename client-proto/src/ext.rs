@@ -1,8 +1,9 @@
-use anyhow::Context;
+use anyhow::{ensure, Context};
 use ben::{DictEncoder, Encode, Entry, Parser};
 
 const METADATA_PIECE_LEN: usize = 0x4000;
 
+#[derive(Debug)]
 pub struct ExtendedMessage<'a, 'p> {
     pub id: u8,
     pub value: Entry<'a, 'p>,
@@ -17,6 +18,7 @@ mod msg_type {
 
 impl<'a, 'p> ExtendedMessage<'a, 'p> {
     pub fn parse(data: &'a [u8], parser: &'p mut Parser) -> anyhow::Result<Self> {
+        ensure!(!data.is_empty(), "Unexpected EOF");
         let id = data[0];
         let (value, i) = parser.parse_prefix::<Entry>(&data[1..])?;
         log::debug!("ext header len: {}", value.as_raw_bytes().len());
@@ -126,5 +128,12 @@ mod tests {
         assert!(ext.value.is_dict());
         assert_eq!(b"de", ext.value.as_raw_bytes());
         assert!(ext.rest.is_empty());
+    }
+
+    #[test]
+    fn extended_empty() {
+        let mut parser = Parser::new();
+        let err = ExtendedMessage::parse(&[], &mut parser).unwrap_err();
+        assert_eq!(err.to_string(), "Unexpected EOF");
     }
 }
