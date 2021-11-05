@@ -300,7 +300,7 @@ impl<'b, 'p> Entry<'b, 'p> {
     /// let entry = parser.parse::<Entry>(b"3:abc").unwrap();
     /// assert_eq!("abc", entry.as_ascii_str().unwrap());
     ///
-    /// let entry = parser.parse::<Entry>(b"3:\x01\x01\x01").unwrap();
+    /// let entry = parser.parse::<Entry>(b"1:\x80").unwrap();
     /// assert!(entry.as_ascii_str().is_none());
     /// ```
     pub fn as_ascii_str(&self) -> Option<&'b str> {
