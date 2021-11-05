@@ -1,5 +1,3 @@
-use bytes::Buf;
-
 pub const CHOKE: u8 = 0;
 pub const UNCHOKE: u8 = 1;
 pub const INTERESTED: u8 = 2;
@@ -40,29 +38,6 @@ impl Packet<'_> {
             REQUEST | CANCEL => 12,
             PIECE => 8,
             _ => 0,
-        }
-    }
-
-    pub fn read(mut data: &[u8]) -> Packet {
-        let id = data.get_u8();
-        match id {
-            REQUEST => Packet::Request {
-                index: data.get_u32(),
-                begin: data.get_u32(),
-                len: data.get_u32(),
-            },
-            PIECE => Packet::Piece {
-                index: data.get_u32(),
-                begin: data.get_u32(),
-                data,
-            },
-            CANCEL => Packet::Cancel {
-                index: data.get_u32(),
-                begin: data.get_u32(),
-                len: data.get_u32(),
-            },
-            EXTENDED => Packet::Extended { data },
-            _ => panic!("Invalid Packet ID"),
         }
     }
 }
