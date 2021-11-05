@@ -11,7 +11,7 @@ pub const PIECE: u8 = 7;
 pub const CANCEL: u8 = 8;
 pub const EXTENDED: u8 = 20;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Packet<'a> {
     Request {
         index: u32,

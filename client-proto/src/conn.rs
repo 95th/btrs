@@ -229,7 +229,7 @@ mod tests {
         conn.bitfield.resize(3);
         conn.bitfield.set_bit(1);
         conn.send_bitfield();
-        assert_eq!(conn.send_buf, &[0, 0, 0, 2, BITFIELD, 0b00000010])
+        assert_eq!(conn.send_buf, &[0, 0, 0, 2, BITFIELD, 0b01000000])
     }
 
     #[test]
@@ -288,8 +288,7 @@ mod tests {
         rx.choked = false;
         tx.send_choke();
 
-        let mut data = &tx.get_send_buf()[..];
-        assert_eq!(data.get_u32(), 1);
+        let data = &tx.get_send_buf()[4..];
         assert!(rx.read_packet(data).is_none());
         assert!(rx.choked);
     }
@@ -300,8 +299,7 @@ mod tests {
         let mut tx = Connection::new();
         tx.send_unchoke();
 
-        let mut data = &tx.get_send_buf()[..];
-        assert_eq!(data.get_u32(), 1);
+        let data = &tx.get_send_buf()[4..];
         assert!(rx.read_packet(data).is_none());
         assert!(!rx.choked);
     }
@@ -312,8 +310,7 @@ mod tests {
         let mut tx = Connection::new();
         tx.send_interested();
 
-        let mut data = &tx.get_send_buf()[..];
-        assert_eq!(data.get_u32(), 1);
+        let data = &tx.get_send_buf()[4..];
         assert!(rx.read_packet(data).is_none());
         assert!(rx.interested);
         assert_eq!(rx.send_buf, &[0, 0, 0, 1, UNCHOKE]);
@@ -326,8 +323,7 @@ mod tests {
         rx.interested = true;
         tx.send_not_interested();
 
-        let mut data = &tx.get_send_buf()[..];
-        assert_eq!(data.get_u32(), 1);
+        let data = &tx.get_send_buf()[4..];
         assert!(rx.read_packet(data).is_none());
         assert!(!rx.interested);
         assert_eq!(rx.send_buf, &[0, 0, 0, 1, CHOKE]);
@@ -337,13 +333,90 @@ mod tests {
     fn parse_have() {
         let mut rx = Connection::new();
         let mut tx = Connection::new();
+        rx.bitfield.resize(16);
+        tx.send_have(5);
+
+        let data = &tx.get_send_buf()[4..];
+        assert!(rx.read_packet(data).is_none());
+        assert_eq!(rx.bitfield.get_bit(5).unwrap(), true);
+    }
+
+    #[test]
+    fn parse_bitfield() {
+        let mut rx = Connection::new();
+        let mut tx = Connection::new();
         tx.bitfield.resize(16);
         tx.bitfield.set_bit(5);
         tx.send_bitfield();
 
-        let mut data = &tx.get_send_buf()[..];
-        assert_eq!(data.get_u32(), 3);
+        let data = &tx.get_send_buf()[4..];
         assert!(rx.read_packet(data).is_none());
-        assert_eq!(rx.bitfield.as_bytes(), &[0b0000000, 0b00010000]);
+        assert_eq!(rx.bitfield.as_bytes(), &[0b0000_0100, 0b0000_0000]);
+    }
+
+    #[test]
+    fn parse_request() {
+        let mut rx = Connection::new();
+        let mut tx = Connection::new();
+        tx.send_request(2, 3, 4);
+
+        let data = &tx.get_send_buf()[4..];
+        assert_eq!(
+            Packet::Request {
+                index: 2,
+                begin: 3,
+                len: 4
+            },
+            rx.read_packet(data).unwrap()
+        );
+    }
+
+    #[test]
+    fn parse_piece() {
+        let mut rx = Connection::new();
+        let mut tx = Connection::new();
+        tx.send_piece(2, 3, b"hello");
+
+        let data = &tx.get_send_buf()[4..];
+        assert_eq!(
+            Packet::Piece {
+                index: 2,
+                begin: 3,
+                data: b"hello"
+            },
+            rx.read_packet(data).unwrap()
+        );
+    }
+
+    #[test]
+    fn parse_cancel() {
+        let mut rx = Connection::new();
+        let mut tx = Connection::new();
+        tx.send_cancel(2, 3, 4);
+
+        let data = &tx.get_send_buf()[4..];
+        assert_eq!(
+            Packet::Cancel {
+                index: 2,
+                begin: 3,
+                len: 4
+            },
+            rx.read_packet(data).unwrap()
+        );
+    }
+
+    #[test]
+    fn parse_extended() {
+        let mut rx = Connection::new();
+        let mut tx = Connection::new();
+        tx.send_extended(2, "hello");
+
+        let data = &tx.get_send_buf()[4..];
+        assert_eq!(
+            Packet::Extended {
+                data: b"\x025:hello"
+            },
+            rx.read_packet(data).unwrap()
+        );
     }
 }
