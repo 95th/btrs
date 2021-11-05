@@ -21,18 +21,15 @@ impl<Stream> Client<Stream>
 where
     Stream: AsyncRead + AsyncWrite + Unpin,
 {
-    pub async fn new(stream: Stream, info_hash: InfoHash, peer_id: PeerId) -> anyhow::Result<Self> {
-        let mut client = Self {
+    pub fn new(stream: Stream) -> Self {
+        Self {
             stream,
             conn: Connection::new(),
             parser: Parser::new(),
-        };
-
-        client.handshake(info_hash, peer_id).await?;
-        Ok(client)
+        }
     }
 
-    async fn handshake(&mut self, info_hash: InfoHash, peer_id: PeerId) -> anyhow::Result<()> {
+    pub async fn handshake(&mut self, info_hash: InfoHash, peer_id: PeerId) -> anyhow::Result<()> {
         let mut h = Handshake::new(info_hash, peer_id);
         h.set_extended(true);
 
@@ -47,37 +44,34 @@ where
         Ok(())
     }
 
-    pub async fn read_packet<'a>(&mut self, buf: &'a mut Vec<u8>) -> anyhow::Result<Packet<'a>> {
+    pub async fn read_packet<'a>(
+        &mut self,
+        buf: &'a mut Vec<u8>,
+    ) -> anyhow::Result<Option<Packet<'a>>> {
         let mut b = [0; 4];
-        loop {
-            self.stream.read_exact(&mut b).await?;
-            let len = u32::from_be_bytes(b);
+        self.stream.read_exact(&mut b).await?;
+        let len = u32::from_be_bytes(b);
 
-            if len == 0 {
-                // Keep-alive
-                continue;
-            }
-
-            buf.resize(len as usize, 0);
-            self.stream.read_exact(buf).await?;
-
-            let header_len = Packet::header_size(buf[0]);
-            ensure!(len as usize >= header_len + 1, "Invalid packet length");
-
-            if !self.conn.process_packet(buf) {
-                break;
-            }
-
-            self.flush().await?;
+        if len == 0 {
+            // Keep-alive
+            return Ok(None);
         }
 
-        Ok(Packet::read(buf))
+        buf.resize(len as usize, 0);
+        self.stream.read_exact(buf).await?;
+
+        let header_len = Packet::header_size(buf[0]);
+        ensure!(len as usize >= header_len + 1, "Invalid packet length");
+
+        let packet = self.conn.read_packet(buf);
+        self.flush().await?;
+        Ok(packet)
     }
 
     pub async fn get_metadata(&mut self) -> anyhow::Result<Vec<u8>> {
         let buf = &mut Vec::new();
         loop {
-            if let Packet::Extended { data } = self.read_packet(buf).await? {
+            if let Some(Packet::Extended { data }) = self.read_packet(buf).await? {
                 let ext = ExtendedMessage::parse(data, &mut self.parser)?;
                 ensure!(ext.is_handshake(), "Expected extended handshake");
 
@@ -106,17 +100,21 @@ where
                 .send_extended(metadata.id, &MetadataMsg::Request(piece));
             self.flush().await?;
 
-            if let Packet::Extended { data } = self.read_packet(buf).await? {
-                let ext = ExtendedMessage::parse(data, &mut self.parser)?;
-                anyhow::ensure!(ext.id == metadata.id, "Expected Metadata message");
+            let data = loop {
+                if let Some(Packet::Extended { data }) = self.read_packet(buf).await? {
+                    break data;
+                }
+            };
 
-                let data = ext.data(piece)?;
-                anyhow::ensure!(data.len() <= remaining, "Incorrect data length received");
+            let ext = ExtendedMessage::parse(data, &mut self.parser)?;
+            anyhow::ensure!(ext.id == metadata.id, "Expected Metadata message");
 
-                out_buf.extend_from_slice(data);
-                remaining -= data.len();
-                piece += 1;
-            }
+            let data = ext.data(piece)?;
+            anyhow::ensure!(data.len() <= remaining, "Incorrect data length received");
+
+            out_buf.extend_from_slice(data);
+            remaining -= data.len();
+            piece += 1;
         }
 
         Ok(out_buf)
@@ -140,7 +138,9 @@ where
 
     pub async fn flush(&mut self) -> anyhow::Result<()> {
         let send_buf = self.conn.get_send_buf();
-        self.stream.write_all(&send_buf).await?;
+        if !send_buf.is_empty() {
+            self.stream.write_all(&send_buf).await?;
+        }
         Ok(())
     }
 }

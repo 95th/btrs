@@ -103,7 +103,7 @@ impl Connection {
         }
     }
 
-    pub fn process_packet(&mut self, mut data: &[u8]) -> bool {
+    pub fn read_packet<'a>(&mut self, mut data: &'a [u8]) -> Option<Packet<'a>> {
         let id = data.get_u8();
         match id {
             CHOKE => self.choked = true,
@@ -124,10 +124,31 @@ impl Connection {
                 let len = data.len();
                 self.bitfield.copy_from_slice(len * 8, data);
             }
-            REQUEST | PIECE | CANCEL | EXTENDED => return false,
+            REQUEST => {
+                return Some(Packet::Request {
+                    index: data.get_u32(),
+                    begin: data.get_u32(),
+                    len: data.get_u32(),
+                })
+            }
+            PIECE => {
+                return Some(Packet::Piece {
+                    index: data.get_u32(),
+                    begin: data.get_u32(),
+                    data,
+                })
+            }
+            CANCEL => {
+                return Some(Packet::Cancel {
+                    index: data.get_u32(),
+                    begin: data.get_u32(),
+                    len: data.get_u32(),
+                })
+            }
+            EXTENDED => return Some(Packet::Extended { data }),
             _ => {}
         }
-        true
+        None
     }
 }
 
