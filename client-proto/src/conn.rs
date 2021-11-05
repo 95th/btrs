@@ -1,7 +1,7 @@
 use std::ops::Deref;
 
 use ben::Encode;
-use bytes::{Buf, BufMut, BytesMut};
+use bytes::{Buf, BufMut};
 
 use crate::bitfield::Bitfield;
 use crate::msg::*;
@@ -103,9 +103,8 @@ impl Connection {
         }
     }
 
-    pub fn read_packet(&mut self, data: &mut BytesMut) -> Option<Packet> {
+    pub fn process_packet(&mut self, mut data: &[u8]) -> bool {
         let id = data.get_u8();
-
         match id {
             CHOKE => self.choked = true,
             UNCHOKE => self.choked = false,
@@ -123,35 +122,12 @@ impl Connection {
             }
             BITFIELD => {
                 let len = data.len();
-                self.bitfield.copy_from_slice(len * 8, &data);
-                data.clear();
+                self.bitfield.copy_from_slice(len * 8, data);
             }
-            REQUEST => {
-                return Some(Packet::Request {
-                    index: data.get_u32(),
-                    begin: data.get_u32(),
-                    len: data.get_u32(),
-                })
-            }
-            PIECE => {
-                return Some(Packet::Piece {
-                    index: data.get_u32(),
-                    begin: data.get_u32(),
-                    data: data.split(),
-                })
-            }
-            CANCEL => {
-                return Some(Packet::Cancel {
-                    index: data.get_u32(),
-                    begin: data.get_u32(),
-                    len: data.get_u32(),
-                })
-            }
-            EXTENDED => return Some(Packet::Extended { data: data.split() }),
-            _ => data.clear(),
+            REQUEST | PIECE | CANCEL | EXTENDED => return false,
+            _ => {}
         }
-
-        None
+        true
     }
 }
 

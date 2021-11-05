@@ -1,6 +1,5 @@
 use anyhow::{ensure, Context};
 use ben::Parser;
-use bytes::BytesMut;
 use futures::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use proto::{
     conn::Connection,
@@ -13,7 +12,6 @@ use proto::{
 pub struct Client<Stream> {
     stream: Stream,
     conn: Connection,
-    recv_buf: BytesMut,
     parser: Parser,
 }
 
@@ -25,7 +23,6 @@ where
         let mut client = Self {
             stream,
             conn: Connection::new(),
-            recv_buf: BytesMut::with_capacity(1024),
             parser: Parser::new(),
         };
 
@@ -48,7 +45,7 @@ where
         Ok(())
     }
 
-    pub async fn read_packet(&mut self) -> anyhow::Result<Packet> {
+    pub async fn read_packet<'a>(&mut self, buf: &'a mut Vec<u8>) -> anyhow::Result<Packet<'a>> {
         let mut b = [0; 4];
         loop {
             self.stream.read_exact(&mut b).await?;
@@ -59,21 +56,27 @@ where
                 continue;
             }
 
-            self.recv_buf.resize(len as usize, 0);
-            self.stream.read_exact(&mut self.recv_buf).await?;
+            buf.resize(len as usize, 0);
+            self.stream.read_exact(buf).await?;
 
-            if let Some(packet) = self.conn.read_packet(&mut self.recv_buf) {
-                return Ok(packet);
+            let header_len = Packet::header_size(buf[0]);
+            ensure!(len as usize >= header_len + 1, "Invalid packet length");
+
+            if !self.conn.process_packet(buf) {
+                break;
             }
 
             self.flush().await?;
         }
+
+        Ok(Packet::read(buf))
     }
 
-    pub async fn get_metadata(&mut self) -> anyhow::Result<BytesMut> {
+    pub async fn get_metadata(&mut self) -> anyhow::Result<Vec<u8>> {
+        let buf = &mut Vec::new();
         loop {
-            if let Packet::Extended { data } = self.read_packet().await? {
-                let ext = ExtendedMessage::parse(&data, &mut self.parser)?;
+            if let Packet::Extended { data } = self.read_packet(buf).await? {
+                let ext = ExtendedMessage::parse(data, &mut self.parser)?;
                 ensure!(ext.is_handshake(), "Expected extended handshake");
 
                 let metadata = ext.metadata().context("Metadata extension not supported")?;
@@ -82,35 +85,39 @@ where
                     .send_extended(metadata.id, &MetadataMsg::Handshake(metadata.id));
                 self.flush().await?;
 
-                return self.read_metadata(metadata).await;
+                return self.read_metadata(metadata, buf).await;
             }
         }
     }
 
-    async fn read_metadata(&mut self, metadata: Metadata) -> anyhow::Result<BytesMut> {
+    async fn read_metadata(
+        &mut self,
+        metadata: Metadata,
+        buf: &mut Vec<u8>,
+    ) -> anyhow::Result<Vec<u8>> {
         let mut remaining = metadata.len;
         let mut piece = 0;
-        let mut buf = BytesMut::new();
+        let mut out_buf = Vec::new();
 
         while remaining > 0 {
             self.conn
                 .send_extended(metadata.id, &MetadataMsg::Request(piece));
             self.flush().await?;
 
-            if let Packet::Extended { data } = self.read_packet().await? {
-                let ext = ExtendedMessage::parse(&data, &mut self.parser)?;
+            if let Packet::Extended { data } = self.read_packet(buf).await? {
+                let ext = ExtendedMessage::parse(data, &mut self.parser)?;
                 anyhow::ensure!(ext.id == metadata.id, "Expected Metadata message");
 
                 let data = ext.data(piece)?;
                 anyhow::ensure!(data.len() <= remaining, "Incorrect data length received");
 
-                buf.extend_from_slice(data);
+                out_buf.extend_from_slice(data);
                 remaining -= data.len();
                 piece += 1;
             }
         }
 
-        Ok(buf)
+        Ok(out_buf)
     }
 
     pub fn send_request(&mut self, index: u32, begin: u32, len: u32) {
