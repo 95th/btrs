@@ -40,7 +40,7 @@ impl DhtTracker {
         log::debug!("Announcing to DHT");
         let start = Instant::now();
 
-        let peers = self.dht.announce(NodeId::from(*info_hash.as_ref())).await?;
+        let peers = self.dht.announce(NodeId::from(*info_hash)).await?;
 
         let took = Instant::now() - start;
         log::debug!(

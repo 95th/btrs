@@ -33,7 +33,8 @@ macro_rules! thin_wrapper {
     };
 }
 
-thin_wrapper!(PeerId, [u8; 20]);
+pub use client::proto::PeerId;
+
 thin_wrapper!(Extensions, [u8; 8]);
 
 #[derive(Copy, Clone)]
@@ -91,5 +92,5 @@ pub fn generate_peer_id() -> PeerId {
         .sample_iter(&Alphanumeric)
         .zip(&mut buf[8..])
         .for_each(|(c, b)| *b = c as u8);
-    PeerId::new(buf)
+    buf
 }

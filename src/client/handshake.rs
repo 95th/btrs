@@ -68,7 +68,7 @@ impl<'a, C: AsyncStream> Handshake<'a, C> {
         let result = HandshakeResult {
             extensions: Extensions::new(buf[20..28].try_into().unwrap()),
             info_hash: buf[28..48].try_into().unwrap(),
-            peer_id: PeerId::new(buf[48..68].try_into().unwrap()),
+            peer_id: buf[48..68].try_into().unwrap(),
         };
 
         anyhow::ensure!(*self.info_hash == result.info_hash, "InfoHash mismatch");

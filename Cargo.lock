@@ -84,6 +84,7 @@ dependencies = [
  "bitflags",
  "byteorder",
  "clap",
+ "client",
  "data-encoding",
  "dht",
  "env_logger",

@@ -300,12 +300,22 @@ mod parser {
 
 #[cfg(test)]
 mod tests {
+    use data_encoding::{BASE32, HEXLOWER_PERMISSIVE};
+
     use super::*;
+
+    fn encode_hex(infohash: InfoHash) -> String {
+        HEXLOWER_PERMISSIVE.encode(&infohash)
+    }
+
+    fn encode_base32(infohash: InfoHash) -> String {
+        BASE32.encode(&infohash)
+    }
 
     #[test]
     fn parse_hex_infohash() {
         let infohash = InfoHash::from([12; 20]);
-        let s = format!("magnet:?xt=urn:btih:{}", infohash.encode_hex());
+        let s = format!("magnet:?xt=urn:btih:{}", encode_hex(infohash));
         let magnet = MagnetUri::parse(&s).unwrap();
         assert_eq!(infohash, magnet.info_hash);
     }
@@ -313,7 +323,7 @@ mod tests {
     #[test]
     fn parse_base32_infohash() {
         let infohash = InfoHash::from([12; 20]);
-        let s = format!("magnet:?xt=urn:btih:{}", infohash.encode_base32());
+        let s = format!("magnet:?xt=urn:btih:{}", encode_base32(infohash));
         let magnet = MagnetUri::parse(&s).unwrap();
         assert_eq!(infohash, magnet.info_hash);
     }
@@ -328,7 +338,7 @@ mod tests {
         let peer_2 = "2.2.2.2:10000";
         let s = format!(
             "magnet:?xt=urn:btih:{}&dn={}&tr={}&tr={}&x.pe={}&x.pe={}",
-            infohash.encode_hex(),
+            encode_hex(infohash),
             display_name,
             tracker_url_1,
             tracker_url_2,
@@ -349,7 +359,7 @@ mod tests {
     #[test]
     fn parse_only_infohash_present() {
         let infohash = InfoHash::from([0; 20]);
-        let s = format!("magnet:?xt=urn:btih:{}", infohash.encode_hex());
+        let s = format!("magnet:?xt=urn:btih:{}", encode_hex(infohash));
         let magnet = MagnetUri::parse(&s).unwrap();
         assert_eq!(infohash, magnet.info_hash);
     }
@@ -360,8 +370,8 @@ mod tests {
         let multihash = InfoHash::from([1; 20]);
         let s = format!(
             "magnet:?xt=urn:btih:{}&xt=urn:btmh:{}",
-            infohash.encode_hex(),
-            multihash.encode_hex(),
+            encode_hex(infohash),
+            encode_hex(multihash),
         );
         let magnet = MagnetUri::parse(&s).unwrap();
         assert_eq!(infohash, magnet.info_hash);
@@ -373,8 +383,8 @@ mod tests {
         let infohash_2 = InfoHash::from([1; 20]);
         let s = format!(
             "magnet:?xt=urn:btih:{}&xt=urn:btih:{}",
-            infohash_1.encode_hex(),
-            infohash_2.encode_hex(),
+            encode_hex(infohash_1),
+            encode_hex(infohash_2),
         );
         let err = MagnetUri::parse(&s).unwrap_err();
         assert_eq!("Multiple infohashes found", err.to_string());
@@ -385,8 +395,8 @@ mod tests {
         let infohash = InfoHash::from([0; 20]);
         let s = format!(
             "magnet:?xt=urn:btih:{}&xt=urn:btih:{}",
-            infohash.encode_hex(),
-            infohash.encode_hex(),
+            encode_hex(infohash),
+            encode_hex(infohash),
         );
         let magnet = MagnetUri::parse(&s).unwrap();
         assert_eq!(infohash, magnet.info_hash);
@@ -396,11 +406,7 @@ mod tests {
     fn parse_invalid_peer_addr_no_err() {
         let infohash = InfoHash::from([0; 20]);
         let peer = "xxxyyyzzz";
-        let s = format!(
-            "magnet:?xt=urn:btih:{}&x.pe={}",
-            infohash.encode_hex(),
-            peer,
-        );
+        let s = format!("magnet:?xt=urn:btih:{}&x.pe={}", encode_hex(infohash), peer,);
         let magnet = MagnetUri::parse_lenient(&s).unwrap();
         assert_eq!(infohash, magnet.info_hash);
         assert!(magnet.peer_addrs.is_empty());

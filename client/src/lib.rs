@@ -9,6 +9,8 @@ use proto::{
     InfoHash, PeerId,
 };
 
+pub use proto;
+
 pub struct Client<Stream> {
     stream: Stream,
     conn: Connection,

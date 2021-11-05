@@ -3,13 +3,19 @@ use crate::peer::Peer;
 use anyhow::Context;
 use ben::decode::Dict;
 use ben::Parser;
+use client::proto::InfoHash;
+use percent_encoding::{percent_encode, PercentEncode, NON_ALPHANUMERIC};
 use reqwest::Client;
 use std::collections::HashSet;
 use std::convert::TryInto;
 
+fn encode_url(infohash: &InfoHash) -> PercentEncode {
+    percent_encode(infohash, NON_ALPHANUMERIC)
+}
+
 pub async fn announce(req: AnnounceRequest<'_>) -> anyhow::Result<AnnounceResponse> {
     let peer_id = std::str::from_utf8(&req.peer_id[..]).unwrap();
-    let info_hash_encoded = req.info_hash.encode_url();
+    let info_hash_encoded = encode_url(&req.info_hash);
     log::debug!("Infohash Encoded: {}", info_hash_encoded);
     let url = format!("{}?info_hash={}", req.url, info_hash_encoded);
     let data = Client::new()
