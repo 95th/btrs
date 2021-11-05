@@ -338,7 +338,7 @@ mod tests {
 
         let data = &tx.get_send_buf()[4..];
         assert!(rx.read_packet(data).is_none());
-        assert_eq!(rx.bitfield.get_bit(5).unwrap(), true);
+        assert_eq!(rx.bitfield.get_bit(5), true);
     }
 
     #[test]

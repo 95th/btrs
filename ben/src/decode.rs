@@ -720,13 +720,13 @@ mod tests {
 
     #[test]
     fn decode_debug_bytes() {
-        let s = b"3:\x01\x01\x01";
+        let s = b"1:\x80";
         let parser = &mut Parser::new();
         let n = parser.parse::<Entry>(s).unwrap();
         assert!(n.as_bytes().is_some());
         assert!(n.as_ascii_str().is_none());
         assert_eq!(
-            format!("'{}'", data_encoding::BASE32.encode(&[1, 1, 1])),
+            format!("'{}'", data_encoding::BASE32.encode(&[0x80])),
             format!("{:?}", n)
         );
     }

@@ -62,9 +62,12 @@ impl Bitfield {
         (self.bits + 7) / 8
     }
 
-    pub fn get_bit(&self, index: usize) -> Option<bool> {
-        let word = self.word(index)?;
-        Some(word & mask(index) != 0)
+    pub fn get_bit(&self, index: usize) -> bool {
+        if let Some(word) = self.word(index) {
+            word & mask(index) != 0
+        } else {
+            false
+        }
     }
 
     pub fn set_bit(&mut self, index: usize) {
@@ -178,7 +181,11 @@ impl Iterator for Iter<'_> {
     type Item = bool;
 
     fn next(&mut self) -> Option<bool> {
-        let value = self.bitfield.get_bit(self.index)?;
+        if self.index >= self.bitfield.bits {
+            return None;
+        }
+
+        let value = self.bitfield.get_bit(self.index);
         self.index += 1;
         Some(value)
     }
@@ -201,18 +208,18 @@ mod tests {
         let mut b = Bitfield::with_size(16);
         b.set_bit(4);
         b.set_bit(14);
-        assert_eq!(b.get_bit(2).unwrap(), false);
-        assert_eq!(b.get_bit(4).unwrap(), true);
-        assert_eq!(b.get_bit(17), None);
+        assert_eq!(b.get_bit(2), false);
+        assert_eq!(b.get_bit(4), true);
+        assert_eq!(b.get_bit(17), false);
     }
 
     #[test]
     fn clear_bit() {
         let mut b = Bitfield::with_size(16);
         b.set_bit(4);
-        assert_eq!(b.get_bit(4).unwrap(), true);
+        assert_eq!(b.get_bit(4), true);
         b.clear_bit(4);
-        assert_eq!(b.get_bit(4).unwrap(), false);
+        assert_eq!(b.get_bit(4), false);
     }
 
     #[test]
@@ -252,23 +259,23 @@ mod tests {
     fn resize_larger() {
         let mut b = Bitfield::with_size(16);
         b.set_bit(5);
-        assert_eq!(b.get_bit(5).unwrap(), true);
+        assert_eq!(b.get_bit(5), true);
 
         b.resize(128);
-        assert_eq!(b.get_bit(5).unwrap(), true);
+        assert_eq!(b.get_bit(5), true);
     }
 
     #[test]
     fn resize_smaller() {
         let mut b = Bitfield::with_size(128);
         b.set_bit(5);
-        assert_eq!(b.get_bit(5).unwrap(), true);
+        assert_eq!(b.get_bit(5), true);
 
         b.resize(8);
-        assert_eq!(b.get_bit(5).unwrap(), true);
+        assert_eq!(b.get_bit(5), true);
 
         b.resize(4);
-        assert_eq!(b.get_bit(5), None);
+        assert_eq!(b.get_bit(5), false);
     }
 
     #[test]
