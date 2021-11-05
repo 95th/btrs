@@ -40,11 +40,6 @@ impl Bitfield {
         unsafe { std::slice::from_raw_parts(ptr, self.len_bytes()) }
     }
 
-    pub fn as_bytes_mut(&mut self) -> &mut [u8] {
-        let ptr = self.buf.as_mut_ptr().cast();
-        unsafe { std::slice::from_raw_parts_mut(ptr, self.len_bytes()) }
-    }
-
     pub fn copy_from_slice(&mut self, bits: usize, buf: &[u8]) {
         self.resize(bits);
         assert_eq!(buf.len(), self.len_bytes());
@@ -104,7 +99,7 @@ impl Bitfield {
 
         if words < self.buf.len() {
             let bits = self.bits % 32;
-            let mask = u32::MAX << (32 - bits);
+            let mask = (u32::MAX << (32 - bits)).to_be();
             return self.buf[words] & mask == mask;
         }
 
@@ -147,7 +142,8 @@ impl Bitfield {
         }
 
         if let Some(v) = self.buf.last_mut() {
-            *v &= u32::MAX << (32 - bits as u32);
+            let mask = u32::MAX << (32 - bits as u32);
+            *v &= mask.to_be();
         }
     }
 
@@ -169,7 +165,8 @@ impl Bitfield {
 }
 
 fn mask(index: usize) -> u32 {
-    1 << (index % 32)
+    let m = 0x8000_0000_u32 >> (index % 32);
+    m.to_be()
 }
 
 pub struct Iter<'a> {
@@ -184,5 +181,114 @@ impl Iterator for Iter<'_> {
         let value = self.bitfield.get_bit(self.index)?;
         self.index += 1;
         Some(value)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn set_bit() {
+        let mut b = Bitfield::with_size(16);
+        b.set_bit(4);
+        b.set_bit(14);
+        assert_eq!(b.as_bytes(), &[0b0000_1000, 0b0000_0010]);
+    }
+
+    #[test]
+    fn get_bit() {
+        let mut b = Bitfield::with_size(16);
+        b.set_bit(4);
+        b.set_bit(14);
+        assert_eq!(b.get_bit(2).unwrap(), false);
+        assert_eq!(b.get_bit(4).unwrap(), true);
+        assert_eq!(b.get_bit(17), None);
+    }
+
+    #[test]
+    fn clear_bit() {
+        let mut b = Bitfield::with_size(16);
+        b.set_bit(4);
+        assert_eq!(b.get_bit(4).unwrap(), true);
+        b.clear_bit(4);
+        assert_eq!(b.get_bit(4).unwrap(), false);
+    }
+
+    #[test]
+    fn count() {
+        let mut b = Bitfield::with_size(16);
+        assert_eq!(b.count(), 0);
+        b.set_bit(4);
+        b.set_bit(14);
+        assert_eq!(b.count(), 2);
+        b.set_bit(14);
+        assert_eq!(b.count(), 2);
+    }
+
+    #[test]
+    fn len() {
+        let b = Bitfield::with_size(16);
+        assert_eq!(b.len(), 16);
+        assert_eq!(b.len_bytes(), 2);
+    }
+
+    #[test]
+    fn set_all() {
+        let mut b = Bitfield::with_size(16);
+        b.set_all();
+        assert_eq!(b.count(), 16);
+        assert!(b.is_all_set());
+    }
+
+    #[test]
+    fn clear() {
+        let mut b = Bitfield::with_size(16);
+        b.clear();
+        assert!(b.is_empty());
+    }
+
+    #[test]
+    fn resize_larger() {
+        let mut b = Bitfield::with_size(16);
+        b.set_bit(5);
+        assert_eq!(b.get_bit(5).unwrap(), true);
+
+        b.resize(128);
+        assert_eq!(b.get_bit(5).unwrap(), true);
+    }
+
+    #[test]
+    fn resize_smaller() {
+        let mut b = Bitfield::with_size(128);
+        b.set_bit(5);
+        assert_eq!(b.get_bit(5).unwrap(), true);
+
+        b.resize(8);
+        assert_eq!(b.get_bit(5).unwrap(), true);
+
+        b.resize(4);
+        assert_eq!(b.get_bit(5), None);
+    }
+
+    #[test]
+    fn clear_all() {
+        let mut b = Bitfield::with_size(128);
+        b.set_bit(5);
+        b.set_bit(45);
+        assert_eq!(b.count(), 2);
+
+        b.clear_all();
+        assert_eq!(b.count(), 0);
+    }
+
+    #[test]
+    fn copy_from_slice() {
+        let mut b = Bitfield::with_size(16);
+        assert_eq!(b.len(), 16);
+
+        b.copy_from_slice(20, &[0xff, 0xff, 0xff]);
+        assert_eq!(b.count(), 20);
+        assert_eq!(b.as_bytes(), &[0xff, 0xff, 0xf0]);
     }
 }

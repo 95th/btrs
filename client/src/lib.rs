@@ -78,7 +78,7 @@ where
                 let metadata = ext.metadata().context("Metadata extension not supported")?;
 
                 self.conn
-                    .send_extended(metadata.id, &MetadataMsg::Handshake(metadata.id));
+                    .send_extended(metadata.id, MetadataMsg::Handshake(metadata.id));
                 self.flush().await?;
 
                 return self.read_metadata(metadata, buf).await;
@@ -97,7 +97,7 @@ where
 
         while remaining > 0 {
             self.conn
-                .send_extended(metadata.id, &MetadataMsg::Request(piece));
+                .send_extended(metadata.id, MetadataMsg::Request(piece));
             self.flush().await?;
 
             let data = loop {

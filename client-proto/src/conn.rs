@@ -86,7 +86,7 @@ impl Connection {
         self.send_buf.put_u32(len);
     }
 
-    pub fn send_extended(&mut self, id: u8, payload: &impl Encode) {
+    pub fn send_extended<E: Encode>(&mut self, id: u8, payload: E) {
         self.encode_buf.clear();
         payload.encode(&mut self.encode_buf);
 
@@ -167,5 +167,183 @@ impl<'a> Deref for SendBuf<'a> {
 impl<'a> Drop for SendBuf<'a> {
     fn drop(&mut self) {
         self.buf.clear();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn send_keepalive() {
+        let mut conn = Connection::new();
+        conn.send_keepalive();
+        assert_eq!(conn.send_buf, &[0, 0, 0, 0])
+    }
+
+    #[test]
+    fn send_choke() {
+        let mut conn = Connection::new();
+        conn.send_choke();
+        assert_eq!(conn.send_buf, &[0, 0, 0, 1, CHOKE])
+    }
+
+    #[test]
+    fn send_unchoke() {
+        let mut conn = Connection::new();
+        conn.send_unchoke();
+        assert_eq!(conn.send_buf, &[0, 0, 0, 1, UNCHOKE])
+    }
+
+    #[test]
+    fn send_interested() {
+        let mut conn = Connection::new();
+        conn.send_interested();
+        assert_eq!(conn.send_buf, &[0, 0, 0, 1, INTERESTED])
+    }
+
+    #[test]
+    fn send_not_interested() {
+        let mut conn = Connection::new();
+        conn.send_not_interested();
+        assert_eq!(conn.send_buf, &[0, 0, 0, 1, NOT_INTERESTED])
+    }
+
+    #[test]
+    fn send_have() {
+        let mut conn = Connection::new();
+        conn.send_have(4);
+        assert_eq!(conn.send_buf, &[0, 0, 0, 5, HAVE, 0, 0, 0, 4])
+    }
+
+    #[test]
+    fn send_bitfield_empty() {
+        let mut conn = Connection::new();
+        conn.send_bitfield();
+        assert_eq!(conn.send_buf, &[0, 0, 0, 1, BITFIELD])
+    }
+
+    #[test]
+    fn send_bitfield() {
+        let mut conn = Connection::new();
+        conn.bitfield.resize(3);
+        conn.bitfield.set_bit(1);
+        conn.send_bitfield();
+        assert_eq!(conn.send_buf, &[0, 0, 0, 2, BITFIELD, 0b00000010])
+    }
+
+    #[test]
+    fn send_request() {
+        let mut conn = Connection::new();
+        conn.send_request(2, 4, 5);
+        assert_eq!(
+            conn.send_buf,
+            &[0, 0, 0, 13, REQUEST, 0, 0, 0, 2, 0, 0, 0, 4, 0, 0, 0, 5]
+        )
+    }
+
+    #[test]
+    fn send_piece() {
+        let mut conn = Connection::new();
+        conn.send_piece(3, 5, &[1, 2, 3, 4]);
+        assert_eq!(
+            conn.send_buf,
+            &[0, 0, 0, 13, PIECE, 0, 0, 0, 3, 0, 0, 0, 5, 1, 2, 3, 4]
+        )
+    }
+
+    #[test]
+    fn send_cancel() {
+        let mut conn = Connection::new();
+        conn.send_cancel(2, 4, 5);
+        assert_eq!(
+            conn.send_buf,
+            &[0, 0, 0, 13, CANCEL, 0, 0, 0, 2, 0, 0, 0, 4, 0, 0, 0, 5]
+        )
+    }
+
+    #[test]
+    fn send_extended() {
+        let mut conn = Connection::new();
+        conn.send_extended(2, "hello");
+        assert_eq!(
+            conn.send_buf,
+            &[0, 0, 0, 9, EXTENDED, 2, b'5', b':', b'h', b'e', b'l', b'l', b'o']
+        )
+    }
+
+    #[test]
+    fn get_send_buf_clears() {
+        let mut conn = Connection::new();
+        conn.send_keepalive();
+        assert!(!conn.send_buf.is_empty());
+        drop(conn.get_send_buf());
+        assert!(conn.send_buf.is_empty());
+    }
+
+    #[test]
+    fn parse_choke() {
+        let mut tx = Connection::new();
+        let mut rx = Connection::new();
+        rx.choked = false;
+        tx.send_choke();
+
+        let mut data = &tx.get_send_buf()[..];
+        assert_eq!(data.get_u32(), 1);
+        assert!(rx.read_packet(data).is_none());
+        assert!(rx.choked);
+    }
+
+    #[test]
+    fn parse_unchoke() {
+        let mut rx = Connection::new();
+        let mut tx = Connection::new();
+        tx.send_unchoke();
+
+        let mut data = &tx.get_send_buf()[..];
+        assert_eq!(data.get_u32(), 1);
+        assert!(rx.read_packet(data).is_none());
+        assert!(!rx.choked);
+    }
+
+    #[test]
+    fn parse_interested() {
+        let mut rx = Connection::new();
+        let mut tx = Connection::new();
+        tx.send_interested();
+
+        let mut data = &tx.get_send_buf()[..];
+        assert_eq!(data.get_u32(), 1);
+        assert!(rx.read_packet(data).is_none());
+        assert!(rx.interested);
+        assert_eq!(rx.send_buf, &[0, 0, 0, 1, UNCHOKE]);
+    }
+
+    #[test]
+    fn parse_not_interested() {
+        let mut rx = Connection::new();
+        let mut tx = Connection::new();
+        rx.interested = true;
+        tx.send_not_interested();
+
+        let mut data = &tx.get_send_buf()[..];
+        assert_eq!(data.get_u32(), 1);
+        assert!(rx.read_packet(data).is_none());
+        assert!(!rx.interested);
+        assert_eq!(rx.send_buf, &[0, 0, 0, 1, CHOKE]);
+    }
+
+    #[test]
+    fn parse_have() {
+        let mut rx = Connection::new();
+        let mut tx = Connection::new();
+        tx.bitfield.resize(16);
+        tx.bitfield.set_bit(5);
+        tx.send_bitfield();
+
+        let mut data = &tx.get_send_buf()[..];
+        assert_eq!(data.get_u32(), 3);
+        assert!(rx.read_packet(data).is_none());
+        assert_eq!(rx.bitfield.as_bytes(), &[0b0000000, 0b00010000]);
     }
 }
