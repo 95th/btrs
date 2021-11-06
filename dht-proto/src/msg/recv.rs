@@ -108,7 +108,7 @@ impl<'a> Decode<'a, 'a> for Msg<'a> {
                         }
                     }
                     other => {
-                        log::trace!("Unexpected Query type: {:?}", other);
+                        trace!("Unexpected Query type: {:?}", other);
                         return Err(Other("Unexpected Query type"));
                     }
                 };
@@ -127,12 +127,12 @@ impl<'a> Decode<'a, 'a> for Msg<'a> {
                 })
             }
             b"e" => {
-                log::trace!("Error: {:?}", dict);
+                trace!("Error: {:?}", dict);
                 let list = dict.get_list("r");
                 Msg::Error(ErrorResponse { txn_id, list })
             }
             other => {
-                log::trace!("Unexpected Message type: {:?}", other);
+                trace!("Unexpected Message type: {:?}", other);
                 return Err(Other("Unexpected Message type"));
             }
         };

@@ -1,6 +1,7 @@
 use crate::contact::Contact;
 use crate::id::NodeId;
 use crate::{msg::recv::Response, table::RoutingTable};
+use std::fmt;
 use std::net::SocketAddr;
 use std::time::Instant;
 
@@ -37,8 +38,14 @@ pub trait Task {
     fn done(&mut self, _rpc: &mut RpcManager) {}
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TaskId(pub(crate) usize);
+
+impl fmt::Debug for TaskId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
 
 pub struct DhtNode {
     pub id: NodeId,

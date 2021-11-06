@@ -1,3 +1,6 @@
+#[macro_use]
+extern crate tracing;
+
 macro_rules! hashset {
     () => {
         std::collections::HashSet::new()

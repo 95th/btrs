@@ -69,9 +69,9 @@ impl<'w, C: AsyncStream> Download<'w, C> {
         client.conn.flush().await?;
 
         while client.choked {
-            log::trace!("We're choked. Waiting for unchoke");
+            trace!("We're choked. Waiting for unchoke");
             if let Some(msg) = client.read().await? {
-                log::warn!("Ignoring: {:?}", msg);
+                warn!("Ignoring: {:?}", msg);
                 msg.read_discard(&mut client.conn).await?;
             }
         }
@@ -90,11 +90,11 @@ impl<'w, C: AsyncStream> Download<'w, C> {
     }
 
     pub async fn start(&mut self) -> anyhow::Result<()> {
-        log::trace!("download");
+        trace!("download");
         loop {
             self.pick_pieces();
 
-            log::trace!("Pending pieces: {}", self.in_progress.len());
+            trace!("Pending pieces: {}", self.in_progress.len());
             if self.in_progress.is_empty() && self.backlog == 0 {
                 // No new pieces to download and no pending requests
                 // We're done
@@ -103,7 +103,7 @@ impl<'w, C: AsyncStream> Download<'w, C> {
 
             self.fill_backlog().await?;
 
-            log::trace!("Current backlog: {}", self.backlog);
+            trace!("Current backlog: {}", self.backlog);
             self.handle_msg().await?;
         }
         Ok(())
@@ -129,7 +129,7 @@ impl<'w, C: AsyncStream> Download<'w, C> {
         p.downloaded += len;
         self.work.add_downloaded(len as usize);
         self.backlog -= 1;
-        log::trace!("current index {}: {}/{}", index, p.downloaded, p.piece.len);
+        trace!("current index {}: {}/{}", index, p.downloaded, p.piece.len);
 
         if p.downloaded < p.piece.len {
             // Not done yet
@@ -141,17 +141,17 @@ impl<'w, C: AsyncStream> Download<'w, C> {
     }
 
     async fn piece_done(&mut self, state: PieceInProgress) -> anyhow::Result<()> {
-        log::trace!("Piece downloaded: {}", state.piece.index);
+        trace!("Piece downloaded: {}", state.piece.index);
         let buf = state.buf.into();
         let verified = self.work.verify(&state.piece, &buf).await;
 
         if !verified {
-            log::error!("Bad piece: Hash mismatch for {}", state.piece.index);
+            error!("Bad piece: Hash mismatch for {}", state.piece.index);
             self.work.add_piece(state.piece);
             return Ok(());
         }
 
-        log::info!("Downloaded and Verified {} piece", state.piece.index);
+        info!("Downloaded and Verified {} piece", state.piece.index);
         self.client.send_have(state.piece.index).await?;
         let piece = Piece {
             index: state.piece.index,
@@ -218,7 +218,7 @@ impl<'w, C: AsyncStream> Download<'w, C> {
             self.last_requested_blocks = self.backlog;
             self.last_requested = Instant::now();
 
-            log::trace!("Flushing the client");
+            trace!("Flushing the client");
             timeout(self.client.conn.flush(), 5).await
         } else {
             Ok(())
@@ -226,7 +226,7 @@ impl<'w, C: AsyncStream> Download<'w, C> {
     }
 
     fn adjust_watermark(&mut self) {
-        log::debug!("Old max_requests: {}", self.max_requests);
+        debug!("Old max_requests: {}", self.max_requests);
 
         let millis = (Instant::now() - self.last_requested).as_millis();
         if millis == 0 {
@@ -245,6 +245,6 @@ impl<'w, C: AsyncStream> Download<'w, C> {
             self.max_requests = rate.min(MAX_REQUESTS);
         }
 
-        log::debug!("New max_requests: {}", self.max_requests);
+        debug!("New max_requests: {}", self.max_requests);
     }
 }

@@ -49,7 +49,7 @@ impl<'a, C: AsyncStream> Handshake<'a, C> {
     }
 
     pub async fn write(&mut self) -> io::Result<()> {
-        log::trace!("Write handshake message");
+        trace!("Write handshake message");
         self.conn.write_all(PROTOCOL).await?;
         self.conn.write_all(&self.extensions[..]).await?;
         self.conn.write_all(self.info_hash.as_ref()).await?;
@@ -58,7 +58,7 @@ impl<'a, C: AsyncStream> Handshake<'a, C> {
     }
 
     pub async fn read(&mut self) -> anyhow::Result<HandshakeResult> {
-        log::trace!("Read handshake message");
+        trace!("Read handshake message");
 
         let mut buf = [0; 68];
         self.conn.read_exact(&mut buf).await?;

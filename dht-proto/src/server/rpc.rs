@@ -69,7 +69,7 @@ impl RpcManager {
         tasks: &mut Slab<Box<dyn Task>>,
         now: Instant,
     ) {
-        log::trace!("Received msg: {:?}", msg);
+        trace!("Received msg: {:?}", msg);
 
         match msg {
             Msg::Response(r) => self.handle_ok(r, addr, table, tasks, now),
@@ -89,7 +89,7 @@ impl RpcManager {
         let req = match self.txns.remove(resp.txn_id) {
             Some(req) => req,
             None => {
-                log::warn!("Response for unrecognized txn: {:?}", resp.txn_id);
+                warn!("Response for unrecognized txn: {:?}", resp.txn_id);
                 return;
             }
         };
@@ -97,11 +97,9 @@ impl RpcManager {
         if req.has_id && req.id == resp.id {
             table.heard_from(req.id, now);
         } else if req.has_id {
-            log::warn!(
-                "ID mismatch from {}, Expected: {:?}, Actual: {:?}",
-                addr,
-                &req.id,
-                &resp.id
+            warn!(
+                "ID mismatch, Expected: {:?}, Actual: {:?}",
+                &req.id, &resp.id
             );
             table.failed(req.id);
 
@@ -135,7 +133,7 @@ impl RpcManager {
         let req = match self.txns.remove(err.txn_id) {
             Some(req) => req,
             None => {
-                log::warn!("Response for unrecognized txn: {:?}", err.txn_id);
+                warn!("Response for unrecognized txn: {:?}", err.txn_id);
                 return;
             }
         };
@@ -183,7 +181,7 @@ impl RpcManager {
                 r.insert("nodes", &nodes[..]);
             }
             QueryKind::AnnouncePeer { .. } => {
-                log::warn!("Announce peer query is not yet implemented");
+                warn!("Announce peer query is not yet implemented");
             }
         }
 
@@ -194,11 +192,10 @@ impl RpcManager {
         dict.insert("y", "r");
         dict.finish();
 
-        if log::log_enabled!(log::Level::Debug) {
-            let mut p = Parser::new();
-            let d = p.parse::<Entry>(&buf).unwrap();
-            log::debug!("Sending reply: {:?}", d);
-        }
+        debug!(
+            "Sending reply: {:?}",
+            Parser::new().parse::<Entry>(&buf).unwrap()
+        );
 
         self.reply(buf, addr);
     }
@@ -219,7 +216,7 @@ impl RpcManager {
 
         let before = self.txns.pending.len();
 
-        log::debug!(
+        debug!(
             "{} pending txns in {} tasks",
             self.txns.pending.len(),
             tasks.len()
@@ -232,7 +229,7 @@ impl RpcManager {
         self.txns.collect_expired(now);
 
         while let Some((txn_id, req)) = self.txns.timed_out.pop() {
-            log::trace!("Txn {:?} expired", txn_id);
+            trace!("Txn {:?} expired", txn_id);
             if req.has_id {
                 table.failed(req.id);
             }
@@ -246,7 +243,7 @@ impl RpcManager {
             }
         }
 
-        log::trace!(
+        trace!(
             "Check timed out txns, before: {}, after: {}",
             before,
             self.txns.pending.len()

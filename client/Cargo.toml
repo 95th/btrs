@@ -9,3 +9,4 @@ ben = { path = "../ben" }
 bytes = "1.1.0"
 futures = "0.3.17"
 proto = { package = "client-proto", path = "../client-proto" }
+tracing = "0.1.29"

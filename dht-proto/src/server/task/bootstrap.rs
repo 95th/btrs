@@ -28,6 +28,7 @@ impl Task for BootstrapTask {
         self.base.task_id
     }
 
+    #[instrument(skip_all, fields(task = ?self.id()))]
     fn handle_response(
         &mut self,
         resp: &Response<'_>,
@@ -37,7 +38,7 @@ impl Task for BootstrapTask {
         has_id: bool,
         now: Instant,
     ) {
-        log::trace!("Handle BOOTSTRAP response");
+        trace!("Handle BOOTSTRAP response");
         self.base.handle_response(resp, addr, table, has_id, now);
     }
 
@@ -45,8 +46,9 @@ impl Task for BootstrapTask {
         self.base.set_failed(id, addr);
     }
 
+    #[instrument(skip_all, fields(task = ?self.id()))]
     fn add_requests(&mut self, rpc: &mut RpcManager, now: Instant) -> bool {
-        log::trace!("Add BOOTSTRAP requests");
+        trace!("Add BOOTSTRAP requests");
 
         let target = self.base.target;
         self.base.add_requests(rpc, now, |buf, rpc| {
@@ -55,7 +57,7 @@ impl Task for BootstrapTask {
                 target,
                 id: rpc.own_id,
             };
-            log::trace!("Send {:?}", msg);
+            trace!("Send {:?}", msg);
 
             msg.encode(buf);
             msg.txn_id

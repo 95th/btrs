@@ -21,7 +21,7 @@ pub struct Client<C = Connection> {
 
 impl Client {
     pub async fn new_tcp(addr: SocketAddr) -> anyhow::Result<Self> {
-        log::trace!("Create new TCP client to {:?}", addr);
+        trace!("Create new TCP client to {:?}", addr);
         let conn = Connection::new_tcp(addr).await?;
         Ok(Client::new(conn))
     }
@@ -45,18 +45,18 @@ impl<C: AsyncStream> Client<C> {
         handshake.set_extended(true);
         handshake.write().await?;
         let result = handshake.read().await?;
-        log::trace!("Handshake result: {:?}", result);
+        trace!("Handshake result: {:?}", result);
         Ok(())
     }
 
     pub async fn read(&mut self) -> anyhow::Result<Option<Message>> {
-        log::trace!("Client::read");
+        trace!("Client::read");
         let msg = match Message::read(&mut self.conn).await? {
             Some(msg) => msg,
             None => return Ok(None), // Keep-alive
         };
 
-        log::trace!("We got message: {:?}", msg);
+        trace!("We got message: {:?}", msg);
 
         match msg {
             Message::Choke => {
@@ -74,7 +74,7 @@ impl<C: AsyncStream> Client<C> {
                 Ok(None)
             }
             Message::Have { index } => {
-                log::trace!("This guy has {} piece", index);
+                trace!("This guy has {} piece", index);
                 self.bitfield.set(index as usize, true);
                 Ok(None)
             }
@@ -83,7 +83,7 @@ impl<C: AsyncStream> Client<C> {
     }
 
     pub async fn read_in_loop(&mut self) -> anyhow::Result<Message> {
-        log::trace!("Client::read_in_loop");
+        trace!("Client::read_in_loop");
         loop {
             if let Some(msg) = self.read().await? {
                 return Ok(msg);
@@ -93,44 +93,44 @@ impl<C: AsyncStream> Client<C> {
 
     pub async fn send_request(&mut self, index: u32, begin: u32, len: u32) -> io::Result<()> {
         let msg = Message::Request { index, begin, len };
-        log::trace!("Send {:?}", msg);
+        trace!("Send {:?}", msg);
         msg.write(&mut self.conn).await
     }
 
     pub async fn send_cancel(&mut self, index: u32, begin: u32, len: u32) -> io::Result<()> {
         let msg = Message::Cancel { index, begin, len };
-        log::trace!("Send {:?}", msg);
+        trace!("Send {:?}", msg);
         msg.write(&mut self.conn).await
     }
 
     pub async fn send_interested(&mut self) -> io::Result<()> {
-        log::trace!("Send interested");
+        trace!("Send interested");
         Message::Interested.write(&mut self.conn).await
     }
 
     pub async fn send_not_interested(&mut self) -> io::Result<()> {
-        log::trace!("Send not interested");
+        trace!("Send not interested");
         Message::NotInterested.write(&mut self.conn).await
     }
 
     pub async fn send_choke(&mut self) -> io::Result<()> {
-        log::trace!("Send choke");
+        trace!("Send choke");
         Message::Choke.write(&mut self.conn).await
     }
 
     pub async fn send_unchoke(&mut self) -> io::Result<()> {
-        log::trace!("Send unchoke");
+        trace!("Send unchoke");
         Message::Unchoke.write(&mut self.conn).await
     }
 
     pub async fn send_have(&mut self, index: u32) -> io::Result<()> {
-        log::trace!("Send have for piece: {}", index);
+        trace!("Send have for piece: {}", index);
         let msg = Message::Have { index };
         msg.write(&mut self.conn).await
     }
 
     pub async fn send_bitfield(&mut self, buf: &[u8]) -> io::Result<()> {
-        log::trace!("Send bitfield");
+        trace!("Send bitfield");
         let msg = Message::Bitfield {
             len: buf.len() as u32,
         };
@@ -138,7 +138,7 @@ impl<C: AsyncStream> Client<C> {
     }
 
     pub async fn send_piece(&mut self, index: u32, begin: u32, buf: &[u8]) -> io::Result<()> {
-        log::trace!("Send have for piece: {}", index);
+        trace!("Send have for piece: {}", index);
         let msg = Message::Piece {
             index,
             begin,
@@ -148,7 +148,7 @@ impl<C: AsyncStream> Client<C> {
     }
 
     pub async fn send_ext_handshake(&mut self, id: u8) -> io::Result<()> {
-        log::trace!("Send extended handshake");
+        trace!("Send extended handshake");
         self.send_ext(0, MetadataMsg::Handshake(id).encode_to_vec())
             .await
     }
@@ -157,19 +157,17 @@ impl<C: AsyncStream> Client<C> {
         let msg = Message::Extended {
             len: data.len() as u32,
         };
-        if log::log_enabled!(log::Level::Trace) {
-            let mut parser = ben::Parser::new();
-            log::trace!(
-                "Send extended message : {:?} ; payload: {:?}",
-                msg,
-                parser.parse::<Entry>(&data).unwrap()
-            );
-        }
+
+        trace!(
+            "Send extended message : {:?} ; payload: {:?}",
+            msg,
+            ben::Parser::new().parse::<Entry>(&data).unwrap()
+        );
         msg.write_ext(&mut self.conn, id, &data).await
     }
 
     pub async fn send_keep_alive(&mut self) -> anyhow::Result<()> {
-        log::trace!("Send Keep-alive message");
+        trace!("Send Keep-alive message");
         self.conn.write_u32(0).await?;
         Ok(())
     }

@@ -21,10 +21,10 @@ impl<'a, 'p> ExtendedMessage<'a, 'p> {
         ensure!(!data.is_empty(), "Unexpected EOF");
         let id = data[0];
         let (value, i) = parser.parse_prefix::<Entry>(&data[1..])?;
-        log::debug!("ext header len: {}", value.as_raw_bytes().len());
+        debug!("ext header len: {}", value.as_raw_bytes().len());
 
         let rest = &data[i + 1..];
-        log::debug!("ext data len: {}", rest.len());
+        debug!("ext data len: {}", rest.len());
         Ok(Self { id, value, rest })
     }
 
@@ -37,7 +37,7 @@ impl<'a, 'p> ExtendedMessage<'a, 'p> {
     }
 
     pub fn metadata(&self) -> Option<Metadata> {
-        log::trace!("metadata: {:#?}", self.value);
+        trace!("metadata: {:#?}", self.value);
         let dict = self.value.as_dict()?;
         let m = dict.get_dict("m")?;
         let id = m.get_int("ut_metadata")? as u8;
@@ -46,7 +46,7 @@ impl<'a, 'p> ExtendedMessage<'a, 'p> {
     }
 
     pub fn data(&self, expected_piece: i64) -> anyhow::Result<&'a [u8]> {
-        log::trace!("data: {:#?}", self.value);
+        trace!("data: {:#?}", self.value);
         let dict = self.value.as_dict().context("Not a dict")?;
 
         let msg_type = dict.get_int("msg_type").context("`msg_type` not found")?;

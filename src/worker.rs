@@ -19,6 +19,7 @@ use std::{
     time::Duration,
 };
 use tokio::time;
+use tracing::Instrument;
 
 pub struct TorrentWorker<'a> {
     peer_id: &'a PeerId,
@@ -110,18 +111,19 @@ impl<'a> TorrentWorker<'a> {
                         for peer in to_connect.drain(..) {
                             let piece_tx = piece_tx.clone();
                             pending_downloads.push(async move {
+                                let span = info_span!("conn", addr = ?peer.addr);
                                 let f = async {
                                     let mut client = timeout(Client::new_tcp(peer.addr), 3).await?;
                                     client.handshake(info_hash, peer_id).await?;
                                     let mut dl = Download::new(client, work, piece_tx).await?;
                                     dl.start().await
                                 };
-                                f.await.map_err(|e| (e, peer))
+                                f.instrument(span).await.map_err(|e| (e, peer))
                             });
 
                             connected.insert(peer);
 
-                            log::debug!(
+                            debug!(
                                 "{} active connections, {} pending trackers, {} pending downloads",
                                 connected.len(),
                                 pending_trackers.len(),
@@ -136,7 +138,7 @@ impl<'a> TorrentWorker<'a> {
                     match maybe_result {
                         Some(Ok(())) => {},
                         Some(Err((e, peer))) => {
-                            log::warn!("Error occurred for peer {} : {}", peer.addr, e);
+                            warn!("Error occurred for peer {} : {}", peer.addr, e);
 
                             if connected.remove(&peer) {
                                 failed.insert(peer);
@@ -165,11 +167,11 @@ impl<'a> TorrentWorker<'a> {
                             add_conn_tx.send(()).await.unwrap();
                         }
                         Some(Err(e)) => {
-                            log::warn!("DHT announce error: {}", e);
+                            warn!("DHT announce error: {}", e);
                             break;
                         },
                         None => {
-                            log::debug!("DHT Tracker is done");
+                            debug!("DHT Tracker is done");
                         }
                     }
                 }
@@ -182,7 +184,7 @@ impl<'a> TorrentWorker<'a> {
                             resp
                         },
                         None => {
-                            log::debug!("Trackers are all done");
+                            debug!("Trackers are all done");
                             continue;
                         }
                     };
@@ -204,7 +206,7 @@ impl<'a> TorrentWorker<'a> {
                             all_peers6.retain(|p| !failed.contains(p));
                             add_conn_tx.send(()).await.unwrap();
                         }
-                       Err(e) => log::warn!("Announce error: {}", e),
+                       Err(e) => warn!("Announce error: {}", e),
                     }
                 }
 

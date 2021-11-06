@@ -44,7 +44,7 @@ impl RoutingTable {
 
     pub fn next_refresh(&mut self, now: Instant) -> Option<ClientRequest> {
         let idx = self.timeouts.iter().position(|t| now > *t)?;
-        log::trace!("Refresh bucket: {}", idx);
+        trace!("Refresh bucket: {}", idx);
 
         self.timeouts[idx] = next_timeout(now);
         let bucket = &mut self.buckets[idx];
@@ -201,7 +201,7 @@ impl RoutingTable {
             }
         }
 
-        log::trace!("Live: {}, Extra: {}", self.len(), self.len_extra());
+        trace!("Live: {}, Extra: {}", self.len(), self.len_extra());
 
         Ok(())
     }

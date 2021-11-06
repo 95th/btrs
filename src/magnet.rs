@@ -41,55 +41,52 @@ impl MagnetUri {
     pub async fn request_metadata(&self, peer_id: PeerId) -> anyhow::Result<Torrent> {
         let (peers, peers6, dht_tracker) = self.get_peers(&peer_id).await?;
 
-        let mut iter = peers.iter().chain(&peers6);
-        let mut futures = FuturesUnordered::new();
-        loop {
-            while futures.len() < 2 {
-                if let Some(peer) = iter.next() {
-                    futures.push(timeout(self.try_get(peer, &peer_id), 60));
-                } else {
-                    break;
-                }
-            }
+        let mut futures = peers
+            .iter()
+            .chain(&peers6)
+            .map(|p| timeout(self.try_get(p, &peer_id), 60))
+            .collect::<FuturesUnordered<_>>();
 
-            anyhow::ensure!(!futures.is_empty(), "Metadata request failed");
-
-            if let Some(result) = futures.next().await {
-                match result {
-                    Ok(data) => {
-                        if let Some(t) = self.read_info(&data) {
-                            drop(futures);
-                            log::trace!("Metadata requested successfully");
-                            return Ok(Torrent {
-                                peer_id,
-                                info_hash: self.info_hash.clone(),
-                                piece_len: t.piece_len,
-                                length: t.length,
-                                piece_hashes: t.piece_hashes,
-                                name: t.name,
-                                tracker_urls: self.tracker_urls.clone(),
-                                peers,
-                                peers6,
-                                dht_tracker,
-                            });
-                        }
+        while let Some(result) = futures.next().await {
+            match result {
+                Ok(data) => {
+                    if let Some(t) = self.read_info(&data) {
+                        drop(futures);
+                        trace!("Metadata requested successfully");
+                        return Ok(Torrent {
+                            peer_id,
+                            info_hash: self.info_hash.clone(),
+                            piece_len: t.piece_len,
+                            length: t.length,
+                            piece_hashes: t.piece_hashes,
+                            name: t.name,
+                            tracker_urls: self.tracker_urls.clone(),
+                            peers,
+                            peers6,
+                            dht_tracker,
+                        });
                     }
-                    Err(e) => log::debug!("Error : {}", e),
                 }
+                Err(e) => debug!("Error : {}", e),
             }
         }
+
+        anyhow::bail!("Metadata request failed")
     }
 
     fn read_info(&self, data: &[u8]) -> Option<TorrentInfo> {
-        log::trace!("Read torrent info, len: {}", data.len());
-        let mut parser = Parser::new();
+        trace!("Read torrent info, len: {}", data.len());
+        let parser = &mut Parser::new();
         let info_dict = match parser.parse::<Dict>(data) {
             Ok(d) => d,
             Err(e) => {
-                log::warn!("{}", e);
+                warn!("{}", e);
                 return None;
             }
         };
+
+        info!("Got dict: {:?}", info_dict);
+
         let length = info_dict.get_int("length")? as usize;
         let name = info_dict.get_str("name").unwrap_or_default().to_string();
         let piece_len = info_dict.get_int("piece length")? as usize;
@@ -106,7 +103,7 @@ impl MagnetUri {
         &self,
         peer_id: &PeerId,
     ) -> anyhow::Result<(HashSet<Peer>, HashSet<Peer>, DhtTracker)> {
-        log::debug!("Requesting peers");
+        debug!("Requesting peers");
 
         let mut futs: FuturesUnordered<_> = self
             .tracker_urls
@@ -126,18 +123,18 @@ impl MagnetUri {
                     peers.extend(r.peers);
                     peers6.extend(r.peers6);
                 }
-                Err(e) => log::debug!("Error: {}", e),
+                Err(e) => debug!("Error: {}", e),
             }
         }
 
-        log::debug!("Got {} v4 peers and {} v6 peers", peers.len(), peers6.len());
+        debug!("Got {} v4 peers and {} v6 peers", peers.len(), peers6.len());
 
         let mut dht_tracker = DhtTracker::new().await?;
         if peers.is_empty() && peers6.is_empty() {
             if let Ok(p) = dht_tracker.announce(&self.info_hash).await {
                 peers.extend(p);
             }
-            log::debug!(
+            debug!(
                 "Got {} v4 peers and {} v6 peers from DHT",
                 peers.len(),
                 peers6.len()
@@ -151,6 +148,7 @@ impl MagnetUri {
         Ok((peers, peers6, dht_tracker))
     }
 
+    #[instrument(skip_all, fields(addr = ?peer.addr))]
     async fn try_get(&self, peer: &Peer, peer_id: &PeerId) -> anyhow::Result<Vec<u8>> {
         let mut client = timeout(Client::new_tcp(peer.addr), 3).await?;
         client.handshake(&self.info_hash, peer_id).await?;
@@ -176,7 +174,7 @@ impl MagnetUri {
             .metadata()
             .context("Peer doesn't support Metadata extension")?;
 
-        log::debug!("{:?}", metadata);
+        debug!("{:?}", metadata);
         client.send_ext_handshake(metadata.id).await?;
 
         let mut remaining = metadata.len;

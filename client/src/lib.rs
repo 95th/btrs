@@ -1,3 +1,6 @@
+#[macro_use]
+extern crate tracing;
+
 use anyhow::{ensure, Context};
 use ben::Parser;
 use futures::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
@@ -30,17 +33,20 @@ where
     }
 
     pub async fn handshake(&mut self, info_hash: InfoHash, peer_id: PeerId) -> anyhow::Result<()> {
+        debug!("Begin handshake");
         let mut h = Handshake::new(info_hash, peer_id);
         h.set_extended(true);
 
         self.stream.write_all(h.as_bytes()).await?;
         self.stream.flush().await?;
 
+        debug!("Wait for handshake response");
         self.stream.read_exact(h.as_bytes_mut()).await?;
 
         ensure!(h.is_supported(), "Unsupported protocol");
         ensure!(h.info_hash == info_hash, "Incorrect infohash");
 
+        debug!("Handshake succeeded");
         Ok(())
     }
 
@@ -49,8 +55,12 @@ where
         buf: &'a mut Vec<u8>,
     ) -> anyhow::Result<Option<Packet<'a>>> {
         let mut b = [0; 4];
+
+        trace!("Read packet length");
         self.stream.read_exact(&mut b).await?;
+
         let len = u32::from_be_bytes(b);
+        trace!("Packet length: {}", len);
 
         if len == 0 {
             // Keep-alive
@@ -64,19 +74,25 @@ where
         ensure!(len as usize >= header_len + 1, "Invalid packet length");
 
         let packet = self.conn.read_packet(buf);
+        trace!("Read packet: {:?}", packet);
+
         self.flush().await?;
         Ok(packet)
     }
 
     pub async fn get_metadata(&mut self) -> anyhow::Result<Vec<u8>> {
+        debug!("Request metadata");
         let buf = &mut Vec::new();
         let data = loop {
+            trace!("Try to read an extended handshake");
             if let Some(Packet::Extended(data)) = self.read_packet(buf).await? {
                 break data;
             }
         };
 
         let ext = ExtendedMessage::parse(data, &mut self.parser)?;
+        trace!("Extended handshake message: {:?}", ext);
+
         ensure!(ext.is_handshake(), "Expected extended handshake");
 
         let metadata = ext.metadata().context("Metadata extension not supported")?;
@@ -93,11 +109,14 @@ where
         metadata: Metadata,
         buf: &mut Vec<u8>,
     ) -> anyhow::Result<Vec<u8>> {
+        debug!("Read metadata");
         let mut remaining = metadata.len;
         let mut piece = 0;
         let mut out_buf = Vec::new();
 
         while remaining > 0 {
+            trace!("Send metadata piece request: {}", piece);
+
             self.conn
                 .send_extended(metadata.id, MetadataMsg::Request(piece));
             self.flush().await?;
@@ -109,6 +128,7 @@ where
             };
 
             let ext = ExtendedMessage::parse(data, &mut self.parser)?;
+            trace!("Got piece response: {:?}", ext);
             anyhow::ensure!(ext.id == metadata.id, "Expected Metadata message");
 
             let data = ext.data(piece)?;
