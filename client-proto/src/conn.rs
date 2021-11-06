@@ -149,7 +149,7 @@ impl Connection {
                     len: data.get_u32(),
                 })
             }
-            EXTENDED => return Some(Packet::Extended { data }),
+            EXTENDED => return Some(Packet::Extended(data)),
             _ => {}
         }
         None
@@ -417,9 +417,7 @@ mod tests {
 
         let data = &tx.get_send_buf()[4..];
         assert_eq!(
-            Packet::Extended {
-                data: b"\x025:hello"
-            },
+            Packet::Extended(b"\x025:hello"),
             rx.read_packet(data).unwrap()
         );
     }

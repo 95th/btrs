@@ -70,20 +70,22 @@ where
 
     pub async fn get_metadata(&mut self) -> anyhow::Result<Vec<u8>> {
         let buf = &mut Vec::new();
-        loop {
-            if let Some(Packet::Extended { data }) = self.read_packet(buf).await? {
-                let ext = ExtendedMessage::parse(data, &mut self.parser)?;
-                ensure!(ext.is_handshake(), "Expected extended handshake");
-
-                let metadata = ext.metadata().context("Metadata extension not supported")?;
-
-                self.conn
-                    .send_extended(metadata.id, MetadataMsg::Handshake(metadata.id));
-                self.flush().await?;
-
-                return self.read_metadata(metadata, buf).await;
+        let data = loop {
+            if let Some(Packet::Extended(data)) = self.read_packet(buf).await? {
+                break data;
             }
-        }
+        };
+
+        let ext = ExtendedMessage::parse(data, &mut self.parser)?;
+        ensure!(ext.is_handshake(), "Expected extended handshake");
+
+        let metadata = ext.metadata().context("Metadata extension not supported")?;
+
+        self.conn
+            .send_extended(metadata.id, MetadataMsg::Handshake(metadata.id));
+        self.flush().await?;
+
+        self.read_metadata(metadata, buf).await
     }
 
     async fn read_metadata(
@@ -101,7 +103,7 @@ where
             self.flush().await?;
 
             let data = loop {
-                if let Some(Packet::Extended { data }) = self.read_packet(buf).await? {
+                if let Some(Packet::Extended(data)) = self.read_packet(buf).await? {
                     break data;
                 }
             };

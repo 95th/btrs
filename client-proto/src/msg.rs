@@ -26,9 +26,7 @@ pub enum Packet<'a> {
         begin: u32,
         len: u32,
     },
-    Extended {
-        data: &'a [u8],
-    },
+    Extended(&'a [u8]),
 }
 
 impl Packet<'_> {
