@@ -1,18 +1,16 @@
 use crate::announce::{DhtTracker, Tracker};
-use crate::client::Client;
 use crate::future::timeout;
 use crate::metainfo::InfoHash;
-use crate::msg::{Message, MetadataMsg};
 use crate::peer::{Peer, PeerId};
 use crate::torrent::Torrent;
 use anyhow::Context;
 use ben::decode::Dict;
-use ben::{Encode, Parser};
+use ben::Parser;
 use futures::stream::FuturesUnordered;
 use futures::stream::StreamExt;
 use std::collections::HashSet;
 use std::net::SocketAddr;
-use tokio::io::AsyncWriteExt;
+use tokio::net::TcpStream;
 
 #[derive(Debug, Default)]
 pub struct MagnetUri {
@@ -41,33 +39,40 @@ impl MagnetUri {
     pub async fn request_metadata(&self, peer_id: PeerId) -> anyhow::Result<Torrent> {
         let (peers, peers6, dht_tracker) = self.get_peers(&peer_id).await?;
 
-        let mut futures = peers
-            .iter()
-            .chain(&peers6)
-            .map(|p| timeout(self.try_get(p, &peer_id), 60))
-            .collect::<FuturesUnordered<_>>();
+        let mut futures = FuturesUnordered::new();
+        let mut peers_iter = peers.iter().chain(&peers6);
 
-        while let Some(result) = futures.next().await {
-            match result {
-                Ok(data) => {
-                    if let Some(t) = self.read_info(&data) {
-                        drop(futures);
-                        trace!("Metadata requested successfully");
-                        return Ok(Torrent {
-                            peer_id,
-                            info_hash: self.info_hash.clone(),
-                            piece_len: t.piece_len,
-                            length: t.length,
-                            piece_hashes: t.piece_hashes,
-                            name: t.name,
-                            tracker_urls: self.tracker_urls.clone(),
-                            peers,
-                            peers6,
-                            dht_tracker,
-                        });
-                    }
+        loop {
+            if futures.len() < 20 {
+                while let Some(p) = peers_iter.next() {
+                    futures.push(timeout(self.try_get(p, &peer_id), 60));
                 }
-                Err(e) => debug!("Error : {}", e),
+            }
+
+            if let Some(result) = futures.next().await {
+                match result {
+                    Ok(data) => {
+                        if let Some(t) = self.read_info(&data) {
+                            drop(futures);
+                            trace!("Metadata requested successfully");
+                            return Ok(Torrent {
+                                peer_id,
+                                info_hash: self.info_hash.clone(),
+                                piece_len: t.piece_len,
+                                length: t.length,
+                                piece_hashes: t.piece_hashes,
+                                name: t.name,
+                                tracker_urls: self.tracker_urls.clone(),
+                                peers,
+                                peers6,
+                                dht_tracker,
+                            });
+                        }
+                    }
+                    Err(e) => debug!("Error : {}", e),
+                }
+            } else {
+                break;
             }
         }
 
@@ -150,58 +155,10 @@ impl MagnetUri {
 
     #[instrument(skip_all, fields(addr = ?peer.addr))]
     async fn try_get(&self, peer: &Peer, peer_id: &PeerId) -> anyhow::Result<Vec<u8>> {
-        let mut client = timeout(Client::new_tcp(peer.addr), 3).await?;
-        client.handshake(&self.info_hash, peer_id).await?;
-        client.conn.flush().await?;
-
-        let ext_buf = &mut vec![];
-        let parser = &mut Parser::new();
-        let ext = loop {
-            let msg = client.read_in_loop().await?;
-            if let Message::Extended { .. } = msg {
-                let ext = msg.read_ext(&mut client.conn, ext_buf, parser).await?;
-                break ext;
-            } else {
-                msg.read_discard(&mut client.conn).await?;
-            }
-        };
-
-        if !ext.is_handshake() {
-            anyhow::bail!("Expected Extended Handshake");
-        }
-
-        let metadata = ext
-            .metadata()
-            .context("Peer doesn't support Metadata extension")?;
-
-        debug!("{:?}", metadata);
-        client.send_ext_handshake(metadata.id).await?;
-
-        let mut remaining = metadata.len;
-        let mut piece = 0;
-        let mut buf = Vec::with_capacity(remaining);
-        while remaining > 0 {
-            let m = MetadataMsg::Request(piece);
-            client.send_ext(metadata.id, m.encode_to_vec()).await?;
-            client.conn.flush().await?;
-            let msg = client.read_in_loop().await?;
-
-            if let Message::Extended { .. } = msg {
-                let ext = msg.read_ext(&mut client.conn, ext_buf, parser).await?;
-                anyhow::ensure!(ext.id == metadata.id, "Expected Metadata message");
-
-                let data = ext.data(piece)?;
-                anyhow::ensure!(data.len() <= remaining, "Incorrect data length received");
-
-                buf.extend(data);
-                remaining -= data.len();
-                piece += 1;
-            } else {
-                msg.read_discard(&mut client.conn).await?;
-            }
-        }
-
-        Ok(buf)
+        let socket = TcpStream::connect(peer.addr).await?;
+        let mut client = client::Client::new(socket);
+        client.handshake(self.info_hash, *peer_id).await?;
+        client.get_metadata().await
     }
 }
 

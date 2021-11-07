@@ -1,10 +1,10 @@
-use btrs::bitfield::BitField;
 use btrs::magnet::MagnetUri;
 use btrs::peer;
 use btrs::storage::StorageWriter;
 use btrs::torrent::{Torrent, TorrentFile};
 use btrs::work::Piece;
 use clap::{App, Arg};
+use client::proto::bitfield::Bitfield;
 use futures::channel::mpsc;
 use futures::StreamExt;
 use std::fs;
@@ -86,20 +86,18 @@ async fn write_to_file(
         .open(torrent_name)
         .unwrap();
     let mut storage = StorageWriter::new(&mut file, piece_len);
-    let mut bitfield = BitField::new(num_pieces);
+    let mut bitfield = Bitfield::with_size(num_pieces);
 
     // Save a piece to storage {
     while let Some(piece) = piece_rx.next().await {
         let index = piece.index as usize;
-        match bitfield.get(index) {
-            Some(true) => error!("Duplicate piece downloaded: {}", index),
-            None => error!("Unexpected piece downloaded: {}", index),
-            _ => {}
+        if bitfield.get_bit(index) {
+            error!("Duplicate piece downloaded: {}", index);
         }
 
         storage.insert(piece).unwrap();
-        bitfield.set(index, true);
+        bitfield.set_bit(index);
     }
-    println!("All pieces downloaded: {}", bitfield.all_true());
+    println!("All pieces downloaded: {}", bitfield.is_all_set());
     println!("File downloaded; size: {}", file.metadata().unwrap().len());
 }

@@ -110,46 +110,58 @@ impl Connection {
     pub fn read_packet<'a>(&mut self, mut data: &'a [u8]) -> Option<Packet<'a>> {
         let id = data.get_u8();
         match id {
-            CHOKE => self.choked = true,
-            UNCHOKE => self.choked = false,
+            CHOKE => {
+                trace!("Got choke");
+                self.choked = true;
+            }
+            UNCHOKE => {
+                trace!("Got unchoke");
+                self.choked = false;
+            }
             INTERESTED => {
+                trace!("Got interested");
                 self.interested = true;
                 self.send_unchoke();
             }
             NOT_INTERESTED => {
+                trace!("Got not-interested");
                 self.interested = false;
                 self.send_choke();
             }
             HAVE => {
                 let index = data.get_u32();
+                trace!("Got have: {}", index);
                 self.bitfield.set_bit(index as usize);
             }
             BITFIELD => {
                 let len = data.len();
+                trace!("Got bitfield len: {}", len);
                 self.bitfield.copy_from_slice(len * 8, data);
             }
             REQUEST => {
-                return Some(Packet::Request {
-                    index: data.get_u32(),
-                    begin: data.get_u32(),
-                    len: data.get_u32(),
-                })
+                let index = data.get_u32();
+                let begin = data.get_u32();
+                let len = data.get_u32();
+                trace!("Got Request: index {}, begin {}, len {}", index, begin, len);
+                return Some(Packet::Request { index, begin, len });
             }
             PIECE => {
-                return Some(Packet::Piece {
-                    index: data.get_u32(),
-                    begin: data.get_u32(),
-                    data,
-                })
+                let index = data.get_u32();
+                let begin = data.get_u32();
+                trace!("Got Piece: index {}, begin {}", index, begin);
+                return Some(Packet::Piece { index, begin, data });
             }
             CANCEL => {
-                return Some(Packet::Cancel {
-                    index: data.get_u32(),
-                    begin: data.get_u32(),
-                    len: data.get_u32(),
-                })
+                let index = data.get_u32();
+                let begin = data.get_u32();
+                let len = data.get_u32();
+                trace!("Got Request: index {}, begin {}, len {}", index, begin, len);
+                return Some(Packet::Cancel { index, begin, len });
             }
-            EXTENDED => return Some(Packet::Extended(data)),
+            EXTENDED => {
+                trace!("Got Extended: len {}", data.len());
+                return Some(Packet::Extended(data));
+            }
             _ => {}
         }
         None

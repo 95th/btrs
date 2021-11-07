@@ -19,8 +19,6 @@ pub const CLIENT_NAME: &str = "95th 0.1";
 
 pub mod announce;
 pub mod avg;
-pub mod bitfield;
-pub mod client;
 mod download;
 pub mod future;
 pub mod magnet;

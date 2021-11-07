@@ -1,6 +1,5 @@
 use crate::{
     announce::{DhtTracker, Tracker},
-    client::Client,
     download::Download,
     future::timeout,
     metainfo::InfoHash,
@@ -18,7 +17,7 @@ use std::{
     collections::{HashSet, VecDeque},
     time::Duration,
 };
-use tokio::time;
+use tokio::{net::TcpStream, time};
 use tracing::Instrument;
 
 pub struct TorrentWorker<'a> {
@@ -113,8 +112,9 @@ impl<'a> TorrentWorker<'a> {
                             pending_downloads.push(async move {
                                 let span = info_span!("conn", addr = ?peer.addr);
                                 let f = async {
-                                    let mut client = timeout(Client::new_tcp(peer.addr), 3).await?;
-                                    client.handshake(info_hash, peer_id).await?;
+                                    let socket = timeout(TcpStream::connect(peer.addr), 3).await?;
+                                    let mut client = client::Client::new(socket);
+                                    client.handshake(*info_hash, *peer_id).await?;
                                     let mut dl = Download::new(client, work, piece_tx).await?;
                                     dl.start().await
                                 };

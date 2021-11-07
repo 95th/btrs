@@ -1,14 +1,13 @@
 use crate::avg::SlidingAvg;
-use crate::client::{AsyncStream, Client};
 use crate::future::timeout;
-use crate::msg::Message;
 use crate::work::{Piece, PieceInfo, WorkQueue};
 use anyhow::Context;
+use client::proto::msg::Packet;
+use client::{AsyncStream, Client};
 use futures::channel::mpsc::Sender;
 use futures::SinkExt;
 use std::collections::HashMap;
 use std::time::Instant;
-use tokio::io::AsyncWriteExt;
 
 const MAX_REQUESTS: u32 = 500;
 const MIN_REQUESTS: u32 = 2;
@@ -48,6 +47,8 @@ pub struct Download<'w, C> {
 
     /// Block download rate
     rate: SlidingAvg,
+
+    recv_buf: Vec<u8>,
 }
 
 impl<C> Drop for Download<'_, C> {
@@ -64,17 +65,10 @@ impl<'w, C: AsyncStream> Download<'w, C> {
         work: &'w WorkQueue,
         piece_tx: Sender<Piece>,
     ) -> anyhow::Result<Download<'w, C>> {
-        client.send_unchoke().await?;
-        client.send_interested().await?;
-        client.conn.flush().await?;
-
-        while client.choked {
-            trace!("We're choked. Waiting for unchoke");
-            if let Some(msg) = client.read().await? {
-                warn!("Ignoring: {:?}", msg);
-                msg.read_discard(&mut client.conn).await?;
-            }
-        }
+        client.send_unchoke();
+        client.send_interested();
+        client.flush().await?;
+        client.wait_for_unchoke().await?;
 
         Ok(Download {
             client,
@@ -86,6 +80,7 @@ impl<'w, C: AsyncStream> Download<'w, C> {
             last_requested_blocks: 0,
             last_requested: Instant::now(),
             rate: SlidingAvg::new(10),
+            recv_buf: Vec::with_capacity(1024),
         })
     }
 
@@ -110,14 +105,16 @@ impl<'w, C: AsyncStream> Download<'w, C> {
     }
 
     async fn handle_msg(&mut self) -> anyhow::Result<()> {
-        let msg = timeout(self.client.read_in_loop(), 5).await?;
-
-        let (index, len) = match msg {
-            Message::Piece { index, len, .. } => (index, len),
-            _ => {
-                msg.read_discard(&mut self.client.conn).await?;
-                return Ok(());
+        let packet = loop {
+            let packet = self.client.read_packet(&mut self.recv_buf).await?;
+            if let Some(packet) = packet {
+                break packet;
             }
+        };
+
+        let (begin, index, data) = match packet {
+            Packet::Piece { begin, index, data } => (begin, index, data),
+            _ => return Ok(()),
         };
 
         let mut p = self
@@ -125,9 +122,9 @@ impl<'w, C: AsyncStream> Download<'w, C> {
             .remove(&index)
             .context("Received a piece that was not requested")?;
 
-        msg.read_piece(&mut self.client.conn, &mut p.buf).await?;
-        p.downloaded += len;
-        self.work.add_downloaded(len as usize);
+        p.buf[begin as usize..][..data.len()].copy_from_slice(data);
+        p.downloaded += data.len() as u32;
+        self.work.add_downloaded(data.len());
         self.backlog -= 1;
         trace!("current index {}: {}/{}", index, p.downloaded, p.piece.len);
 
@@ -152,7 +149,7 @@ impl<'w, C: AsyncStream> Download<'w, C> {
         }
 
         info!("Downloaded and Verified {} piece", state.piece.index);
-        self.client.send_have(state.piece.index).await?;
+        self.client.send_have(state.piece.index);
         let piece = Piece {
             index: state.piece.index,
             buf,
@@ -189,7 +186,7 @@ impl<'w, C: AsyncStream> Download<'w, C> {
     }
 
     async fn fill_backlog(&mut self) -> anyhow::Result<()> {
-        if self.client.choked || self.backlog >= MIN_REQUESTS {
+        if self.client.is_choked() || self.backlog >= MIN_REQUESTS {
             // Either
             // - Choked - Wait for peer to send us an Unchoke
             // - Too many pending requests - Wait for peer to send us already requested pieces.
@@ -203,10 +200,8 @@ impl<'w, C: AsyncStream> Download<'w, C> {
         for s in self.in_progress.values_mut() {
             while self.backlog < self.max_requests && s.requested < s.piece.len {
                 let block_size = MAX_BLOCK_SIZE.min(s.piece.len - s.requested);
-                let request = self
-                    .client
+                self.client
                     .send_request(s.piece.index, s.requested, block_size);
-                timeout(request, 5).await?;
 
                 self.backlog += 1;
                 s.requested += block_size;
@@ -219,7 +214,7 @@ impl<'w, C: AsyncStream> Download<'w, C> {
             self.last_requested = Instant::now();
 
             trace!("Flushing the client");
-            timeout(self.client.conn.flush(), 5).await
+            timeout(self.client.flush(), 5).await
         } else {
             Ok(())
         }

@@ -14,6 +14,10 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 pub use proto;
 
+pub trait AsyncStream: AsyncRead + AsyncWrite + Unpin {}
+
+impl<T: AsyncRead + AsyncWrite + Unpin> AsyncStream for T {}
+
 pub struct Client<Stream> {
     stream: Stream,
     conn: Connection,
@@ -22,7 +26,7 @@ pub struct Client<Stream> {
 
 impl<Stream> Client<Stream>
 where
-    Stream: AsyncRead + AsyncWrite + Unpin,
+    Stream: AsyncStream,
 {
     pub fn new(stream: Stream) -> Self {
         Self {
@@ -59,11 +63,9 @@ where
         buf: &'a mut Vec<u8>,
     ) -> anyhow::Result<Option<Packet<'a>>> {
         let mut b = [0; 4];
-
-        trace!("Read packet length");
         self.stream.read_exact(&mut b).await?;
-
         let len = u32::from_be_bytes(b) as usize;
+
         trace!("Packet length: {}", len);
 
         if len == 0 {
@@ -80,10 +82,16 @@ where
         ensure!(len >= header_len + 1, "Invalid packet length");
 
         let packet = self.conn.read_packet(buf);
-        trace!("Read packet: {:?}", packet);
-
         self.flush().await?;
         Ok(packet)
+    }
+
+    pub async fn wait_for_unchoke(&mut self) -> anyhow::Result<()> {
+        let buf = &mut Vec::new();
+        while self.conn.is_choked() {
+            self.read_packet(buf).await?;
+        }
+        Ok(())
     }
 
     pub async fn get_metadata(&mut self) -> anyhow::Result<Vec<u8>> {
@@ -134,8 +142,7 @@ where
             };
 
             let ext = ExtendedMessage::parse(data, &mut self.parser)?;
-            trace!("Got piece response: {:?}", ext);
-            anyhow::ensure!(ext.id == metadata.id, "Expected Metadata message");
+            trace!("Got piece response, len: {}", ext.rest.len());
 
             let data = ext.data(piece)?;
             anyhow::ensure!(data.len() <= remaining, "Incorrect data length received");
@@ -178,6 +185,10 @@ where
             self.stream.write_all(&send_buf).await?;
         }
         Ok(())
+    }
+
+    pub fn is_choked(&self) -> bool {
+        self.conn.is_choked()
     }
 }
 
