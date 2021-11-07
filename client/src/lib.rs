@@ -63,7 +63,7 @@ where
         trace!("Read packet length");
         self.stream.read_exact(&mut b).await?;
 
-        let len = u32::from_be_bytes(b);
+        let len = u32::from_be_bytes(b) as usize;
         trace!("Packet length: {}", len);
 
         if len == 0 {
@@ -71,11 +71,13 @@ where
             return Ok(None);
         }
 
-        buf.resize(len as usize, 0);
+        ensure!(len <= 1024 * 1024, "Packet too large");
+
+        buf.resize(len, 0);
         self.stream.read_exact(buf).await?;
 
-        let header_len = Packet::header_size(buf[0]);
-        ensure!(len as usize >= header_len + 1, "Invalid packet length");
+        let header_len = Packet::header_len(buf[0]);
+        ensure!(len >= header_len + 1, "Invalid packet length");
 
         let packet = self.conn.read_packet(buf);
         trace!("Read packet: {:?}", packet);

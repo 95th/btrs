@@ -30,7 +30,7 @@ pub enum Packet<'a> {
 }
 
 impl Packet<'_> {
-    pub fn header_size(id: u8) -> usize {
+    pub fn header_len(id: u8) -> usize {
         match id {
             HAVE => 4,
             REQUEST | CANCEL => 12,
