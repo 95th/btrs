@@ -32,22 +32,26 @@ where
         }
     }
 
-    pub async fn handshake(&mut self, info_hash: InfoHash, peer_id: PeerId) -> anyhow::Result<()> {
+    pub async fn handshake(
+        &mut self,
+        info_hash: InfoHash,
+        peer_id: PeerId,
+    ) -> anyhow::Result<PeerId> {
         debug!("Begin handshake");
-        let mut h = Handshake::new(info_hash, peer_id);
-        h.set_extended(true);
+        let mut handshake = Handshake::new(info_hash, peer_id);
+        handshake.set_extended(true);
 
-        self.stream.write_all(h.as_bytes()).await?;
+        self.stream.write_all(handshake.as_bytes()).await?;
         self.stream.flush().await?;
 
-        debug!("Wait for handshake response");
-        self.stream.read_exact(h.as_bytes_mut()).await?;
+        let mut response = Handshake::default();
 
-        ensure!(h.is_supported(), "Unsupported protocol");
-        ensure!(h.info_hash == info_hash, "Incorrect infohash");
+        debug!("Wait for handshake response");
+        self.stream.read_exact(response.as_bytes_mut()).await?;
+        handshake.verify(&response)?;
 
         debug!("Handshake succeeded");
-        Ok(())
+        Ok(response.peer_id)
     }
 
     pub async fn read_packet<'a>(
