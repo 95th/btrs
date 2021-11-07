@@ -153,6 +153,7 @@ dependencies = [
  "bytes",
  "client-proto",
  "futures",
+ "tokio",
  "tracing",
 ]
 

@@ -3,7 +3,6 @@ extern crate tracing;
 
 use anyhow::{ensure, Context};
 use ben::Parser;
-use futures::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use proto::{
     conn::Connection,
     ext::{ExtendedMessage, Metadata, MetadataMsg},
@@ -11,6 +10,7 @@ use proto::{
     msg::Packet,
     InfoHash, PeerId,
 };
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 pub use proto;
 
@@ -191,10 +191,10 @@ mod tests {
 
     use futures::{
         channel::mpsc::{self, Receiver, Sender},
-        executor::block_on,
-        join, ready, AsyncRead, AsyncWrite, SinkExt, StreamExt,
+        join, ready, SinkExt, StreamExt,
     };
     use proto::msg::Packet;
+    use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
     use crate::Client;
 
@@ -226,26 +226,26 @@ mod tests {
         fn poll_read(
             mut self: Pin<&mut Self>,
             cx: &mut Context<'_>,
-            buf: &mut [u8],
-        ) -> Poll<io::Result<usize>> {
+            buf: &mut ReadBuf<'_>,
+        ) -> Poll<io::Result<()>> {
             let data = if self.remaining.is_empty() {
                 match ready!(self.rx.poll_next_unpin(cx)) {
                     Some(data) => data,
-                    None => return Poll::Ready(Ok(0)),
+                    None => return Poll::Ready(Ok(())),
                 }
             } else {
                 std::mem::take(&mut self.remaining)
             };
 
-            if data.len() <= buf.len() {
-                buf[..data.len()].copy_from_slice(&data);
-                Poll::Ready(Ok(data.len()))
+            if data.len() <= buf.capacity() {
+                buf.put_slice(&data);
             } else {
-                buf.copy_from_slice(&data[..buf.len()]);
-                self.remaining = data[buf.len()..].to_vec();
+                buf.put_slice(&data[..buf.capacity()]);
+                self.remaining = data[buf.capacity()..].to_vec();
                 cx.waker().wake_by_ref();
-                Poll::Ready(Ok(buf.len()))
             }
+
+            Poll::Ready(Ok(()))
         }
     }
 
@@ -268,102 +268,95 @@ mod tests {
             self.tx.poll_flush_unpin(cx).map_err(|_| err())
         }
 
-        fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
             self.tx.poll_close_unpin(cx).map_err(|_| err())
         }
     }
 
-    #[test]
-    fn handshake() {
-        block_on(async {
-            let (a, b) = Peer::create_pair();
-            let f1 = async move {
-                let mut c = Client::new(a);
-                c.handshake([0; 20], [1; 20]).await.unwrap();
-            };
+    #[tokio::test]
+    async fn handshake() {
+        let (a, b) = Peer::create_pair();
+        let f1 = async move {
+            let mut c = Client::new(a);
+            c.handshake([0; 20], [1; 20]).await.unwrap();
+        };
 
-            let f2 = async move {
-                let mut c = Client::new(b);
-                c.handshake([0; 20], [2; 20]).await.unwrap();
-            };
+        let f2 = async move {
+            let mut c = Client::new(b);
+            c.handshake([0; 20], [2; 20]).await.unwrap();
+        };
 
-            join!(f1, f2);
-        })
+        join!(f1, f2);
     }
 
-    #[test]
-    fn send_piece() {
-        block_on(async {
-            let (a, b) = Peer::create_pair();
-            let f1 = async move {
-                let mut c = Client::new(a);
-                c.send_piece(1, 2, b"hello");
-                c.flush().await.unwrap();
-            };
+    #[tokio::test]
+    async fn send_piece() {
+        let (a, b) = Peer::create_pair();
+        let f1 = async move {
+            let mut c = Client::new(a);
+            c.send_piece(1, 2, b"hello");
+            c.flush().await.unwrap();
+        };
 
-            let f2 = async move {
-                let mut c = Client::new(b);
-                let b = &mut vec![];
-                let p = c.read_packet(b).await.unwrap().unwrap();
-                assert_eq!(
-                    p,
-                    Packet::Piece {
-                        index: 1,
-                        begin: 2,
-                        data: b"hello"
-                    }
-                )
-            };
+        let f2 = async move {
+            let mut c = Client::new(b);
+            let b = &mut vec![];
+            let p = c.read_packet(b).await.unwrap().unwrap();
+            assert_eq!(
+                p,
+                Packet::Piece {
+                    index: 1,
+                    begin: 2,
+                    data: b"hello"
+                }
+            )
+        };
 
-            join!(f1, f2);
-        })
+        join!(f1, f2);
     }
 
-    #[test]
-    fn send_interested_and_receive_unchoke() {
-        block_on(async {
-            let (a, b) = Peer::create_pair();
-            let f1 = async move {
-                let mut c = Client::new(a);
-                assert!(c.conn.is_choked());
-                c.send_interested();
-                c.flush().await.unwrap();
-                c.read_packet(&mut vec![]).await.unwrap();
-                assert!(!c.conn.is_choked());
-            };
+    #[tokio::test]
+    async fn send_interested_and_receive_unchoke() {
+        let (a, b) = Peer::create_pair();
+        let f1 = async move {
+            let mut c = Client::new(a);
+            assert!(c.conn.is_choked());
+            c.send_interested();
+            c.flush().await.unwrap();
+            c.read_packet(&mut vec![]).await.unwrap();
+            assert!(!c.conn.is_choked());
+        };
 
-            let f2 = async move {
-                let mut c = Client::new(b);
-                c.read_packet(&mut vec![]).await.unwrap();
-            };
+        let f2 = async move {
+            let mut c = Client::new(b);
+            c.read_packet(&mut vec![]).await.unwrap();
+        };
 
-            join!(f1, f2);
-        })
+        join!(f1, f2);
     }
-    #[test]
-    fn send_not_interested_and_receive_choke() {
-        block_on(async {
-            let (a, b) = Peer::create_pair();
-            let f1 = async move {
-                let mut c = Client::new(a);
-                assert!(c.conn.is_choked());
-                c.send_interested();
-                c.flush().await.unwrap();
-                c.read_packet(&mut vec![]).await.unwrap();
-                assert!(!c.conn.is_choked());
-                c.send_not_interested();
-                c.flush().await.unwrap();
-                c.read_packet(&mut vec![]).await.unwrap();
-                assert!(c.conn.is_choked());
-            };
 
-            let f2 = async move {
-                let mut c = Client::new(b);
-                c.read_packet(&mut vec![]).await.unwrap();
-                c.read_packet(&mut vec![]).await.unwrap();
-            };
+    #[tokio::test]
+    async fn send_not_interested_and_receive_choke() {
+        let (a, b) = Peer::create_pair();
+        let f1 = async move {
+            let mut c = Client::new(a);
+            assert!(c.conn.is_choked());
+            c.send_interested();
+            c.flush().await.unwrap();
+            c.read_packet(&mut vec![]).await.unwrap();
+            assert!(!c.conn.is_choked());
+            c.send_not_interested();
+            c.flush().await.unwrap();
+            c.read_packet(&mut vec![]).await.unwrap();
+            assert!(c.conn.is_choked());
+        };
 
-            join!(f1, f2);
-        })
+        let f2 = async move {
+            let mut c = Client::new(b);
+            c.read_packet(&mut vec![]).await.unwrap();
+            c.read_packet(&mut vec![]).await.unwrap();
+        };
+
+        join!(f1, f2);
     }
 }

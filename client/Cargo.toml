@@ -7,6 +7,7 @@ edition = "2021"
 anyhow = "1.0.45"
 ben = { path = "../ben" }
 bytes = "1.1.0"
-futures = "0.3.17"
+tokio = { version = "1.1.0", default-features = false, features = ["io-util", "rt", "macros"] }
+futures = "0.3.12"
 proto = { package = "client-proto", path = "../client-proto" }
 tracing = "0.1.29"
