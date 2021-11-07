@@ -1,4 +1,4 @@
-use crate::contact::{CompactNodes, Contact, ContactStatus};
+use crate::contact::{CompactNodeIter, Contact, ContactStatus};
 use crate::id::NodeId;
 use crate::msg::recv::Response;
 use crate::{bucket::Bucket, server::ClientRequest};
@@ -188,14 +188,14 @@ impl RoutingTable {
         F: FnMut(&Contact),
     {
         if let Some(nodes) = response.body.get_bytes("nodes") {
-            for c in CompactNodes::<4>::new(nodes)? {
+            for c in CompactNodeIter::<4>::new(nodes)? {
                 f(&c);
                 self.add_contact(c, now);
             }
         }
 
         if let Some(nodes6) = response.body.get_bytes("nodes6") {
-            for c in CompactNodes::<16>::new(nodes6)? {
+            for c in CompactNodeIter::<16>::new(nodes6)? {
                 f(&c);
                 self.add_contact(c, now);
             }
