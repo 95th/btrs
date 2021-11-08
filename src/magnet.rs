@@ -90,12 +90,11 @@ impl MagnetUri {
             }
         };
 
-        info!("Got dict: {:?}", info_dict);
-
         let length = info_dict.get_int("length")? as usize;
         let name = info_dict.get_str("name").unwrap_or_default().to_string();
         let piece_len = info_dict.get_int("piece length")? as usize;
         let piece_hashes = info_dict.get_bytes("pieces")?.to_vec();
+
         Some(TorrentInfo {
             piece_len,
             length,
