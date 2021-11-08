@@ -3,7 +3,7 @@ use crate::peer::Peer;
 use anyhow::Context;
 use ben::decode::Dict;
 use ben::Parser;
-use client::proto::InfoHash;
+use client::InfoHash;
 use percent_encoding::{percent_encode, PercentEncode, NON_ALPHANUMERIC};
 use reqwest::Client;
 use std::collections::HashSet;

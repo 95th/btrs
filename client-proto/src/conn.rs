@@ -149,7 +149,7 @@ impl Connection {
                 let index = data.get_u32();
                 let begin = data.get_u32();
                 trace!("Got Piece: index {}, begin {}", index, begin);
-                return Some(Packet::Piece { index, begin, data });
+                return Some(Packet::Piece(PieceBlock { index, begin, data }));
             }
             CANCEL => {
                 let index = data.get_u32();
@@ -395,11 +395,11 @@ mod tests {
 
         let data = &tx.get_send_buf()[4..];
         assert_eq!(
-            Packet::Piece {
+            Packet::Piece(PieceBlock {
                 index: 2,
                 begin: 3,
                 data: b"hello"
-            },
+            }),
             rx.read_packet(data).unwrap()
         );
     }

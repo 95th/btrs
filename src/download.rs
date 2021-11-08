@@ -2,7 +2,7 @@ use crate::avg::SlidingAvg;
 use crate::future::timeout;
 use crate::work::{Piece, PieceInfo, WorkQueue};
 use anyhow::Context;
-use client::proto::msg::Packet;
+use client::msg::{Packet, PieceBlock};
 use client::{AsyncStream, Client};
 use futures::channel::mpsc::Sender;
 use futures::SinkExt;
@@ -105,16 +105,11 @@ impl<'w, C: AsyncStream> Download<'w, C> {
     }
 
     async fn handle_msg(&mut self) -> anyhow::Result<()> {
-        let packet = loop {
+        let PieceBlock { begin, index, data } = loop {
             let packet = self.client.read_packet(&mut self.recv_buf).await?;
-            if let Some(packet) = packet {
-                break packet;
+            if let Some(Packet::Piece(p)) = packet {
+                break p;
             }
-        };
-
-        let (begin, index, data) = match packet {
-            Packet::Piece { begin, index, data } => (begin, index, data),
-            _ => return Ok(()),
         };
 
         let mut p = self

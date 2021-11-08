@@ -4,7 +4,7 @@ use btrs::storage::StorageWriter;
 use btrs::torrent::{Torrent, TorrentFile};
 use btrs::work::Piece;
 use clap::{App, Arg};
-use client::proto::bitfield::Bitfield;
+use client::bitfield::Bitfield;
 use futures::channel::mpsc;
 use futures::StreamExt;
 use std::fs;

@@ -33,7 +33,7 @@ macro_rules! thin_wrapper {
     };
 }
 
-pub use client::proto::PeerId;
+pub use client::PeerId;
 
 thin_wrapper!(Extensions, [u8; 8]);
 

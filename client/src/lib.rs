@@ -8,11 +8,10 @@ use proto::{
     ext::{ExtendedMessage, Metadata, MetadataMsg},
     handshake::Handshake,
     msg::Packet,
-    InfoHash, PeerId,
 };
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
-pub use proto;
+pub use proto::*;
 
 pub trait AsyncStream: AsyncRead + AsyncWrite + Unpin {}
 
@@ -209,7 +208,7 @@ mod tests {
         channel::mpsc::{self, Receiver, Sender},
         join, ready, SinkExt, StreamExt,
     };
-    use proto::msg::Packet;
+    use proto::msg::{Packet, PieceBlock};
     use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
     use crate::Client;
@@ -324,11 +323,11 @@ mod tests {
             let p = c.read_packet(b).await.unwrap().unwrap();
             assert_eq!(
                 p,
-                Packet::Piece {
+                Packet::Piece(PieceBlock {
                     index: 1,
                     begin: 2,
                     data: b"hello"
-                }
+                })
             )
         };
 

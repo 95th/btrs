@@ -1,1 +1,1 @@
-pub use client::proto::InfoHash;
+pub use client::InfoHash;
