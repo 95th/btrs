@@ -134,8 +134,7 @@ impl<'w, C: AsyncStream> Download<'w, C> {
 
     async fn piece_done(&mut self, state: PieceInProgress) -> anyhow::Result<()> {
         trace!("Piece downloaded: {}", state.piece.index);
-        let buf = state.buf.into();
-        let verified = self.work.verify(&state.piece, &buf).await;
+        let verified = self.work.verify(&state.piece, &state.buf).await;
 
         if !verified {
             error!("Bad piece: Hash mismatch for {}", state.piece.index);
@@ -147,7 +146,7 @@ impl<'w, C: AsyncStream> Download<'w, C> {
         self.client.send_have(state.piece.index);
         let piece = Piece {
             index: state.piece.index,
-            buf,
+            buf: state.buf,
         };
         self.piece_tx.send(piece).await?;
         Ok(())

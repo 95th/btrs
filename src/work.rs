@@ -6,8 +6,8 @@ use std::cell::Cell;
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::VecDeque;
+use std::env;
 use std::slice::Chunks;
-use std::sync::Arc;
 
 use crate::torrent::Torrent;
 
@@ -56,7 +56,7 @@ impl WorkQueue {
         self.pieces.borrow_mut().extend(iter);
     }
 
-    pub async fn verify(&self, piece_info: &PieceInfo, data: &Arc<[u8]>) -> bool {
+    pub async fn verify(&self, piece_info: &PieceInfo, data: &[u8]) -> bool {
         self.verifier.verify(piece_info, data).await
     }
 
@@ -76,7 +76,7 @@ impl WorkQueue {
 pub struct PieceInfo {
     pub index: u32,
     pub len: u32,
-    pub hash: Arc<[u8]>,
+    pub hash: Vec<u8>,
 }
 
 pub struct PieceVerifier {
@@ -93,13 +93,11 @@ impl PieceVerifier {
         }
     }
 
-    async fn verify(&self, piece_info: &PieceInfo, data: &Arc<[u8]>) -> bool {
+    async fn verify(&self, piece_info: &PieceInfo, data: &[u8]) -> bool {
         let (tx, rx) = oneshot::channel();
-        let expected_hash = piece_info.hash.clone();
-        let data = data.clone();
-        self.pool.spawn(move || {
-            let actual_hash = Sha1::from(&data).digest().bytes();
-            let ok = expected_hash[..] == actual_hash;
+        self.pool.install(|| {
+            let actual_hash = Sha1::from(data).digest().bytes();
+            let ok = piece_info.hash[..] == actual_hash;
             let _ = tx.send(ok);
         });
         rx.await.unwrap()
@@ -108,7 +106,7 @@ impl PieceVerifier {
 
 pub struct Piece {
     pub index: u32,
-    pub buf: Arc<[u8]>,
+    pub buf: Box<[u8]>,
 }
 
 impl PartialEq for Piece {
