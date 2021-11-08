@@ -17,12 +17,12 @@ pub struct WorkQueue {
 
 impl WorkQueue {
     pub fn new(torrent: &Torrent) -> Self {
-        let piece_iter = PieceIter::new(&torrent.piece_hashes, torrent.piece_len, torrent.length);
+        let piece_iter = PieceIter::new(torrent.piece_len, torrent.length);
 
         Self {
             pieces: RefCell::new(piece_iter.collect()),
             downloaded: Cell::new(0),
-            verifier: PieceVerifier::new(1),
+            verifier: PieceVerifier::new(1, torrent.piece_hashes.clone()),
         }
     }
 
@@ -50,7 +50,7 @@ impl WorkQueue {
     }
 
     pub async fn verify(&self, piece_info: &PieceInfo, data: &[u8]) -> bool {
-        self.verifier.verify(piece_info, data).await
+        self.verifier.verify(piece_info.index as usize, data).await
     }
 
     pub fn add_downloaded(&self, n: usize) {
@@ -69,31 +69,35 @@ impl WorkQueue {
 pub struct PieceInfo {
     pub index: u32,
     pub len: u32,
-    pub hash: [u8; 20],
 }
 
 pub struct PieceVerifier {
     pool: ThreadPool,
+    hashes: Vec<u8>,
 }
 
 impl PieceVerifier {
-    pub fn new(num_threads: usize) -> Self {
+    pub fn new(num_threads: usize, hashes: Vec<u8>) -> Self {
         Self {
             pool: ThreadPoolBuilder::new()
                 .num_threads(num_threads)
                 .build()
                 .unwrap(),
+            hashes,
         }
     }
 
-    async fn verify(&self, piece_info: &PieceInfo, data: &[u8]) -> bool {
-        let (tx, rx) = oneshot::channel();
+    async fn verify(&self, index: usize, data: &[u8]) -> bool {
+        let expected_hash = &self.hashes[20 * index..][..20];
+        let (sender, receiver) = oneshot::channel();
+
         self.pool.install(|| {
             let actual_hash = Sha1::from(data).digest().bytes();
-            let ok = piece_info.hash == actual_hash;
-            let _ = tx.send(ok);
+            let matched = expected_hash == actual_hash;
+            let _ = sender.send(matched);
         });
-        rx.await.unwrap()
+
+        receiver.await.unwrap()
     }
 }
 
@@ -122,21 +126,15 @@ impl Ord for Piece {
     }
 }
 
-pub struct PieceIter<'a> {
-    hashes: std::slice::Iter<'a, [u8; 20]>,
+pub struct PieceIter {
     piece_len: u32,
     length: u32,
     index: u32,
 }
 
-impl<'a> PieceIter<'a> {
-    pub fn new(piece_hashes: &'a [u8], piece_len: usize, length: usize) -> Self {
-        assert_eq!(piece_hashes.len() % 20, 0);
-        let ptr = piece_hashes.as_ptr().cast();
-        let len = piece_hashes.len() / 20;
-        let hashes = unsafe { std::slice::from_raw_parts(ptr, len).iter() };
+impl PieceIter {
+    pub fn new(piece_len: usize, length: usize) -> Self {
         Self {
-            hashes,
             piece_len: piece_len as u32,
             length: length as u32,
             index: 0,
@@ -144,19 +142,20 @@ impl<'a> PieceIter<'a> {
     }
 }
 
-impl<'a> Iterator for PieceIter<'a> {
+impl Iterator for PieceIter {
     type Item = PieceInfo;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let hash = self.hashes.next()?;
-        let piece_len = self.piece_len;
-        let start = self.index * piece_len;
-        let len = piece_len.min(self.length - start);
+        if self.index * self.piece_len >= self.length {
+            return None;
+        }
+
+        let start = self.index * self.piece_len;
+        let len = self.piece_len.min(self.length - start);
 
         let piece = PieceInfo {
             index: self.index,
             len,
-            hash: *hash,
         };
 
         self.index += 1;
