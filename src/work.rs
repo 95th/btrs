@@ -6,7 +6,6 @@ use std::cell::Cell;
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::VecDeque;
-use std::env;
 use std::slice::Chunks;
 
 use crate::torrent::Torrent;
@@ -97,7 +96,7 @@ impl PieceVerifier {
         let (tx, rx) = oneshot::channel();
         self.pool.install(|| {
             let actual_hash = Sha1::from(data).digest().bytes();
-            let ok = piece_info.hash[..] == actual_hash;
+            let ok = piece_info.hash == actual_hash;
             let _ = tx.send(ok);
         });
         rx.await.unwrap()
@@ -169,7 +168,7 @@ impl<'a> Iterator for PieceIter<'a> {
         let piece = PieceInfo {
             index: self.index,
             len,
-            hash: hash.into(),
+            hash: hash.to_vec(),
         };
 
         self.index += 1;
