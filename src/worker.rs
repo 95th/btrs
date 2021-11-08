@@ -2,12 +2,11 @@ use crate::{
     announce::{DhtTracker, Tracker},
     download::Download,
     future::timeout,
-    metainfo::InfoHash,
-    peer::{Peer, PeerId},
+    peer::Peer,
     torrent::Torrent,
     work::{Piece, WorkQueue},
 };
-use client::Client;
+use client::{Client, InfoHash, PeerId};
 use futures::{
     channel::mpsc::{self, Sender},
     select,

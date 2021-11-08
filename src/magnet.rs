@@ -1,12 +1,11 @@
 use crate::announce::{DhtTracker, Tracker};
 use crate::future::timeout;
-use crate::metainfo::InfoHash;
-use crate::peer::{Peer, PeerId};
+use crate::peer::Peer;
 use crate::torrent::Torrent;
 use anyhow::Context;
 use ben::decode::Dict;
 use ben::Parser;
-use client::Client;
+use client::{Client, InfoHash, PeerId};
 use futures::stream::FuturesUnordered;
 use futures::stream::StreamExt;
 use std::collections::HashSet;

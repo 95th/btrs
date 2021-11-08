@@ -22,7 +22,6 @@ pub mod avg;
 mod download;
 pub mod future;
 pub mod magnet;
-pub mod metainfo;
 pub mod msg;
 pub mod peer;
 pub mod storage;

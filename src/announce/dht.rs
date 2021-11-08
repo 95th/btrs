@@ -1,5 +1,5 @@
-use crate::metainfo::InfoHash;
 use crate::peer::Peer;
+use client::InfoHash;
 use dht::Dht;
 use dht::NodeId;
 use std::net::ToSocketAddrs;

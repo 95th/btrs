@@ -1,6 +1,7 @@
+use client::{InfoHash, PeerId};
+
 use crate::future::timeout;
-use crate::metainfo::InfoHash;
-use crate::peer::{Peer, PeerId};
+use crate::peer::Peer;
 use std::collections::HashSet;
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};

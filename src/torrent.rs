@@ -1,11 +1,11 @@
 use crate::{
     announce::DhtTracker,
-    metainfo::InfoHash,
-    peer::{self, Peer, PeerId},
+    peer::{self, Peer},
     worker::TorrentWorker,
 };
 use anyhow::Context;
 use ben::{decode::Dict, Parser};
+use client::{InfoHash, PeerId};
 use sha1::Sha1;
 use std::{collections::HashSet, fmt};
 
