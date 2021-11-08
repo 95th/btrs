@@ -7,6 +7,7 @@ use crate::{
     torrent::Torrent,
     work::{Piece, WorkQueue},
 };
+use client::Client;
 use futures::{
     channel::mpsc::{self, Sender},
     select,
@@ -113,8 +114,9 @@ impl<'a> TorrentWorker<'a> {
                                 let span = info_span!("conn", addr = ?peer.addr);
                                 let f = async {
                                     let socket = timeout(TcpStream::connect(peer.addr), 3).await?;
-                                    let mut client = client::Client::new(socket);
-                                    client.handshake(*info_hash, *peer_id).await?;
+                                    let mut client = Client::new(socket);
+                                    client.send_handshake(info_hash, peer_id).await?;
+                                    client.recv_handshake(info_hash).await?;
                                     let mut dl = Download::new(client, work, piece_tx).await?;
                                     dl.start().await
                                 };

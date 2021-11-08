@@ -1,5 +1,3 @@
-use anyhow::ensure;
-
 use crate::{Extensions, InfoHash, PeerId};
 
 const PROTOCOL: &[u8; 20] = b"\x13BitTorrent protocol";
@@ -9,7 +7,7 @@ const PROTOCOL: &[u8; 20] = b"\x13BitTorrent protocol";
 pub struct Handshake {
     protocol: [u8; 20],
     extensions: Extensions,
-    info_hash: InfoHash,
+    pub info_hash: InfoHash,
     pub peer_id: PeerId,
 }
 
@@ -45,12 +43,7 @@ impl Handshake {
         unsafe { &mut *ptr.cast() }
     }
 
-    pub fn verify(&self, response: &Handshake) -> anyhow::Result<()> {
-        ensure!(response.protocol == *PROTOCOL, "Unsupported protocol");
-        ensure!(
-            response.info_hash == self.info_hash,
-            "Incorrect infohash received"
-        );
-        Ok(())
+    pub fn is_supported(&self) -> bool {
+        self.protocol == *PROTOCOL
     }
 }

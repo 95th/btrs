@@ -6,6 +6,7 @@ use crate::torrent::Torrent;
 use anyhow::Context;
 use ben::decode::Dict;
 use ben::Parser;
+use client::Client;
 use futures::stream::FuturesUnordered;
 use futures::stream::StreamExt;
 use std::collections::HashSet;
@@ -156,8 +157,9 @@ impl MagnetUri {
     #[instrument(skip_all, fields(addr = ?peer.addr))]
     async fn try_get(&self, peer: &Peer, peer_id: &PeerId) -> anyhow::Result<Vec<u8>> {
         let socket = TcpStream::connect(peer.addr).await?;
-        let mut client = client::Client::new(socket);
-        client.handshake(self.info_hash, *peer_id).await?;
+        let mut client = Client::new(socket);
+        client.send_handshake(&self.info_hash, peer_id).await?;
+        client.recv_handshake(&self.info_hash).await?;
         client.get_metadata().await
     }
 }

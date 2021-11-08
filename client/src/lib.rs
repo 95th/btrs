@@ -36,25 +36,30 @@ where
         }
     }
 
-    pub async fn handshake(
+    pub async fn send_handshake(
         &mut self,
-        info_hash: InfoHash,
-        peer_id: PeerId,
-    ) -> anyhow::Result<PeerId> {
-        debug!("Begin handshake");
-        let mut handshake = Handshake::new(info_hash, peer_id);
+        info_hash: &InfoHash,
+        peer_id: &PeerId,
+    ) -> anyhow::Result<()> {
+        debug!("Send handshake");
+        let mut handshake = Handshake::new(*info_hash, *peer_id);
         handshake.set_extended(true);
 
         self.stream.write_all(handshake.as_bytes()).await?;
         self.stream.flush().await?;
+        debug!("Send handshake done");
+        Ok(())
+    }
+
+    pub async fn recv_handshake(&mut self, info_hash: &InfoHash) -> anyhow::Result<PeerId> {
+        debug!("Recv handshake");
 
         let mut response = Handshake::default();
-
-        debug!("Wait for handshake response");
         self.stream.read_exact(response.as_bytes_mut()).await?;
-        handshake.verify(&response)?;
+        ensure!(response.is_supported(), "Unsupported handshake");
+        ensure!(response.info_hash == *info_hash, "Incorrect infohash");
 
-        debug!("Handshake succeeded");
+        debug!("Recv handshake done");
         Ok(response.peer_id)
     }
 
@@ -289,12 +294,16 @@ mod tests {
         let (a, b) = Peer::create_pair();
         let f1 = async move {
             let mut c = Client::new(a);
-            c.handshake([0; 20], [1; 20]).await.unwrap();
+            c.send_handshake(&[0; 20], &[1; 20]).await.unwrap();
+            let p = c.recv_handshake(&[0; 20]).await.unwrap();
+            assert_eq!(p, [2; 20]);
         };
 
         let f2 = async move {
             let mut c = Client::new(b);
-            c.handshake([0; 20], [2; 20]).await.unwrap();
+            let p = c.recv_handshake(&[0; 20]).await.unwrap();
+            assert_eq!(p, [1; 20]);
+            c.send_handshake(&[0; 20], &[2; 20]).await.unwrap();
         };
 
         join!(f1, f2);
