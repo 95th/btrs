@@ -6,7 +6,6 @@ use std::cell::Cell;
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::VecDeque;
-use std::slice::Chunks;
 
 use crate::torrent::Torrent;
 
@@ -18,12 +17,7 @@ pub struct WorkQueue {
 
 impl WorkQueue {
     pub fn new(torrent: &Torrent) -> Self {
-        let piece_iter = PieceIter::new(
-            &torrent.piece_hashes,
-            HashKind::Sha1,
-            torrent.piece_len,
-            torrent.length,
-        );
+        let piece_iter = PieceIter::new(&torrent.piece_hashes, torrent.piece_len, torrent.length);
 
         Self {
             pieces: RefCell::new(piece_iter.collect()),
@@ -75,7 +69,7 @@ impl WorkQueue {
 pub struct PieceInfo {
     pub index: u32,
     pub len: u32,
-    pub hash: Vec<u8>,
+    pub hash: [u8; 20],
 }
 
 pub struct PieceVerifier {
@@ -128,27 +122,21 @@ impl Ord for Piece {
     }
 }
 
-pub enum HashKind {
-    Sha1 = 20,
-}
-
 pub struct PieceIter<'a> {
-    chunks: Chunks<'a, u8>,
+    hashes: std::slice::Iter<'a, [u8; 20]>,
     piece_len: u32,
     length: u32,
     index: u32,
 }
 
 impl<'a> PieceIter<'a> {
-    pub fn new(
-        piece_hashes: &'a [u8],
-        hash_kind: HashKind,
-        piece_len: usize,
-        length: usize,
-    ) -> Self {
-        let chunks = piece_hashes.chunks(hash_kind as usize);
+    pub fn new(piece_hashes: &'a [u8], piece_len: usize, length: usize) -> Self {
+        assert_eq!(piece_hashes.len() % 20, 0);
+        let ptr = piece_hashes.as_ptr().cast();
+        let len = piece_hashes.len() / 20;
+        let hashes = unsafe { std::slice::from_raw_parts(ptr, len).iter() };
         Self {
-            chunks,
+            hashes,
             piece_len: piece_len as u32,
             length: length as u32,
             index: 0,
@@ -160,7 +148,7 @@ impl<'a> Iterator for PieceIter<'a> {
     type Item = PieceInfo;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let hash = self.chunks.next()?;
+        let hash = self.hashes.next()?;
         let piece_len = self.piece_len;
         let start = self.index * piece_len;
         let len = piece_len.min(self.length - start);
@@ -168,7 +156,7 @@ impl<'a> Iterator for PieceIter<'a> {
         let piece = PieceInfo {
             index: self.index,
             len,
-            hash: hash.to_vec(),
+            hash: *hash,
         };
 
         self.index += 1;
