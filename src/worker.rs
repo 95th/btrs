@@ -20,34 +20,28 @@ use std::{
 use tokio::{net::TcpStream, time};
 use tracing::Instrument;
 
-pub struct TorrentWorker<'a> {
-    peer_id: &'a PeerId,
-    info_hash: &'a InfoHash,
+pub struct TorrentWorker {
+    peer_id: PeerId,
+    info_hash: InfoHash,
     work: WorkQueue,
-    trackers: VecDeque<Tracker<'a>>,
-    peers: &'a mut HashSet<Peer>,
-    peers6: &'a mut HashSet<Peer>,
-    dht_tracker: &'a mut DhtTracker,
+    trackers: VecDeque<Tracker>,
+    peers: HashSet<Peer>,
+    peers6: HashSet<Peer>,
+    dht_tracker: DhtTracker,
 }
 
-impl<'a> TorrentWorker<'a> {
-    pub fn new(torrent: &'a mut Torrent) -> Self {
-        let trackers = torrent
-            .tracker_urls
-            .iter()
-            .map(|url| Tracker::new(url))
-            .collect();
-
-        let work = WorkQueue::new(torrent);
+impl TorrentWorker {
+    pub fn new(torrent: Torrent) -> Self {
+        let work = WorkQueue::new(torrent.piece_len, torrent.length, torrent.piece_hashes);
 
         Self {
-            peer_id: &torrent.peer_id,
-            info_hash: &torrent.info_hash,
-            peers: &mut torrent.peers,
-            peers6: &mut torrent.peers6,
+            peer_id: torrent.peer_id,
+            info_hash: torrent.info_hash,
+            peers: torrent.peers,
+            peers6: torrent.peers6,
             work,
-            trackers,
-            dht_tracker: &mut torrent.dht_tracker,
+            trackers: torrent.trackers,
+            dht_tracker: torrent.dht_tracker,
         }
     }
 
@@ -57,12 +51,12 @@ impl<'a> TorrentWorker<'a> {
 
     pub async fn run(&mut self, piece_tx: Sender<Piece>) {
         let work = &self.work;
-        let info_hash = &*self.info_hash;
-        let peer_id = &*self.peer_id;
-        let all_peers = &mut *self.peers;
-        let all_peers6 = &mut *self.peers6;
+        let info_hash = &self.info_hash;
+        let peer_id = &self.peer_id;
+        let all_peers = &mut self.peers;
+        let all_peers6 = &mut self.peers6;
         let trackers = &mut self.trackers;
-        let dht_tracker = &mut *self.dht_tracker;
+        let dht_tracker = &mut self.dht_tracker;
 
         let pending_downloads = FuturesUnordered::new();
         let pending_trackers = FuturesUnordered::new();

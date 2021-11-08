@@ -7,8 +7,6 @@ use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::VecDeque;
 
-use crate::torrent::Torrent;
-
 pub struct WorkQueue {
     pieces: RefCell<VecDeque<PieceInfo>>,
     verifier: PieceVerifier,
@@ -16,13 +14,13 @@ pub struct WorkQueue {
 }
 
 impl WorkQueue {
-    pub fn new(torrent: &Torrent) -> Self {
-        let piece_iter = PieceIter::new(torrent.piece_len, torrent.length);
+    pub fn new(piece_len: usize, len: usize, hashes: Vec<u8>) -> Self {
+        let pieces = PieceIter::new(piece_len, len).collect();
 
         Self {
-            pieces: RefCell::new(piece_iter.collect()),
+            pieces: RefCell::new(pieces),
             downloaded: Cell::new(0),
-            verifier: PieceVerifier::new(1, torrent.piece_hashes.clone()),
+            verifier: PieceVerifier::new(2, hashes),
         }
     }
 
@@ -128,15 +126,15 @@ impl Ord for Piece {
 
 pub struct PieceIter {
     piece_len: u32,
-    length: u32,
+    len: u32,
     index: u32,
 }
 
 impl PieceIter {
-    pub fn new(piece_len: usize, length: usize) -> Self {
+    pub fn new(piece_len: usize, len: usize) -> Self {
         Self {
             piece_len: piece_len as u32,
-            length: length as u32,
+            len: len as u32,
             index: 0,
         }
     }
@@ -146,12 +144,12 @@ impl Iterator for PieceIter {
     type Item = PieceInfo;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.index * self.piece_len >= self.length {
+        if self.index * self.piece_len >= self.len {
             return None;
         }
 
         let start = self.index * self.piece_len;
-        let len = self.piece_len.min(self.length - start);
+        let len = self.piece_len.min(self.len - start);
 
         let piece = PieceInfo {
             index: self.index,

@@ -58,7 +58,7 @@ pub async fn torrent_file(file: &str) -> anyhow::Result<()> {
     download(torrent).await
 }
 
-pub async fn download(mut torrent: Torrent) -> anyhow::Result<()> {
+pub async fn download(torrent: Torrent) -> anyhow::Result<()> {
     let torrent_name = torrent.name.clone();
     let piece_len = torrent.piece_len;
 

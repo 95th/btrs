@@ -22,16 +22,17 @@ pub enum Event {
     Stopped,
 }
 
-pub struct Tracker<'a> {
-    url: &'a str,
+#[derive(Debug)]
+pub struct Tracker {
+    pub url: String,
     resolved_addr: Option<SocketAddr>,
     next_announce: Instant,
     interval: u64,
     buf: Box<[u8]>,
 }
 
-impl<'a> Tracker<'a> {
-    pub fn new(url: &'a str) -> Self {
+impl Tracker {
+    pub fn new(url: String) -> Self {
         Self {
             url,
             resolved_addr: None,
@@ -49,7 +50,7 @@ impl<'a> Tracker<'a> {
         tokio::time::sleep_until(self.next_announce.into()).await;
 
         trace!("Announce to {}", self.url);
-        let req = AnnounceRequest::new(self.url, self.resolved_addr, info_hash, peer_id, 6881);
+        let req = AnnounceRequest::new(&self.url, self.resolved_addr, info_hash, peer_id, 6881);
         let resp = match timeout(req.announce(&mut self.buf), 3).await {
             Ok(r) => {
                 self.interval = MIN_TRACKER_INTERVAL.max(r.interval);

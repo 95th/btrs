@@ -8,7 +8,7 @@ use ben::Parser;
 use client::{Client, InfoHash, PeerId};
 use futures::stream::FuturesUnordered;
 use futures::stream::StreamExt;
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 use std::net::SocketAddr;
 use tokio::net::TcpStream;
 
@@ -16,7 +16,7 @@ use tokio::net::TcpStream;
 pub struct MagnetUri {
     info_hash: InfoHash,
     display_name: Option<String>,
-    tracker_urls: HashSet<String>,
+    trackers: VecDeque<Tracker>,
     peer_addrs: Vec<SocketAddr>,
 }
 
@@ -36,7 +36,7 @@ impl MagnetUri {
         parser::MagnetUriParser::new_lenient().parse(s)
     }
 
-    pub async fn request_metadata(&self, peer_id: PeerId) -> anyhow::Result<Torrent> {
+    pub async fn request_metadata(mut self, peer_id: PeerId) -> anyhow::Result<Torrent> {
         let (peers, peers6, dht_tracker) = self.get_peers(&peer_id).await?;
 
         let mut futures = FuturesUnordered::new();
@@ -62,7 +62,7 @@ impl MagnetUri {
                                 length: t.length,
                                 piece_hashes: t.piece_hashes,
                                 name: t.name,
-                                tracker_urls: self.tracker_urls.clone(),
+                                trackers: self.trackers,
                                 peers,
                                 peers6,
                                 dht_tracker,
@@ -105,18 +105,15 @@ impl MagnetUri {
     }
 
     async fn get_peers(
-        &self,
+        &mut self,
         peer_id: &PeerId,
     ) -> anyhow::Result<(HashSet<Peer>, HashSet<Peer>, DhtTracker)> {
         debug!("Requesting peers");
 
         let mut futs: FuturesUnordered<_> = self
-            .tracker_urls
-            .iter()
-            .map(|url| async move {
-                let mut t = Tracker::new(url);
-                t.announce(&self.info_hash, peer_id).await
-            })
+            .trackers
+            .iter_mut()
+            .map(|t| t.announce(&self.info_hash, peer_id))
             .collect();
 
         let mut peers = hashset![];
@@ -210,7 +207,7 @@ mod parser {
                     }
                     DISPLAY_NAME => magnet.display_name = Some(value.to_string()),
                     TRACKER_URL => {
-                        magnet.tracker_urls.insert(value.to_string());
+                        magnet.trackers.push_back(Tracker::new(value.to_string()));
                     }
                     PEER => match value.parse() {
                         Ok(addr) => magnet.peer_addrs.push(addr),
@@ -305,7 +302,7 @@ mod tests {
         assert_eq!(infohash, magnet.info_hash);
         assert_eq!(display_name, magnet.display_name.unwrap());
 
-        let urls: HashSet<&str> = magnet.tracker_urls.iter().map(|s| &s[..]).collect();
+        let urls: HashSet<&str> = magnet.trackers.iter().map(|t| &t.url[..]).collect();
         assert_eq!(hashset![tracker_url_1, tracker_url_2], urls);
 
         let peers: &[SocketAddr] = &[peer_1.parse().unwrap(), peer_2.parse().unwrap()];
