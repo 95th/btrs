@@ -145,7 +145,7 @@ impl Bitfield {
         }
 
         if let Some(v) = self.buf.last_mut() {
-            let mask = u32::MAX << (32 - bits as u32);
+            let mask = u32::MAX << (32 - bits);
             *v &= mask.to_be();
         }
     }
