@@ -32,6 +32,7 @@ impl<'a, 'p> ExtendedMessage<'a, 'p> {
         self.id == 0
     }
 
+    #[allow(unused)]
     pub fn body(&self) -> &Entry<'a, 'p> {
         &self.value
     }
@@ -45,7 +46,7 @@ impl<'a, 'p> ExtendedMessage<'a, 'p> {
         Some(Metadata { id, len })
     }
 
-    pub fn data(&self, expected_piece: i64) -> anyhow::Result<&'a [u8]> {
+    pub fn data(&self, expected_piece: u32) -> anyhow::Result<&'a [u8]> {
         trace!("data: {:#?}", self.value);
         let dict = self.value.as_dict().context("Not a dict")?;
 
@@ -53,7 +54,7 @@ impl<'a, 'p> ExtendedMessage<'a, 'p> {
         anyhow::ensure!(msg_type == msg_type::DATA, "Not a DATA message");
 
         let piece = dict.get_int("piece").context("`piece` not found")?;
-        anyhow::ensure!(piece == expected_piece, "Incorrect piece");
+        anyhow::ensure!(piece == expected_piece as i64, "Incorrect piece");
 
         if self.rest.len() > METADATA_PIECE_LEN {
             anyhow::bail!("Piece can't be larger than 16kB");
@@ -69,6 +70,7 @@ pub struct Metadata {
     pub len: usize,
 }
 
+#[allow(unused)]
 pub enum MetadataMsg {
     Handshake(u8),
     Request(i64),

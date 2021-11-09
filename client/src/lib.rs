@@ -1,14 +1,8 @@
 #[macro_use]
 extern crate tracing;
 
-use anyhow::{ensure, Context};
-use ben::Parser;
-use proto::{
-    conn::Connection,
-    ext::{ExtendedMessage, Metadata, MetadataMsg},
-    handshake::Handshake,
-    msg::Packet,
-};
+use anyhow::ensure;
+use proto::{conn::Connection, event::Event, msg::Packet};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 pub use proto::*;
@@ -20,7 +14,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin> AsyncStream for T {}
 pub struct Client<Stream> {
     stream: Stream,
     conn: Connection,
-    parser: Parser,
 }
 
 impl<Stream> Client<Stream>
@@ -31,7 +24,6 @@ where
         Self {
             stream,
             conn: Connection::new(),
-            parser: Parser::new(),
         }
     }
 
@@ -41,49 +33,30 @@ where
         peer_id: &PeerId,
     ) -> anyhow::Result<()> {
         debug!("Send handshake");
-        let mut handshake = Handshake::new(*info_hash, *peer_id);
-        handshake.set_extended(true);
-
-        self.stream.write_all(handshake.as_bytes()).await?;
-        self.stream.flush().await?;
-        debug!("Send handshake done");
+        self.conn.send_handshake(info_hash, peer_id)?;
+        self.flush().await?;
         Ok(())
     }
 
     pub async fn recv_handshake(&mut self, info_hash: &InfoHash) -> anyhow::Result<PeerId> {
         debug!("Recv handshake");
 
-        let mut response = Handshake::default();
-        self.stream.read_exact(response.as_bytes_mut()).await?;
-        ensure!(response.is_supported(), "Unsupported handshake");
-        ensure!(response.info_hash == *info_hash, "Incorrect infohash");
-
-        debug!("Recv handshake done");
-        Ok(response.peer_id)
+        let mut buf = [0; 68];
+        self.stream.read_exact(&mut buf).await?;
+        self.conn.recv_handshake(info_hash, buf)
     }
 
     pub async fn read_packet<'a>(
         &mut self,
         buf: &'a mut Vec<u8>,
     ) -> anyhow::Result<Option<Packet<'a>>> {
-        let mut b = [0; 4];
-        self.stream.read_exact(&mut b).await?;
-        let len = u32::from_be_bytes(b) as usize;
-
-        trace!("Packet length: {}", len);
-
-        if len == 0 {
-            // Keep-alive
+        let buf = self.recv_packet(buf).await?;
+        if buf.is_empty() {
             return Ok(None);
         }
 
-        ensure!(len <= 1024 * 1024, "Packet too large");
-
-        buf.resize(len, 0);
-        self.stream.read_exact(buf).await?;
-
         let header_len = Packet::header_len(buf[0]);
-        ensure!(len >= header_len + 1, "Invalid packet length");
+        ensure!(buf.len() >= header_len + 1, "Invalid packet length");
 
         let packet = self.conn.read_packet(buf);
         self.flush().await?;
@@ -101,62 +74,48 @@ where
     pub async fn get_metadata(&mut self) -> anyhow::Result<Vec<u8>> {
         debug!("Request metadata");
         let buf = &mut Vec::new();
-        let data = loop {
-            trace!("Try to read an extended handshake");
-            if let Some(Packet::Extended(data)) = self.read_packet(buf).await? {
-                break data;
+        loop {
+            let buf = self.recv_packet(buf).await?;
+            if buf.is_empty() {
+                continue;
             }
-        };
 
-        let ext = ExtendedMessage::parse(data, &mut self.parser)?;
-        trace!("Extended handshake message: {:?}", ext);
+            self.conn.recv_metadata(buf)?;
 
-        ensure!(ext.is_handshake(), "Expected extended handshake");
+            while let Some(event) = self.conn.poll_event() {
+                match event {
+                    Event::Metadata(metadata) => return Ok(metadata),
+                }
+            }
 
-        let metadata = ext.metadata().context("Metadata extension not supported")?;
-
-        self.conn
-            .send_extended(metadata.id, MetadataMsg::Handshake(metadata.id));
-        self.flush().await?;
-
-        self.read_metadata(metadata, buf).await
+            self.flush().await?;
+        }
     }
 
-    async fn read_metadata(
-        &mut self,
-        metadata: Metadata,
-        buf: &mut Vec<u8>,
-    ) -> anyhow::Result<Vec<u8>> {
-        debug!("Read metadata");
-        let mut remaining = metadata.len;
-        let mut piece = 0;
-        let mut out_buf = Vec::new();
+    /// Receive one packet from the peer with length header removed.
+    /// Hence returns an empty buffer if it is a keep-alive message.
+    async fn recv_packet<'a>(&mut self, buf: &'a mut Vec<u8>) -> anyhow::Result<&'a [u8]> {
+        let mut b = [0; 4];
+        self.stream.read_exact(&mut b).await?;
+        let len = u32::from_be_bytes(b) as usize;
 
-        while remaining > 0 {
-            trace!("Send metadata piece request: {}", piece);
+        trace!("Packet length: {}", len);
 
-            self.conn
-                .send_extended(metadata.id, MetadataMsg::Request(piece));
-            self.flush().await?;
-
-            let data = loop {
-                if let Some(Packet::Extended(data)) = self.read_packet(buf).await? {
-                    break data;
-                }
-            };
-
-            let ext = ExtendedMessage::parse(data, &mut self.parser)?;
-            trace!("Got piece response, len: {}", ext.rest.len());
-
-            let data = ext.data(piece)?;
-            anyhow::ensure!(data.len() <= remaining, "Incorrect data length received");
-
-            out_buf.extend_from_slice(data);
-            remaining -= data.len();
-            piece += 1;
+        if len == 0 {
+            // Keep-alive
+            return Ok(&[]);
         }
 
-        Ok(out_buf)
+        ensure!(len <= 1024 * 1024, "Packet too large");
+
+        if buf.len() < len {
+            buf.resize(len, 0);
+        }
+
+        let buf = &mut buf[..len];
+        self.stream.read_exact(buf).await?;
+
+        Ok(buf)
     }
 
     pub fn send_request(&mut self, index: u32, begin: u32, len: u32) {
@@ -300,9 +259,9 @@ mod tests {
 
         let f2 = async move {
             let mut c = Client::new(b);
+            c.send_handshake(&[0; 20], &[2; 20]).await.unwrap();
             let p = c.recv_handshake(&[0; 20]).await.unwrap();
             assert_eq!(p, [1; 20]);
-            c.send_handshake(&[0; 20], &[2; 20]).await.unwrap();
         };
 
         join!(f1, f2);

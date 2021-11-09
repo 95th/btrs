@@ -38,11 +38,6 @@ impl Handshake {
         unsafe { &*ptr.cast() }
     }
 
-    pub fn as_bytes_mut(&mut self) -> &mut [u8; 68] {
-        let ptr = self as *mut Handshake;
-        unsafe { &mut *ptr.cast() }
-    }
-
     pub fn is_supported(&self) -> bool {
         self.protocol == *PROTOCOL
     }

@@ -1,10 +1,16 @@
+use std::collections::VecDeque;
 use std::ops::Deref;
 
-use ben::Encode;
+use anyhow::Context;
+use ben::{Encode, Parser};
 use bytes::{Buf, BufMut};
 
 use crate::bitfield::Bitfield;
-use crate::msg::*;
+use crate::event::Event;
+use crate::ext::{ExtendedMessage, MetadataMsg};
+use crate::handshake::Handshake;
+use crate::state::{Error, MetadataState, State};
+use crate::{msg::*, InfoHash, PeerId};
 
 pub struct Connection {
     send_buf: Vec<u8>,
@@ -12,6 +18,15 @@ pub struct Connection {
     bitfield: Bitfield,
     choked: bool,
     interested: bool,
+    state: State,
+    parser: Parser,
+    events: VecDeque<Event>,
+}
+
+macro_rules! ensure_state {
+    ($self:expr, $( $state:pat_param )|+ ) => {
+        ensure!(matches!($self.state, $( $state )|+), Error::InvalidState)
+    };
 }
 
 impl Connection {
@@ -22,7 +37,89 @@ impl Connection {
             bitfield: Bitfield::new(),
             choked: true,
             interested: false,
+            state: State::HandshakeRequired,
+            parser: Parser::new(),
+            events: VecDeque::new(),
         }
+    }
+
+    pub fn poll_event(&mut self) -> Option<Event> {
+        self.events.pop_front()
+    }
+
+    pub fn send_handshake(&mut self, info_hash: &InfoHash, peer_id: &PeerId) -> anyhow::Result<()> {
+        ensure_state!(self, State::HandshakeRequired);
+        let mut h = Handshake::new(*info_hash, *peer_id);
+        h.set_extended(true);
+        self.send_buf.extend_from_slice(h.as_bytes());
+        self.state = State::HandshakeSent;
+        Ok(())
+    }
+
+    pub fn recv_handshake(
+        &mut self,
+        info_hash: &InfoHash,
+        data: [u8; 68],
+    ) -> anyhow::Result<PeerId> {
+        ensure_state!(self, State::HandshakeSent);
+        let h: Handshake = unsafe { std::mem::transmute(data) };
+        ensure!(h.is_supported(), Error::UnsupportedProtocol);
+        ensure!(h.info_hash == *info_hash, Error::UnsupportedProtocol);
+        self.state = State::Ready;
+        Ok(h.peer_id)
+    }
+
+    pub fn recv_metadata(&mut self, data: &[u8]) -> anyhow::Result<()> {
+        use State::*;
+
+        match std::mem::replace(&mut self.state, State::Ready) {
+            Ready => {
+                if let Some(Packet::Extended(ext)) = self.read_packet(data) {
+                    let ext = ExtendedMessage::parse(ext, &mut self.parser)?;
+                    ensure!(ext.is_handshake(), Error::InvalidHandshake);
+
+                    let meta = ext.metadata().context(Error::InvalidHandshake)?;
+                    ensure!(meta.len < 50 * 1024 * 1024, Error::PacketTooLarge);
+
+                    self.send_extended(meta.id, MetadataMsg::Handshake(meta.id));
+                    self.send_extended(meta.id, MetadataMsg::Request(0));
+
+                    self.state = MetadataRequested(MetadataState {
+                        ext_id: meta.id,
+                        requested_piece: 0,
+                        len: meta.len,
+                        buf: Vec::new(),
+                    });
+                }
+            }
+            MetadataRequested(mut state) => {
+                if let Some(Packet::Extended(ext)) = self.read_packet(data) {
+                    let ext = ExtendedMessage::parse(ext, &mut self.parser)?;
+                    let piece = ext.data(state.requested_piece)?;
+                    trace!("Got piece response, len: {}", piece.len());
+                    state.buf.extend_from_slice(piece);
+
+                    ensure!(state.buf.len() <= state.len, Error::PacketTooLarge);
+
+                    if state.buf.len() == state.len {
+                        self.events.push_back(Event::Metadata(state.buf));
+                        self.state = State::Ready;
+                        return Ok(());
+                    }
+
+                    state.requested_piece += 1;
+                    self.send_extended(
+                        state.ext_id,
+                        MetadataMsg::Request(state.requested_piece as i64),
+                    );
+
+                    self.state = MetadataRequested(state);
+                }
+            }
+            _ => bail!(Error::InvalidState),
+        }
+
+        Ok(())
     }
 
     pub fn send_keepalive(&mut self) {
@@ -59,7 +156,7 @@ impl Connection {
         let bytes = self.bitfield.as_bytes();
         self.send_buf.put_u32(bytes.len() as u32 + 1);
         self.send_buf.put_u8(BITFIELD);
-        self.send_buf.extend(bytes);
+        self.send_buf.extend_from_slice(bytes);
     }
 
     pub fn send_request(&mut self, index: u32, begin: u32, len: u32) {
@@ -75,7 +172,7 @@ impl Connection {
         self.send_buf.put_u8(PIECE);
         self.send_buf.put_u32(index);
         self.send_buf.put_u32(begin);
-        self.send_buf.extend(data);
+        self.send_buf.extend_from_slice(data);
     }
 
     pub fn send_cancel(&mut self, index: u32, begin: u32, len: u32) {
@@ -94,7 +191,7 @@ impl Connection {
         self.send_buf.put_u32(len);
         self.send_buf.put_u8(EXTENDED);
         self.send_buf.put_u8(id);
-        self.send_buf.extend(&self.encode_buf);
+        self.send_buf.extend_from_slice(&self.encode_buf);
     }
 
     pub fn get_send_buf(&mut self) -> SendBuf<'_> {
@@ -432,5 +529,72 @@ mod tests {
             Packet::Extended(b"\x025:hello"),
             rx.read_packet(data).unwrap()
         );
+    }
+
+    #[test]
+    fn handshake() {
+        let mut c = Connection::new();
+        assert_eq!(c.state, State::HandshakeRequired);
+
+        c.send_handshake(&[0; 20], &[1; 20]).unwrap();
+        assert_eq!(c.state, State::HandshakeSent);
+
+        let h = Handshake::new([0; 20], [2; 20]);
+        let p = c.recv_handshake(&[0; 20], *h.as_bytes()).unwrap();
+        assert_eq!(p, [2; 20]);
+        assert_eq!(c.state, State::Ready);
+    }
+
+    #[test]
+    fn get_metadata() {
+        let mut c = Connection::new();
+
+        // Assume handshake is done
+        c.state = State::Ready;
+
+        let data = b"\x14\x00d1:md11:ut_metadatai2ee13:metadata_sizei20ee";
+        c.recv_metadata(data).unwrap();
+
+        assert_eq!(
+            c.state,
+            State::MetadataRequested(MetadataState {
+                ext_id: 2,
+                len: 20,
+                requested_piece: 0,
+                buf: vec![]
+            })
+        );
+
+        assert_eq!(c.poll_event(), None);
+
+        let data = b"\x14\x01d8:msg_typei1e5:piecei0eexxxxxyyyyy";
+        c.recv_metadata(data).unwrap();
+        assert_eq!(
+            c.state,
+            State::MetadataRequested(MetadataState {
+                ext_id: 2,
+                len: 20,
+                requested_piece: 1,
+                buf: b"xxxxxyyyyy".to_vec()
+            })
+        );
+
+        assert_eq!(c.poll_event(), None);
+
+        let data = b"\x14\x01d8:msg_typei1e5:piecei1eetttttqqqqq";
+        c.recv_metadata(data).unwrap();
+        assert_eq!(c.state, State::Ready);
+
+        assert_eq!(
+            c.poll_event().unwrap(),
+            Event::Metadata(b"xxxxxyyyyytttttqqqqq".to_vec())
+        );
+    }
+
+    #[test]
+    fn get_metadata_without_handshake() {
+        let mut c = Connection::new();
+        let e = c.recv_metadata(&[]).unwrap_err();
+        assert_eq!(e.to_string(), Error::InvalidState.to_string());
     }
 }
