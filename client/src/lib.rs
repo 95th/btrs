@@ -58,7 +58,7 @@ where
         let header_len = Packet::header_len(buf[0]);
         ensure!(buf.len() >= header_len + 1, "Invalid packet length");
 
-        let packet = self.conn.read_packet(buf);
+        let packet = self.conn.recv_packet(buf);
         self.flush().await?;
         Ok(packet)
     }

@@ -74,7 +74,7 @@ impl Connection {
 
         match std::mem::replace(&mut self.state, State::Ready) {
             Ready => {
-                if let Some(Packet::Extended(ext)) = self.read_packet(data) {
+                if let Some(Packet::Extended(ext)) = self.recv_packet(data) {
                     let ext = ExtendedMessage::parse(ext, &mut self.parser)?;
                     ensure!(ext.is_handshake(), Error::InvalidHandshake);
 
@@ -93,7 +93,7 @@ impl Connection {
                 }
             }
             MetadataRequested(mut state) => {
-                if let Some(Packet::Extended(ext)) = self.read_packet(data) {
+                if let Some(Packet::Extended(ext)) = self.recv_packet(data) {
                     let ext = ExtendedMessage::parse(ext, &mut self.parser)?;
                     let piece = ext.data(state.requested_piece)?;
                     trace!("Got piece response, len: {}", piece.len());
@@ -213,7 +213,7 @@ impl Connection {
         self.choked
     }
 
-    pub fn read_packet<'a>(&mut self, mut data: &'a [u8]) -> Option<Packet<'a>> {
+    pub fn recv_packet<'a>(&mut self, mut data: &'a [u8]) -> Option<Packet<'a>> {
         let id = data.get_u8();
         match id {
             CHOKE => {
@@ -411,7 +411,7 @@ mod tests {
         tx.send_choke();
 
         let data = &tx.get_send_buf()[4..];
-        assert!(rx.read_packet(data).is_none());
+        assert!(rx.recv_packet(data).is_none());
         assert!(rx.choked);
     }
 
@@ -422,7 +422,7 @@ mod tests {
         tx.send_unchoke();
 
         let data = &tx.get_send_buf()[4..];
-        assert!(rx.read_packet(data).is_none());
+        assert!(rx.recv_packet(data).is_none());
         assert!(!rx.choked);
     }
 
@@ -433,7 +433,7 @@ mod tests {
         tx.send_interested();
 
         let data = &tx.get_send_buf()[4..];
-        assert!(rx.read_packet(data).is_none());
+        assert!(rx.recv_packet(data).is_none());
         assert!(rx.interested);
         assert_eq!(rx.send_buf, &[0, 0, 0, 1, UNCHOKE]);
     }
@@ -446,7 +446,7 @@ mod tests {
         tx.send_not_interested();
 
         let data = &tx.get_send_buf()[4..];
-        assert!(rx.read_packet(data).is_none());
+        assert!(rx.recv_packet(data).is_none());
         assert!(!rx.interested);
         assert_eq!(rx.send_buf, &[0, 0, 0, 1, CHOKE]);
     }
@@ -459,7 +459,7 @@ mod tests {
         tx.send_have(5);
 
         let data = &tx.get_send_buf()[4..];
-        assert!(rx.read_packet(data).is_none());
+        assert!(rx.recv_packet(data).is_none());
         assert_eq!(rx.bitfield.get_bit(5), true);
     }
 
@@ -472,7 +472,7 @@ mod tests {
         tx.send_bitfield();
 
         let data = &tx.get_send_buf()[4..];
-        assert!(rx.read_packet(data).is_none());
+        assert!(rx.recv_packet(data).is_none());
         assert_eq!(rx.bitfield.as_bytes(), &[0b0000_0100, 0b0000_0000]);
     }
 
@@ -489,7 +489,7 @@ mod tests {
                 begin: 3,
                 len: 4
             },
-            rx.read_packet(data).unwrap()
+            rx.recv_packet(data).unwrap()
         );
     }
 
@@ -506,7 +506,7 @@ mod tests {
                 begin: 3,
                 data: b"hello"
             }),
-            rx.read_packet(data).unwrap()
+            rx.recv_packet(data).unwrap()
         );
     }
 
@@ -523,7 +523,7 @@ mod tests {
                 begin: 3,
                 len: 4
             },
-            rx.read_packet(data).unwrap()
+            rx.recv_packet(data).unwrap()
         );
     }
 
@@ -536,7 +536,7 @@ mod tests {
         let data = &tx.get_send_buf()[4..];
         assert_eq!(
             Packet::Extended(b"\x025:hello"),
-            rx.read_packet(data).unwrap()
+            rx.recv_packet(data).unwrap()
         );
     }
 
