@@ -71,14 +71,14 @@ pub struct Metadata {
 }
 
 #[allow(unused)]
-pub enum MetadataMsg<'a> {
+pub enum MetadataMsg {
     Handshake(u8, u32),
     Request(i64),
     Reject(i64),
-    Data(i64, &'a [u8]),
+    Data(i64, i64),
 }
 
-impl Encode for MetadataMsg<'_> {
+impl Encode for MetadataMsg {
     fn encode(&self, buf: &mut Vec<u8>) {
         let mut dict = DictEncoder::new(buf);
         match *self {
@@ -99,12 +99,10 @@ impl Encode for MetadataMsg<'_> {
                 dict.insert("msg_type", msg_type::REJECT);
                 dict.insert("piece", piece);
             }
-            MetadataMsg::Data(piece, data) => {
+            MetadataMsg::Data(piece, total_size) => {
                 dict.insert("msg_type", msg_type::DATA);
                 dict.insert("piece", piece);
-                dict.insert("total_size", data.len() as i64);
-                dict.finish();
-                buf.extend_from_slice(data);
+                dict.insert("total_size", total_size);
             }
         }
     }

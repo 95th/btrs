@@ -81,8 +81,8 @@ impl Connection {
                     let meta = ext.metadata().context(Error::MetadataUnsupported)?;
                     ensure!(meta.len < 50 * 1024 * 1024, Error::PacketTooLarge);
 
-                    self.send_extended(meta.id, MetadataMsg::Handshake(meta.id, 0));
-                    self.send_extended(meta.id, MetadataMsg::Request(0));
+                    self.send_ext(meta.id, MetadataMsg::Handshake(meta.id, 0));
+                    self.send_ext(meta.id, MetadataMsg::Request(0));
 
                     self.state = MetadataRequested(MetadataState {
                         ext_id: meta.id,
@@ -108,7 +108,7 @@ impl Connection {
                     }
 
                     state.requested_piece += 1;
-                    self.send_extended(
+                    self.send_ext(
                         state.ext_id,
                         MetadataMsg::Request(state.requested_piece as i64),
                     );
@@ -183,7 +183,7 @@ impl Connection {
         self.send_buf.put_u32(len);
     }
 
-    pub fn send_extended<E: Encode>(&mut self, id: u8, payload: E) {
+    pub fn send_ext<E: Encode>(&mut self, id: u8, payload: E) {
         self.encode_buf.clear();
         payload.encode(&mut self.encode_buf);
 
@@ -192,6 +192,18 @@ impl Connection {
         self.send_buf.put_u8(EXTENDED);
         self.send_buf.put_u8(id);
         self.send_buf.extend_from_slice(&self.encode_buf);
+    }
+
+    pub fn send_ext_data<E: Encode>(&mut self, id: u8, payload: E, data: &[u8]) {
+        self.encode_buf.clear();
+        payload.encode(&mut self.encode_buf);
+
+        let len = 2 + self.encode_buf.len() + data.len();
+        self.send_buf.put_u32(len as u32);
+        self.send_buf.put_u8(EXTENDED);
+        self.send_buf.put_u8(id);
+        self.send_buf.extend_from_slice(&self.encode_buf);
+        self.send_buf.extend_from_slice(data);
     }
 
     pub fn get_send_buf(&mut self) -> SendBuf<'_> {
@@ -378,7 +390,7 @@ mod tests {
     #[test]
     fn send_extended() {
         let mut conn = Connection::new();
-        conn.send_extended(2, "hello");
+        conn.send_ext(2, "hello");
         assert_eq!(
             conn.send_buf,
             &[0, 0, 0, 9, EXTENDED, 2, b'5', b':', b'h', b'e', b'l', b'l', b'o']
@@ -522,7 +534,7 @@ mod tests {
     fn parse_extended() {
         let mut rx = Connection::new();
         let mut tx = Connection::new();
-        tx.send_extended(2, "hello");
+        tx.send_ext(2, "hello");
 
         let data = &tx.get_send_buf()[4..];
         assert_eq!(
@@ -553,7 +565,7 @@ mod tests {
         // Assume handshake is done
         c.state = State::Ready;
 
-        sender.send_extended(0, MetadataMsg::Handshake(2, 20));
+        sender.send_ext(0, MetadataMsg::Handshake(2, 20));
         c.recv_metadata(&sender.get_send_buf()[4..]).unwrap();
 
         assert_eq!(
@@ -568,7 +580,7 @@ mod tests {
 
         assert_eq!(c.poll_event(), None);
 
-        sender.send_extended(1, MetadataMsg::Data(0, b"xxxxxyyyyy"));
+        sender.send_ext_data(1, MetadataMsg::Data(0, 10), b"xxxxxyyyyy");
         c.recv_metadata(&sender.get_send_buf()[4..]).unwrap();
 
         assert_eq!(
@@ -583,7 +595,7 @@ mod tests {
 
         assert_eq!(c.poll_event(), None);
 
-        sender.send_extended(1, MetadataMsg::Data(1, b"tttttqqqqq"));
+        sender.send_ext_data(1, MetadataMsg::Data(1, 10), b"tttttqqqqq");
         c.recv_metadata(&sender.get_send_buf()[4..]).unwrap();
 
         assert_eq!(c.state, State::Ready);
@@ -609,7 +621,7 @@ mod tests {
         // Assume handshake is done
         c.state = State::Ready;
 
-        sender.send_extended(0, MetadataMsg::Handshake(2, 10));
+        sender.send_ext(0, MetadataMsg::Handshake(2, 10));
         c.recv_metadata(&sender.get_send_buf()[4..]).unwrap();
 
         assert_eq!(
@@ -624,7 +636,10 @@ mod tests {
 
         assert_eq!(c.poll_event(), None);
 
-        c.recv_metadata(&[0]).unwrap(); // A wild choke appears
+        // A wild choke appears
+        sender.send_choke();
+        c.recv_metadata(&sender.get_send_buf()[4..]).unwrap();
+
         assert_eq!(
             c.state,
             State::MetadataRequested(MetadataState {
@@ -634,8 +649,9 @@ mod tests {
                 buf: vec![]
             })
         );
+        assert_eq!(c.poll_event(), None);
 
-        sender.send_extended(1, MetadataMsg::Data(0, b"xxxxxyyyyy"));
+        sender.send_ext_data(1, MetadataMsg::Data(0, 10), b"xxxxxyyyyy");
         c.recv_metadata(&sender.get_send_buf()[4..]).unwrap();
         assert_eq!(c.state, State::Ready);
 
