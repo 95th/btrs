@@ -64,7 +64,7 @@ impl<'a, 'p> ExtendedMessage<'a, 'p> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct Metadata {
     pub id: u8,
     pub len: usize,

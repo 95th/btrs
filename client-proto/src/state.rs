@@ -5,7 +5,6 @@ pub enum State {
     HandshakeRequired,
     HandshakeSent,
     Ready,
-    MetadataRequested(MetadataState),
 }
 
 #[derive(Debug, PartialEq)]
@@ -23,13 +22,4 @@ pub enum Error {
 
     #[error("Unsupported protocol")]
     UnsupportedProtocol,
-
-    #[error("Invalid handshake data")]
-    InvalidHandshake,
-
-    #[error("Metadata is not supported")]
-    MetadataUnsupported,
-
-    #[error("Packet too large")]
-    PacketTooLarge,
 }

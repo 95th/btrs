@@ -1,7 +1,7 @@
 #[macro_use]
 extern crate tracing;
 
-use anyhow::ensure;
+use anyhow::{bail, ensure};
 use proto::{conn::Connection, event::Event, msg::Packet};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
@@ -73,22 +73,19 @@ where
 
     pub async fn get_metadata(&mut self) -> anyhow::Result<Vec<u8>> {
         debug!("Request metadata");
+        if !self.conn.request_metadata() {
+            bail!("Metadata request not supported");
+        }
+
         let buf = &mut Vec::new();
         loop {
-            let buf = self.recv_packet(buf).await?;
-            if buf.is_empty() {
-                continue;
-            }
-
-            self.conn.recv_metadata(buf)?;
+            self.read_packet(buf).await?;
 
             while let Some(event) = self.conn.poll_event() {
                 match event {
                     Event::Metadata(metadata) => return Ok(metadata),
                 }
             }
-
-            self.flush().await?;
         }
     }
 

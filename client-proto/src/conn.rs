@@ -1,7 +1,6 @@
 use std::collections::VecDeque;
 use std::ops::Deref;
 
-use anyhow::Context;
 use ben::{Encode, Parser};
 use bytes::{Buf, BufMut};
 
@@ -9,7 +8,7 @@ use crate::bitfield::Bitfield;
 use crate::event::Event;
 use crate::ext::{ExtendedMessage, MetadataMsg};
 use crate::handshake::Handshake;
-use crate::state::{Error, MetadataState, State};
+use crate::state::{Error, State};
 use crate::{msg::*, InfoHash, PeerId};
 
 pub struct Connection {
@@ -21,6 +20,7 @@ pub struct Connection {
     state: State,
     parser: Parser,
     events: VecDeque<Event>,
+    ut_metadata: Option<UtMetadata>,
 }
 
 macro_rules! ensure_state {
@@ -40,6 +40,7 @@ impl Connection {
             state: State::HandshakeRequired,
             parser: Parser::new(),
             events: VecDeque::new(),
+            ut_metadata: None,
         }
     }
 
@@ -67,56 +68,6 @@ impl Connection {
         ensure!(h.info_hash == *info_hash, Error::UnsupportedProtocol);
         self.state = State::Ready;
         Ok(h.peer_id)
-    }
-
-    pub fn recv_metadata(&mut self, data: &[u8]) -> anyhow::Result<()> {
-        use State::*;
-
-        match std::mem::replace(&mut self.state, State::Ready) {
-            Ready => {
-                if let Some(Packet::Extended(ext)) = self.recv_packet(data) {
-                    let ext = ExtendedMessage::parse(ext, &mut self.parser)?;
-                    ensure!(ext.is_handshake(), Error::InvalidHandshake);
-
-                    let meta = ext.metadata().context(Error::MetadataUnsupported)?;
-                    ensure!(meta.len < 50 * 1024 * 1024, Error::PacketTooLarge);
-
-                    self.send_ext(meta.id, MetadataMsg::Handshake(meta.id, 0));
-                    self.send_ext(meta.id, MetadataMsg::Request(0));
-
-                    self.state = MetadataRequested(MetadataState {
-                        ext_id: meta.id,
-                        requested_piece: 0,
-                        len: meta.len,
-                        buf: Vec::new(),
-                    });
-                }
-            }
-            MetadataRequested(mut state) => {
-                if let Some(Packet::Extended(ext)) = self.recv_packet(data) {
-                    let ext = ExtendedMessage::parse(ext, &mut self.parser)?;
-                    let piece = ext.data(state.requested_piece)?;
-                    trace!("Got piece response, len: {}", piece.len());
-                    state.buf.extend_from_slice(piece);
-
-                    ensure!(state.buf.len() <= state.len, Error::PacketTooLarge);
-
-                    if state.buf.len() == state.len {
-                        self.events.push_back(Event::Metadata(state.buf));
-                        self.state = State::Ready;
-                        return Ok(());
-                    }
-
-                    state.requested_piece += 1;
-                    self.send_ext(state.ext_id, MetadataMsg::Request(state.requested_piece));
-                }
-
-                self.state = MetadataRequested(state);
-            }
-            _ => bail!(Error::InvalidState),
-        }
-
-        Ok(())
     }
 
     pub fn send_keepalive(&mut self) {
@@ -203,6 +154,20 @@ impl Connection {
         self.send_buf.extend_from_slice(data);
     }
 
+    pub fn request_metadata(&mut self) -> bool {
+        if let Some(meta) = &mut self.ut_metadata {
+            meta.piece = 0;
+            meta.buf.clear();
+
+            let id = meta.id;
+            self.send_ext(id, MetadataMsg::Handshake(id, 0));
+            self.send_ext(id, MetadataMsg::Request(0));
+            true
+        } else {
+            false
+        }
+    }
+
     pub fn get_send_buf(&mut self) -> SendBuf<'_> {
         SendBuf {
             buf: &mut self.send_buf,
@@ -215,6 +180,7 @@ impl Connection {
 
     pub fn recv_packet<'a>(&mut self, mut data: &'a [u8]) -> Option<Packet<'a>> {
         let id = data.get_u8();
+        let mut packet = None;
         match id {
             CHOKE => {
                 trace!("Got choke");
@@ -249,29 +215,83 @@ impl Connection {
                 let begin = data.get_u32();
                 let len = data.get_u32();
                 trace!("Got Request: index {}, begin {}, len {}", index, begin, len);
-                return Some(Packet::Request { index, begin, len });
+                packet = Some(Packet::Request { index, begin, len });
             }
             PIECE => {
                 let index = data.get_u32();
                 let begin = data.get_u32();
                 trace!("Got Piece: index {}, begin {}", index, begin);
-                return Some(Packet::Piece(PieceBlock { index, begin, data }));
+                packet = Some(Packet::Piece(PieceBlock { index, begin, data }));
             }
             CANCEL => {
                 let index = data.get_u32();
                 let begin = data.get_u32();
                 let len = data.get_u32();
                 trace!("Got Request: index {}, begin {}, len {}", index, begin, len);
-                return Some(Packet::Cancel { index, begin, len });
+                packet = Some(Packet::Cancel { index, begin, len });
             }
             EXTENDED => {
                 trace!("Got Extended: len {}", data.len());
-                return Some(Packet::Extended(data));
+                self.recv_ext(data);
             }
             _ => {}
         }
-        None
+
+        packet
     }
+
+    fn recv_ext(&mut self, ext: &[u8]) {
+        let ext = match ExtendedMessage::parse(ext, &mut self.parser) {
+            Ok(e) => e,
+            Err(e) => {
+                warn!("{}", e);
+                return;
+            }
+        };
+
+        if ext.is_handshake() {
+            self.ut_metadata = ext.metadata().map(|m| UtMetadata {
+                id: m.id,
+                len: m.len,
+                buf: Vec::new(),
+                piece: 0,
+            });
+            return;
+        }
+
+        if let Some(meta) = &mut self.ut_metadata {
+            if let Ok(piece) = ext.data(meta.piece) {
+                meta.buf.extend_from_slice(piece);
+
+                if meta.buf.len() > meta.len {
+                    meta.piece = 0;
+                    meta.buf.clear();
+                    return;
+                }
+
+                if meta.buf.len() == meta.len {
+                    meta.piece = 0;
+                    self.events
+                        .push_back(Event::Metadata(std::mem::take(&mut meta.buf)));
+                    return;
+                }
+
+                meta.piece += 1;
+
+                let id = meta.id;
+                let piece = meta.piece;
+                self.send_ext(id, MetadataMsg::Request(piece));
+            }
+        }
+    }
+}
+
+#[derive(Debug, PartialEq)]
+struct UtMetadata {
+    id: u8,
+    len: usize,
+    piece: u32,
+    buf: Vec<u8>,
 }
 
 pub struct SendBuf<'a> {
@@ -528,19 +548,6 @@ mod tests {
     }
 
     #[test]
-    fn parse_extended() {
-        let mut rx = Connection::new();
-        let mut tx = Connection::new();
-        tx.send_ext(2, "hello");
-
-        let data = &tx.get_send_buf()[4..];
-        assert_eq!(
-            Packet::Extended(b"\x025:hello"),
-            rx.recv_packet(data).unwrap()
-        );
-    }
-
-    #[test]
     fn handshake() {
         let mut c = Connection::new();
         assert_eq!(c.state, State::HandshakeRequired);
@@ -563,51 +570,52 @@ mod tests {
         c.state = State::Ready;
 
         sender.send_ext(0, MetadataMsg::Handshake(2, 20));
-        c.recv_metadata(&sender.get_send_buf()[4..]).unwrap();
+        c.recv_packet(&sender.get_send_buf()[4..]);
 
         assert_eq!(
-            c.state,
-            State::MetadataRequested(MetadataState {
-                ext_id: 2,
+            c.ut_metadata.as_ref().unwrap(),
+            &UtMetadata {
+                id: 2,
                 len: 20,
-                requested_piece: 0,
+                piece: 0,
                 buf: vec![]
-            })
+            }
         );
 
         assert_eq!(c.poll_event(), None);
 
         sender.send_ext_data(1, MetadataMsg::Data(0, 10), b"xxxxxyyyyy");
-        c.recv_metadata(&sender.get_send_buf()[4..]).unwrap();
+        c.recv_packet(&sender.get_send_buf()[4..]);
 
         assert_eq!(
-            c.state,
-            State::MetadataRequested(MetadataState {
-                ext_id: 2,
+            c.ut_metadata.as_ref().unwrap(),
+            &UtMetadata {
+                id: 2,
                 len: 20,
-                requested_piece: 1,
+                piece: 1,
                 buf: b"xxxxxyyyyy".to_vec()
-            })
+            }
         );
 
         assert_eq!(c.poll_event(), None);
 
         sender.send_ext_data(1, MetadataMsg::Data(1, 10), b"tttttqqqqq");
-        c.recv_metadata(&sender.get_send_buf()[4..]).unwrap();
+        c.recv_packet(&sender.get_send_buf()[4..]);
 
-        assert_eq!(c.state, State::Ready);
+        assert_eq!(
+            c.ut_metadata.as_ref().unwrap(),
+            &UtMetadata {
+                id: 2,
+                len: 20,
+                piece: 0,
+                buf: vec![]
+            }
+        );
 
         assert_eq!(
             c.poll_event().unwrap(),
             Event::Metadata(b"xxxxxyyyyytttttqqqqq".to_vec())
         );
-    }
-
-    #[test]
-    fn get_metadata_without_handshake() {
-        let mut c = Connection::new();
-        let e = c.recv_metadata(&[]).unwrap_err();
-        assert_eq!(e.to_string(), Error::InvalidState.to_string());
     }
 
     #[test]
@@ -619,38 +627,18 @@ mod tests {
         c.state = State::Ready;
 
         sender.send_ext(0, MetadataMsg::Handshake(2, 10));
-        c.recv_metadata(&sender.get_send_buf()[4..]).unwrap();
-
-        assert_eq!(
-            c.state,
-            State::MetadataRequested(MetadataState {
-                ext_id: 2,
-                len: 10,
-                requested_piece: 0,
-                buf: vec![]
-            })
-        );
+        c.recv_packet(&sender.get_send_buf()[4..]);
 
         assert_eq!(c.poll_event(), None);
 
         // A wild choke appears
         sender.send_choke();
-        c.recv_metadata(&sender.get_send_buf()[4..]).unwrap();
+        c.recv_packet(&sender.get_send_buf()[4..]);
 
-        assert_eq!(
-            c.state,
-            State::MetadataRequested(MetadataState {
-                ext_id: 2,
-                len: 10,
-                requested_piece: 0,
-                buf: vec![]
-            })
-        );
         assert_eq!(c.poll_event(), None);
 
         sender.send_ext_data(1, MetadataMsg::Data(0, 10), b"xxxxxyyyyy");
-        c.recv_metadata(&sender.get_send_buf()[4..]).unwrap();
-        assert_eq!(c.state, State::Ready);
+        c.recv_packet(&sender.get_send_buf()[4..]);
 
         assert_eq!(
             c.poll_event().unwrap(),

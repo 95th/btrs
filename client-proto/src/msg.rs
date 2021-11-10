@@ -14,7 +14,6 @@ pub enum Packet<'a> {
     Request { index: u32, begin: u32, len: u32 },
     Piece(PieceBlock<'a>),
     Cancel { index: u32, begin: u32, len: u32 },
-    Extended(&'a [u8]),
 }
 
 impl Packet<'_> {
