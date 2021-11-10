@@ -81,7 +81,7 @@ impl Connection {
                     let meta = ext.metadata().context(Error::MetadataUnsupported)?;
                     ensure!(meta.len < 50 * 1024 * 1024, Error::PacketTooLarge);
 
-                    self.send_extended(meta.id, MetadataMsg::Handshake(meta.id));
+                    self.send_extended(meta.id, MetadataMsg::Handshake(meta.id, 0));
                     self.send_extended(meta.id, MetadataMsg::Request(0));
 
                     self.state = MetadataRequested(MetadataState {
@@ -548,12 +548,13 @@ mod tests {
     #[test]
     fn get_metadata() {
         let mut c = Connection::new();
+        let mut sender = Connection::new();
 
         // Assume handshake is done
         c.state = State::Ready;
 
-        let data = b"\x14\x00d1:md11:ut_metadatai2ee13:metadata_sizei20ee";
-        c.recv_metadata(data).unwrap();
+        sender.send_extended(0, MetadataMsg::Handshake(2, 20));
+        c.recv_metadata(&sender.get_send_buf()[4..]).unwrap();
 
         assert_eq!(
             c.state,
@@ -567,8 +568,9 @@ mod tests {
 
         assert_eq!(c.poll_event(), None);
 
-        let data = b"\x14\x01d8:msg_typei1e5:piecei0eexxxxxyyyyy";
-        c.recv_metadata(data).unwrap();
+        sender.send_extended(1, MetadataMsg::Data(0, b"xxxxxyyyyy"));
+        c.recv_metadata(&sender.get_send_buf()[4..]).unwrap();
+
         assert_eq!(
             c.state,
             State::MetadataRequested(MetadataState {
@@ -581,8 +583,9 @@ mod tests {
 
         assert_eq!(c.poll_event(), None);
 
-        let data = b"\x14\x01d8:msg_typei1e5:piecei1eetttttqqqqq";
-        c.recv_metadata(data).unwrap();
+        sender.send_extended(1, MetadataMsg::Data(1, b"tttttqqqqq"));
+        c.recv_metadata(&sender.get_send_buf()[4..]).unwrap();
+
         assert_eq!(c.state, State::Ready);
 
         assert_eq!(
@@ -601,18 +604,19 @@ mod tests {
     #[test]
     fn get_metadata_with_other_interleaving_msg() {
         let mut c = Connection::new();
+        let mut sender = Connection::new();
 
         // Assume handshake is done
         c.state = State::Ready;
 
-        let data = b"\x14\x00d1:md11:ut_metadatai2ee13:metadata_sizei20ee";
-        c.recv_metadata(data).unwrap();
+        sender.send_extended(0, MetadataMsg::Handshake(2, 10));
+        c.recv_metadata(&sender.get_send_buf()[4..]).unwrap();
 
         assert_eq!(
             c.state,
             State::MetadataRequested(MetadataState {
                 ext_id: 2,
-                len: 20,
+                len: 10,
                 requested_piece: 0,
                 buf: vec![]
             })
@@ -625,33 +629,19 @@ mod tests {
             c.state,
             State::MetadataRequested(MetadataState {
                 ext_id: 2,
-                len: 20,
+                len: 10,
                 requested_piece: 0,
                 buf: vec![]
             })
         );
 
-        let data = b"\x14\x01d8:msg_typei1e5:piecei0eexxxxxyyyyy";
-        c.recv_metadata(data).unwrap();
-        assert_eq!(
-            c.state,
-            State::MetadataRequested(MetadataState {
-                ext_id: 2,
-                len: 20,
-                requested_piece: 1,
-                buf: b"xxxxxyyyyy".to_vec()
-            })
-        );
-
-        assert_eq!(c.poll_event(), None);
-
-        let data = b"\x14\x01d8:msg_typei1e5:piecei1eetttttqqqqq";
-        c.recv_metadata(data).unwrap();
+        sender.send_extended(1, MetadataMsg::Data(0, b"xxxxxyyyyy"));
+        c.recv_metadata(&sender.get_send_buf()[4..]).unwrap();
         assert_eq!(c.state, State::Ready);
 
         assert_eq!(
             c.poll_event().unwrap(),
-            Event::Metadata(b"xxxxxyyyyytttttqqqqq".to_vec())
+            Event::Metadata(b"xxxxxyyyyy".to_vec())
         );
     }
 }
