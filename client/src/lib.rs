@@ -216,7 +216,6 @@ mod tests {
             } else {
                 buf.put_slice(&data[..buf.capacity()]);
                 self.remaining = data[buf.capacity()..].to_vec();
-                cx.waker().wake_by_ref();
             }
 
             Poll::Ready(Ok(()))

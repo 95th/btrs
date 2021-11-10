@@ -27,6 +27,9 @@ pub enum Error {
     #[error("Invalid handshake data")]
     InvalidHandshake,
 
+    #[error("Metadata is not supported")]
+    MetadataUnsupported,
+
     #[error("Packet too large")]
     PacketTooLarge,
 }

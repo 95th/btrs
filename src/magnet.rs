@@ -107,6 +107,17 @@ impl MagnetUri {
         &mut self,
         peer_id: &PeerId,
     ) -> anyhow::Result<(HashSet<Peer>, HashSet<Peer>, DhtTracker)> {
+        let mut dht_tracker = DhtTracker::new().await?;
+
+        debug!("Our peers: {}", self.peer_addrs.len());
+        if !self.peer_addrs.is_empty() {
+            return Ok((
+                self.peer_addrs.drain(..).map(Into::into).collect(),
+                hashset![],
+                dht_tracker,
+            ));
+        }
+
         debug!("Requesting peers");
 
         let mut futs: FuturesUnordered<_> = self
@@ -130,7 +141,6 @@ impl MagnetUri {
 
         debug!("Got {} v4 peers and {} v6 peers", peers.len(), peers6.len());
 
-        let mut dht_tracker = DhtTracker::new().await?;
         if peers.is_empty() && peers6.is_empty() {
             if let Ok(p) = dht_tracker.announce(&self.info_hash).await {
                 peers.extend(p);

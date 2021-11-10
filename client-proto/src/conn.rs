@@ -78,7 +78,7 @@ impl Connection {
                     let ext = ExtendedMessage::parse(ext, &mut self.parser)?;
                     ensure!(ext.is_handshake(), Error::InvalidHandshake);
 
-                    let meta = ext.metadata().context(Error::InvalidHandshake)?;
+                    let meta = ext.metadata().context(Error::MetadataUnsupported)?;
                     ensure!(meta.len < 50 * 1024 * 1024, Error::PacketTooLarge);
 
                     self.send_extended(meta.id, MetadataMsg::Handshake(meta.id));
@@ -112,9 +112,9 @@ impl Connection {
                         state.ext_id,
                         MetadataMsg::Request(state.requested_piece as i64),
                     );
-
-                    self.state = MetadataRequested(state);
                 }
+
+                self.state = MetadataRequested(state);
             }
             _ => bail!(Error::InvalidState),
         }
@@ -596,5 +596,62 @@ mod tests {
         let mut c = Connection::new();
         let e = c.recv_metadata(&[]).unwrap_err();
         assert_eq!(e.to_string(), Error::InvalidState.to_string());
+    }
+
+    #[test]
+    fn get_metadata_with_other_interleaving_msg() {
+        let mut c = Connection::new();
+
+        // Assume handshake is done
+        c.state = State::Ready;
+
+        let data = b"\x14\x00d1:md11:ut_metadatai2ee13:metadata_sizei20ee";
+        c.recv_metadata(data).unwrap();
+
+        assert_eq!(
+            c.state,
+            State::MetadataRequested(MetadataState {
+                ext_id: 2,
+                len: 20,
+                requested_piece: 0,
+                buf: vec![]
+            })
+        );
+
+        assert_eq!(c.poll_event(), None);
+
+        c.recv_metadata(&[0]).unwrap(); // A wild choke appears
+        assert_eq!(
+            c.state,
+            State::MetadataRequested(MetadataState {
+                ext_id: 2,
+                len: 20,
+                requested_piece: 0,
+                buf: vec![]
+            })
+        );
+
+        let data = b"\x14\x01d8:msg_typei1e5:piecei0eexxxxxyyyyy";
+        c.recv_metadata(data).unwrap();
+        assert_eq!(
+            c.state,
+            State::MetadataRequested(MetadataState {
+                ext_id: 2,
+                len: 20,
+                requested_piece: 1,
+                buf: b"xxxxxyyyyy".to_vec()
+            })
+        );
+
+        assert_eq!(c.poll_event(), None);
+
+        let data = b"\x14\x01d8:msg_typei1e5:piecei1eetttttqqqqq";
+        c.recv_metadata(data).unwrap();
+        assert_eq!(c.state, State::Ready);
+
+        assert_eq!(
+            c.poll_event().unwrap(),
+            Event::Metadata(b"xxxxxyyyyytttttqqqqq".to_vec())
+        );
     }
 }
