@@ -108,10 +108,7 @@ impl Connection {
                     }
 
                     state.requested_piece += 1;
-                    self.send_ext(
-                        state.ext_id,
-                        MetadataMsg::Request(state.requested_piece as i64),
-                    );
+                    self.send_ext(state.ext_id, MetadataMsg::Request(state.requested_piece));
                 }
 
                 self.state = MetadataRequested(state);

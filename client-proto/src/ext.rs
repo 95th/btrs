@@ -73,9 +73,9 @@ pub struct Metadata {
 #[allow(unused)]
 pub enum MetadataMsg {
     Handshake(u8, u32),
-    Request(i64),
-    Reject(i64),
-    Data(i64, i64),
+    Request(u32),
+    Reject(u32),
+    Data(u32, u32),
 }
 
 impl Encode for MetadataMsg {
@@ -93,16 +93,16 @@ impl Encode for MetadataMsg {
             }
             MetadataMsg::Request(piece) => {
                 dict.insert("msg_type", msg_type::REQUEST);
-                dict.insert("piece", piece);
+                dict.insert("piece", piece as i64);
             }
             MetadataMsg::Reject(piece) => {
                 dict.insert("msg_type", msg_type::REJECT);
-                dict.insert("piece", piece);
+                dict.insert("piece", piece as i64);
             }
             MetadataMsg::Data(piece, total_size) => {
                 dict.insert("msg_type", msg_type::DATA);
-                dict.insert("piece", piece);
-                dict.insert("total_size", total_size);
+                dict.insert("piece", piece as i64);
+                dict.insert("total_size", total_size as i64);
             }
         }
     }
