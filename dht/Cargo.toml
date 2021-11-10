@@ -11,3 +11,4 @@ log = "0.4.14"
 anyhow = "1.0.40"
 proto = { package = "dht-proto", path = "../dht-proto" }
 data-encoding = "2.3.2"
+tracing = "0.1.29"

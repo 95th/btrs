@@ -3,14 +3,20 @@ use crate::peer::Peer;
 use anyhow::Context;
 use ben::decode::Dict;
 use ben::Parser;
+use client::InfoHash;
+use percent_encoding::{percent_encode, PercentEncode, NON_ALPHANUMERIC};
 use reqwest::Client;
 use std::collections::HashSet;
 use std::convert::TryInto;
 
+fn encode_url(infohash: &InfoHash) -> PercentEncode {
+    percent_encode(infohash, NON_ALPHANUMERIC)
+}
+
 pub async fn announce(req: AnnounceRequest<'_>) -> anyhow::Result<AnnounceResponse> {
     let peer_id = std::str::from_utf8(&req.peer_id[..]).unwrap();
-    let info_hash_encoded = req.info_hash.encode_url();
-    log::debug!("Infohash Encoded: {}", info_hash_encoded);
+    let info_hash_encoded = encode_url(&req.info_hash);
+    debug!("Infohash Encoded: {}", info_hash_encoded);
     let url = format!("{}?info_hash={}", req.url, info_hash_encoded);
     let data = Client::new()
         .get(&url)
@@ -22,7 +28,7 @@ pub async fn announce(req: AnnounceRequest<'_>) -> anyhow::Result<AnnounceRespon
         .bytes()
         .await?;
 
-    log::debug!("Announce response: {:?}", data);
+    debug!("Announce response: {:?}", data);
     let mut parser = Parser::new();
     let value = parser.parse::<Dict>(&data)?;
     let interval = value
@@ -53,13 +59,13 @@ pub async fn announce(req: AnnounceRequest<'_>) -> anyhow::Result<AnnounceRespon
         None => hashset![],
     };
 
-    log::debug!("Found {} peers (v4): {:?}", peers.len(), peers);
+    debug!("Found {} peers (v4): {:?}", peers.len(), peers);
 
     let peers6 = value.get_bytes("peers6").unwrap_or_default();
     anyhow::ensure!(peers6.len() % 18 == 0, "Invalid peer len");
 
     let peers6: HashSet<_> = peers6.chunks_exact(18).map(Peer::v6).collect();
-    log::debug!("Found {} peers (v6): {:?}", peers6.len(), peers6);
+    debug!("Found {} peers (v6): {:?}", peers6.len(), peers6);
 
     Ok(AnnounceResponse {
         interval,

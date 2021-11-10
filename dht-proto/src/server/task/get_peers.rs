@@ -31,6 +31,7 @@ impl Task for GetPeersTask {
         self.base.task_id
     }
 
+    #[instrument(skip_all, fields(task = ?self.id()))]
     fn handle_response(
         &mut self,
         resp: &Response<'_>,
@@ -40,7 +41,7 @@ impl Task for GetPeersTask {
         has_id: bool,
         now: Instant,
     ) {
-        log::trace!("Handle GET_PEERS response");
+        trace!("Handle GET_PEERS response");
         self.base.handle_response(resp, addr, table, has_id, now);
 
         if let Some(token) = resp.body.get_bytes("token") {
@@ -62,8 +63,9 @@ impl Task for GetPeersTask {
         self.base.set_failed(id, addr);
     }
 
+    #[instrument(skip_all, fields(task = ?self.id()))]
     fn add_requests(&mut self, rpc: &mut RpcManager, now: Instant) -> bool {
-        log::trace!("Add GET_PEERS requests");
+        trace!("Add GET_PEERS requests");
 
         let info_hash = self.base.target;
         self.base.add_requests(rpc, now, |buf, rpc| {
@@ -73,14 +75,14 @@ impl Task for GetPeersTask {
                 info_hash,
             };
 
-            log::trace!("Send {:?}", msg);
+            trace!("Send {:?}", msg);
             msg.encode(buf);
             msg.txn_id
         })
     }
 
     fn done(&mut self, rpc: &mut RpcManager) {
-        log::info!("Found {} peers", self.peers.len());
+        info!("Found {} peers", self.peers.len());
         rpc.add_event(Event::FoundPeers {
             peers: std::mem::take(&mut self.peers),
         });
@@ -98,10 +100,10 @@ fn decode_peer(d: Entry) -> Option<SocketAddr> {
             let (ip, port) = unsafe { *ptr };
             return Some((ip, u16::from_be_bytes(port)).into());
         } else {
-            log::warn!("Incorrect Peer length. Expected: 6/18, Actual: {}", b.len());
+            warn!("Incorrect Peer length. Expected: 6/18, Actual: {}", b.len());
         }
     } else {
-        log::warn!("Unexpected Peer format: {:?}", d);
+        warn!("Unexpected Peer format: {:?}", d);
     }
 
     None

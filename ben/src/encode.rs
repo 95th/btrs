@@ -20,10 +20,9 @@ where
 
 /// A trait for objects that can be bencoded.
 ///
-/// Types implementing `Encode` are able to be encoded with an instance of
-/// `Encoder`.
+/// Types implementing `Encode` are encodable into given buffer.
 pub trait Encode {
-    /// Feed this value into given `Encoder`.
+    /// Encode this value into given buffer.
     fn encode(&self, buf: &mut Vec<u8>);
 
     /// Encode this value into a vector of bytes.

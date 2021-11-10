@@ -300,15 +300,13 @@ impl<'b, 'p> Entry<'b, 'p> {
     /// let entry = parser.parse::<Entry>(b"3:abc").unwrap();
     /// assert_eq!("abc", entry.as_ascii_str().unwrap());
     ///
-    /// let entry = parser.parse::<Entry>(b"3:\x01\x01\x01").unwrap();
+    /// let entry = parser.parse::<Entry>(b"1:\x80").unwrap();
     /// assert!(entry.as_ascii_str().is_none());
     /// ```
     pub fn as_ascii_str(&self) -> Option<&'b str> {
         let s = self.as_str()?;
-        let is_ascii = |c: char| {
-            c.is_ascii_alphanumeric() || c.is_ascii_punctuation() || c.is_ascii_whitespace()
-        };
-        if s.chars().all(is_ascii) {
+
+        if s.is_ascii() {
             Some(s)
         } else {
             None
@@ -722,13 +720,13 @@ mod tests {
 
     #[test]
     fn decode_debug_bytes() {
-        let s = b"3:\x01\x01\x01";
+        let s = b"1:\x80";
         let parser = &mut Parser::new();
         let n = parser.parse::<Entry>(s).unwrap();
         assert!(n.as_bytes().is_some());
         assert!(n.as_ascii_str().is_none());
         assert_eq!(
-            format!("'{}'", data_encoding::BASE32.encode(&[1, 1, 1])),
+            format!("'{}'", data_encoding::BASE32.encode(&[0x80])),
             format!("{:?}", n)
         );
     }

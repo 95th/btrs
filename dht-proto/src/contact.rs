@@ -89,17 +89,18 @@ impl Encode for Contact {
     }
 }
 
+#[repr(C)]
 struct CompactNode<const N: usize> {
     id: NodeId,
     ip: [u8; N],
     port: [u8; 2],
 }
 
-pub struct CompactNodes<'a, const N: usize> {
+pub struct CompactNodeIter<'a, const N: usize> {
     iter: std::slice::Iter<'a, CompactNode<N>>,
 }
 
-impl<'a, const N: usize> CompactNodes<'a, N> {
+impl<'a, const N: usize> CompactNodeIter<'a, N> {
     pub fn new(buf: &'a [u8]) -> anyhow::Result<Self> {
         let size = std::mem::size_of::<CompactNode<N>>();
 
@@ -120,7 +121,7 @@ impl<'a, const N: usize> CompactNodes<'a, N> {
     }
 }
 
-impl<'a> Iterator for CompactNodes<'a, 4> {
+impl<'a> Iterator for CompactNodeIter<'a, 4> {
     type Item = Contact;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -132,7 +133,7 @@ impl<'a> Iterator for CompactNodes<'a, 4> {
     }
 }
 
-impl<'a> Iterator for CompactNodes<'a, 16> {
+impl<'a> Iterator for CompactNodeIter<'a, 16> {
     type Item = Contact;
 
     fn next(&mut self) -> Option<Self::Item> {

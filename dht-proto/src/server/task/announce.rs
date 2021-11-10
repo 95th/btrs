@@ -28,6 +28,7 @@ impl Task for AnnounceTask {
         self.get_peers.id()
     }
 
+    #[instrument(skip_all, fields(task = ?self.id()))]
     fn handle_response(
         &mut self,
         resp: &Response<'_>,
@@ -37,7 +38,7 @@ impl Task for AnnounceTask {
         has_id: bool,
         now: Instant,
     ) {
-        log::trace!("Handle ANNOUNCE response");
+        trace!("Handle ANNOUNCE response");
         self.get_peers
             .handle_response(resp, addr, table, rpc, has_id, now);
     }
@@ -46,15 +47,16 @@ impl Task for AnnounceTask {
         self.get_peers.set_failed(id, addr);
     }
 
+    #[instrument(skip_all, fields(task = ?self.id()))]
     fn add_requests(&mut self, rpc: &mut RpcManager, now: Instant) -> bool {
-        log::trace!("Add ANNOUNCE's GET_PEERS requests");
+        trace!("Add ANNOUNCE's GET_PEERS requests");
 
         let done = self.get_peers.add_requests(rpc, now);
         if !done {
             return false;
         }
 
-        log::trace!("Finished ANNOUNCE's GET_PEERS. Time to announce");
+        trace!("Finished ANNOUNCE's GET_PEERS. Time to announce");
 
         let mut announce_count = 0;
         for n in &self.get_peers.base.nodes {
@@ -70,7 +72,7 @@ impl Task for AnnounceTask {
             let token = match rpc.tokens.get(&n.addr) {
                 Some(t) => t,
                 None => {
-                    log::warn!("Token not found for {}", n.addr);
+                    warn!("Token not found for {}", n.addr);
                     continue;
                 }
             };
@@ -88,12 +90,12 @@ impl Task for AnnounceTask {
             msg.encode(&mut buf);
 
             rpc.transmit(self.id(), n.id, buf, n.addr);
-            log::debug!("Announced to {}", n.addr);
+            debug!("Announced to {}", n.addr);
             announce_count += 1;
         }
 
         if announce_count == 0 {
-            log::warn!("Couldn't announce to anyone");
+            warn!("Couldn't announce to anyone");
         }
 
         true

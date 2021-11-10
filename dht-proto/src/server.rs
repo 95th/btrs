@@ -55,12 +55,12 @@ impl Dht {
     }
 
     pub fn tick(&mut self, now: Instant) {
-        log::trace!("Server::tick");
+        trace!("Server::tick");
         self.rpc
             .check_timeouts(&mut self.table, &mut self.tasks, now);
 
         if let Some(refresh) = self.table.next_refresh(now) {
-            log::trace!("Time to refresh the routing table");
+            trace!("Time to refresh the routing table");
             self.add_request(refresh, now);
         }
     }
@@ -87,19 +87,21 @@ impl Dht {
         }
     }
 
+    #[instrument(skip_all, fields(task_id = task_id.0))]
     pub fn set_failed(&mut self, task_id: TaskId, id: NodeId, addr: SocketAddr) {
         if let Some(t) = self.tasks.get_mut(task_id.0) {
             t.set_failed(id, addr);
         }
     }
 
+    #[instrument(skip_all, fields(?addr))]
     pub fn receive(&mut self, buf: &[u8], addr: SocketAddr, now: Instant) {
-        log::debug!("Got {} bytes from {}", buf.len(), addr);
+        debug!("Got {} bytes", buf.len());
 
         let msg = match self.parser.parse::<Msg>(buf) {
             Ok(x) => x,
             Err(e) => {
-                log::warn!("Error parsing message from {}: {}", addr, e);
+                warn!("Error parsing message: {}", e);
                 return;
             }
         };

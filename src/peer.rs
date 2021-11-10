@@ -1,3 +1,4 @@
+use client::PeerId;
 use rand::{distributions::Alphanumeric, Rng};
 use std::{
     convert::TryInto,
@@ -5,36 +6,6 @@ use std::{
     hash::Hash,
     net::{IpAddr, SocketAddr},
 };
-
-macro_rules! thin_wrapper {
-    ($name:ident, $ty:ty) => {
-        #[derive(Default, Debug, Clone)]
-        pub struct $name($ty);
-
-        impl $name {
-            pub fn new(val: $ty) -> Self {
-                Self(val)
-            }
-        }
-
-        impl std::ops::Deref for $name {
-            type Target = $ty;
-
-            fn deref(&self) -> &Self::Target {
-                &self.0
-            }
-        }
-
-        impl std::ops::DerefMut for $name {
-            fn deref_mut(&mut self) -> &mut Self::Target {
-                &mut self.0
-            }
-        }
-    };
-}
-
-thin_wrapper!(PeerId, [u8; 20]);
-thin_wrapper!(Extensions, [u8; 8]);
 
 #[derive(Copy, Clone)]
 pub struct Peer {
@@ -91,5 +62,5 @@ pub fn generate_peer_id() -> PeerId {
         .sample_iter(&Alphanumeric)
         .zip(&mut buf[8..])
         .for_each(|(c, b)| *b = c as u8);
-    PeerId::new(buf)
+    buf
 }

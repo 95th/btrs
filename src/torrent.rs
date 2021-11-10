@@ -1,16 +1,19 @@
 use crate::{
-    announce::DhtTracker,
-    metainfo::InfoHash,
-    peer::{self, Peer, PeerId},
+    announce::{DhtTracker, Tracker},
+    peer::{self, Peer},
     worker::TorrentWorker,
 };
 use anyhow::Context;
 use ben::{decode::Dict, Parser};
+use client::{InfoHash, PeerId};
 use sha1::Sha1;
-use std::{collections::HashSet, fmt};
+use std::{
+    collections::{HashSet, VecDeque},
+    fmt,
+};
 
 pub struct TorrentFile {
-    pub tracker_urls: HashSet<String>,
+    pub trackers: VecDeque<Tracker>,
     pub info_hash: InfoHash,
     pub piece_hashes: Vec<u8>,
     pub piece_len: usize,
@@ -21,7 +24,7 @@ pub struct TorrentFile {
 impl fmt::Debug for TorrentFile {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("TorrentFile")
-            .field("tracker_urls", &self.tracker_urls)
+            .field("tracker_urls", &self.trackers)
             .field("info_hash", &self.info_hash)
             .field(
                 "piece_hashes",
@@ -50,22 +53,24 @@ impl TorrentFile {
             .context("`piece length` not found")?;
         let pieces = info.get_bytes("pieces").context("`pieces` not found")?;
 
-        let mut tracker_urls = hashset![announce.to_owned()];
+        let mut trackers = VecDeque::new();
+        trackers.push_back(Tracker::new(announce.to_owned()));
+
         if let Some(list) = dict.get_list("announce-list") {
             for urls in list {
                 let urls = urls.as_list().context("`announce-list` is not a list")?;
                 for url in urls {
-                    tracker_urls.insert(
+                    trackers.push_back(Tracker::new(
                         url.as_str()
                             .context("URL in `announce-list` is not a valid string")?
                             .to_string(),
-                    );
+                    ));
                 }
             }
         }
 
         let torrent = TorrentFile {
-            tracker_urls,
+            trackers,
             info_hash,
             piece_hashes: pieces.to_vec(),
             piece_len: piece_len as usize,
@@ -87,7 +92,7 @@ impl TorrentFile {
             piece_len: self.piece_len,
             length: self.length,
             name: self.name,
-            tracker_urls: self.tracker_urls,
+            trackers: self.trackers,
             peers: hashset![],
             peers6: hashset![],
             dht_tracker,
@@ -102,14 +107,14 @@ pub struct Torrent {
     pub piece_len: usize,
     pub length: usize,
     pub name: String,
-    pub tracker_urls: HashSet<String>,
+    pub trackers: VecDeque<Tracker>,
     pub peers: HashSet<Peer>,
     pub peers6: HashSet<Peer>,
     pub dht_tracker: DhtTracker,
 }
 
 impl Torrent {
-    pub fn worker(&mut self) -> TorrentWorker<'_> {
+    pub fn worker(self) -> TorrentWorker {
         TorrentWorker::new(self)
     }
 }

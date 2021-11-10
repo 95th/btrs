@@ -1,15 +1,14 @@
 [package]
-name = "dht-proto"
+name = "client-proto"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-slab = "0.4.5"
+anyhow = "1.0.38"
 ben = { path = "../ben" }
-hashbrown = "0.11.2"
-log = "0.4.14"
-anyhow = "1.0.44"
-bitflags = "1.3.2"
-rand = "0.8.4"
+bytes = "1.1.0"
 data-encoding = "2.3.2"
+sha1 = "0.6.0"
+thiserror = "1.0.30"
 tracing = "0.1.29"
+url = "2.2.2"

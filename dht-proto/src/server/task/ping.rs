@@ -37,6 +37,7 @@ impl Task for PingTask {
         self.task_id
     }
 
+    #[instrument(skip_all, fields(task = ?self.id()))]
     fn handle_response(
         &mut self,
         resp: &Response<'_>,
@@ -46,7 +47,7 @@ impl Task for PingTask {
         _has_id: bool,
         now: Instant,
     ) {
-        log::trace!("Handle PING response");
+        trace!("Handle PING response");
 
         if self.node.id == resp.id && self.node.addr == addr {
             table.add_contact(Contact::new(resp.id, addr), now);
@@ -64,8 +65,9 @@ impl Task for PingTask {
         self.done = true;
     }
 
+    #[instrument(skip_all, fields(task = ?self.id()))]
     fn add_requests(&mut self, rpc: &mut RpcManager, now: Instant) -> bool {
-        log::trace!("Invoke PING request");
+        trace!("Invoke PING request");
         if self.done {
             return true;
         }

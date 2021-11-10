@@ -27,7 +27,7 @@ impl BaseTask {
             nodes.push(DhtNode::new(c, target));
         }
 
-        log::info!("Closest nodes in the routing table: {}", nodes.len());
+        info!("Closest nodes in the routing table: {}", nodes.len());
 
         if nodes.len() < 3 {
             for node in &table.router_nodes {
@@ -59,7 +59,7 @@ impl BaseTask {
         has_id: bool,
         now: Instant,
     ) {
-        log::trace!("Invoked before: {}", self.invoked);
+        trace!("Invoked before: {}", self.invoked);
         if has_id {
             let key = resp.id ^ self.target;
             let result = self.nodes.binary_search_by_key(&key, |n| n.key);
@@ -68,7 +68,7 @@ impl BaseTask {
                 self.nodes[i].status.insert(Status::ALIVE);
                 self.invoked -= 1;
             } else {
-                log::warn!(
+                warn!(
                     "Received a response, but no corresponding DHT node found. {:?}",
                     resp
                 );
@@ -92,7 +92,7 @@ impl BaseTask {
         });
 
         if let Err(e) = result {
-            log::warn!("{}", e);
+            warn!("{}", e);
         }
 
         if self.nodes.len() > 100 {
@@ -107,7 +107,7 @@ impl BaseTask {
 
         self.nodes.truncate(100);
 
-        log::trace!("Invoked after: {}", self.invoked);
+        trace!("Invoked after: {}", self.invoked);
     }
 
     pub fn set_failed(&mut self, id: NodeId, addr: SocketAddr) {
@@ -155,7 +155,7 @@ impl BaseTask {
 
             let mut buf = Vec::new();
             let txn_id = write_msg(&mut buf, rpc);
-            log::trace!("Send to {}", n.addr);
+            trace!("Send to {}", n.addr);
 
             rpc.transmit(self.task_id, n.id, buf, n.addr);
             n.status.insert(Status::QUERIED);
@@ -165,7 +165,7 @@ impl BaseTask {
             self.invoked += 1;
         }
 
-        log::trace!(
+        trace!(
             "Pending: {}, alive; {}, Invoked: {}",
             pending,
             alive,

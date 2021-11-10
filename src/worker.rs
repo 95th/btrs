@@ -1,13 +1,12 @@
 use crate::{
     announce::{DhtTracker, Tracker},
-    client::Client,
     download::Download,
     future::timeout,
-    metainfo::InfoHash,
-    peer::{Peer, PeerId},
+    peer::Peer,
     torrent::Torrent,
     work::{Piece, WorkQueue},
 };
+use client::{Client, InfoHash, PeerId};
 use futures::{
     channel::mpsc::{self, Sender},
     select,
@@ -18,36 +17,31 @@ use std::{
     collections::{HashSet, VecDeque},
     time::Duration,
 };
-use tokio::time;
+use tokio::{net::TcpStream, time};
+use tracing::Instrument;
 
-pub struct TorrentWorker<'a> {
-    peer_id: &'a PeerId,
-    info_hash: &'a InfoHash,
+pub struct TorrentWorker {
+    peer_id: PeerId,
+    info_hash: InfoHash,
     work: WorkQueue,
-    trackers: VecDeque<Tracker<'a>>,
-    peers: &'a mut HashSet<Peer>,
-    peers6: &'a mut HashSet<Peer>,
-    dht_tracker: &'a mut DhtTracker,
+    trackers: VecDeque<Tracker>,
+    peers: HashSet<Peer>,
+    peers6: HashSet<Peer>,
+    dht_tracker: DhtTracker,
 }
 
-impl<'a> TorrentWorker<'a> {
-    pub fn new(torrent: &'a mut Torrent) -> Self {
-        let trackers = torrent
-            .tracker_urls
-            .iter()
-            .map(|url| Tracker::new(url))
-            .collect();
-
-        let work = WorkQueue::new(torrent);
+impl TorrentWorker {
+    pub fn new(torrent: Torrent) -> Self {
+        let work = WorkQueue::new(torrent.piece_len, torrent.length, torrent.piece_hashes);
 
         Self {
-            peer_id: &torrent.peer_id,
-            info_hash: &torrent.info_hash,
-            peers: &mut torrent.peers,
-            peers6: &mut torrent.peers6,
+            peer_id: torrent.peer_id,
+            info_hash: torrent.info_hash,
+            peers: torrent.peers,
+            peers6: torrent.peers6,
             work,
-            trackers,
-            dht_tracker: &mut torrent.dht_tracker,
+            trackers: torrent.trackers,
+            dht_tracker: torrent.dht_tracker,
         }
     }
 
@@ -57,12 +51,12 @@ impl<'a> TorrentWorker<'a> {
 
     pub async fn run(&mut self, piece_tx: Sender<Piece>) {
         let work = &self.work;
-        let info_hash = &*self.info_hash;
-        let peer_id = &*self.peer_id;
-        let all_peers = &mut *self.peers;
-        let all_peers6 = &mut *self.peers6;
+        let info_hash = &self.info_hash;
+        let peer_id = &self.peer_id;
+        let all_peers = &mut self.peers;
+        let all_peers6 = &mut self.peers6;
         let trackers = &mut self.trackers;
-        let dht_tracker = &mut *self.dht_tracker;
+        let dht_tracker = &mut self.dht_tracker;
 
         let pending_downloads = FuturesUnordered::new();
         let pending_trackers = FuturesUnordered::new();
@@ -110,18 +104,21 @@ impl<'a> TorrentWorker<'a> {
                         for peer in to_connect.drain(..) {
                             let piece_tx = piece_tx.clone();
                             pending_downloads.push(async move {
+                                let span = info_span!("conn", addr = ?peer.addr);
                                 let f = async {
-                                    let mut client = timeout(Client::new_tcp(peer.addr), 3).await?;
-                                    client.handshake(info_hash, peer_id).await?;
+                                    let socket = timeout(TcpStream::connect(peer.addr), 3).await?;
+                                    let mut client = Client::new(socket);
+                                    client.send_handshake(info_hash, peer_id).await?;
+                                    client.recv_handshake(info_hash).await?;
                                     let mut dl = Download::new(client, work, piece_tx).await?;
                                     dl.start().await
                                 };
-                                f.await.map_err(|e| (e, peer))
+                                f.instrument(span).await.map_err(|e| (e, peer))
                             });
 
                             connected.insert(peer);
 
-                            log::debug!(
+                            debug!(
                                 "{} active connections, {} pending trackers, {} pending downloads",
                                 connected.len(),
                                 pending_trackers.len(),
@@ -136,7 +133,7 @@ impl<'a> TorrentWorker<'a> {
                     match maybe_result {
                         Some(Ok(())) => {},
                         Some(Err((e, peer))) => {
-                            log::warn!("Error occurred for peer {} : {}", peer.addr, e);
+                            warn!("Error occurred for peer {} : {}", peer.addr, e);
 
                             if connected.remove(&peer) {
                                 failed.insert(peer);
@@ -165,11 +162,11 @@ impl<'a> TorrentWorker<'a> {
                             add_conn_tx.send(()).await.unwrap();
                         }
                         Some(Err(e)) => {
-                            log::warn!("DHT announce error: {}", e);
+                            warn!("DHT announce error: {}", e);
                             break;
                         },
                         None => {
-                            log::debug!("DHT Tracker is done");
+                            debug!("DHT Tracker is done");
                         }
                     }
                 }
@@ -182,7 +179,7 @@ impl<'a> TorrentWorker<'a> {
                             resp
                         },
                         None => {
-                            log::debug!("Trackers are all done");
+                            debug!("Trackers are all done");
                             continue;
                         }
                     };
@@ -204,7 +201,7 @@ impl<'a> TorrentWorker<'a> {
                             all_peers6.retain(|p| !failed.contains(p));
                             add_conn_tx.send(()).await.unwrap();
                         }
-                       Err(e) => log::warn!("Announce error: {}", e),
+                       Err(e) => warn!("Announce error: {}", e),
                     }
                 }
 

@@ -65,7 +65,7 @@ impl Dht {
                     match resp {
                         Ok((len, addr)) => self.dht.receive(&self.recv_buf[..len], unmap_ipv4(addr), Instant::now()),
                         Err(e) => {
-                            log::warn!("Error: {}", e);
+                            warn!("Error: {}", e);
                             continue;
                         },
                     }
@@ -86,7 +86,7 @@ impl Dht {
 
     async fn process_events(&mut self) -> Option<HashSet<SocketAddr>> {
         while let Some(event) = self.dht.poll_event() {
-            log::debug!("Received event: {}", event);
+            debug!("Received event: {}", event);
             match event {
                 Event::FoundPeers { peers } => return Some(peers),
                 Event::Bootstrapped { .. } => {}
