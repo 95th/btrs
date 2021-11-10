@@ -38,7 +38,7 @@ impl<'a, 'p> ExtendedMessage<'a, 'p> {
     }
 
     pub fn metadata(&self) -> Option<Metadata> {
-        trace!("metadata: {:#?}", self.value);
+        trace!("id: {}, metadata: {:#?}", self.id, self.value);
         let dict = self.value.as_dict()?;
         let m = dict.get_dict("m")?;
         let id = m.get_int("ut_metadata")? as u8;
@@ -71,6 +71,7 @@ pub struct Metadata {
 }
 
 #[allow(unused)]
+#[derive(Debug)]
 pub enum MetadataMsg {
     Handshake(u8, u32),
     Request(u32),

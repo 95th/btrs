@@ -73,11 +73,16 @@ where
 
     pub async fn get_metadata(&mut self) -> anyhow::Result<Vec<u8>> {
         debug!("Request metadata");
+
+        let buf = &mut Vec::new();
+        while !self.conn.is_ext_handshaked() {
+            self.read_packet(buf).await?;
+        }
+
         if !self.conn.request_metadata() {
             bail!("Metadata request not supported");
         }
 
-        let buf = &mut Vec::new();
         loop {
             self.read_packet(buf).await?;
 

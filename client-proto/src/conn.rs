@@ -1,4 +1,5 @@
 use std::collections::VecDeque;
+use std::fmt::Debug;
 use std::ops::Deref;
 
 use ben::{Encode, Parser};
@@ -20,6 +21,7 @@ pub struct Connection {
     state: State,
     parser: Parser,
     events: VecDeque<Event>,
+    ext_handshaked: bool,
     ut_metadata: Option<UtMetadata>,
 }
 
@@ -40,6 +42,7 @@ impl Connection {
             state: State::HandshakeRequired,
             parser: Parser::new(),
             events: VecDeque::new(),
+            ext_handshaked: false,
             ut_metadata: None,
         }
     }
@@ -71,36 +74,43 @@ impl Connection {
     }
 
     pub fn send_keepalive(&mut self) {
+        trace!("Send keepalive");
         self.send_buf.put_u32(0);
     }
 
     pub fn send_choke(&mut self) {
+        trace!("Send choke");
         self.send_buf.put_u32(1);
         self.send_buf.put_u8(CHOKE);
     }
 
     pub fn send_unchoke(&mut self) {
+        trace!("Send unchoke");
         self.send_buf.put_u32(1);
         self.send_buf.put_u8(UNCHOKE);
     }
 
     pub fn send_interested(&mut self) {
+        trace!("Send interested");
         self.send_buf.put_u32(1);
         self.send_buf.put_u8(INTERESTED);
     }
 
     pub fn send_not_interested(&mut self) {
+        trace!("Send not interested");
         self.send_buf.put_u32(1);
         self.send_buf.put_u8(NOT_INTERESTED);
     }
 
     pub fn send_have(&mut self, index: u32) {
+        trace!("Send have {}", index);
         self.send_buf.put_u32(5);
         self.send_buf.put_u8(HAVE);
         self.send_buf.put_u32(index);
     }
 
     pub fn send_bitfield(&mut self) {
+        trace!("Send bitfield");
         let bytes = self.bitfield.as_bytes();
         self.send_buf.put_u32(bytes.len() as u32 + 1);
         self.send_buf.put_u8(BITFIELD);
@@ -108,6 +118,7 @@ impl Connection {
     }
 
     pub fn send_request(&mut self, index: u32, begin: u32, len: u32) {
+        trace!("Send request {}, {}, {}", index, begin, len);
         self.send_buf.put_u32(13);
         self.send_buf.put_u8(REQUEST);
         self.send_buf.put_u32(index);
@@ -116,6 +127,7 @@ impl Connection {
     }
 
     pub fn send_piece(&mut self, index: u32, begin: u32, data: &[u8]) {
+        trace!("Send piece {}, {}, {}", index, begin, data.len());
         self.send_buf.put_u32(9 + data.len() as u32);
         self.send_buf.put_u8(PIECE);
         self.send_buf.put_u32(index);
@@ -124,6 +136,7 @@ impl Connection {
     }
 
     pub fn send_cancel(&mut self, index: u32, begin: u32, len: u32) {
+        trace!("Send cancel {}, {}, {}", index, begin, len);
         self.send_buf.put_u32(13);
         self.send_buf.put_u8(CANCEL);
         self.send_buf.put_u32(index);
@@ -131,7 +144,8 @@ impl Connection {
         self.send_buf.put_u32(len);
     }
 
-    pub fn send_ext<E: Encode>(&mut self, id: u8, payload: E) {
+    pub fn send_ext<E: Encode + Debug>(&mut self, id: u8, payload: E) {
+        trace!("Send ext {}, {:?}", id, payload);
         self.encode_buf.clear();
         payload.encode(&mut self.encode_buf);
 
@@ -142,11 +156,15 @@ impl Connection {
         self.send_buf.extend_from_slice(&self.encode_buf);
     }
 
-    pub fn send_ext_data<E: Encode>(&mut self, id: u8, payload: E, data: &[u8]) {
+    pub fn send_ext_data<E: Encode + Debug>(&mut self, id: u8, payload: E, data: &[u8]) {
+        trace!("Send ext {}, {:?}, data: {}", id, payload, data.len());
+
         self.encode_buf.clear();
         payload.encode(&mut self.encode_buf);
 
         let len = 2 + self.encode_buf.len() + data.len();
+        trace!("Send ext with trailing data {}, {}", id, len);
+
         self.send_buf.put_u32(len as u32);
         self.send_buf.put_u8(EXTENDED);
         self.send_buf.put_u8(id);
@@ -156,14 +174,17 @@ impl Connection {
 
     pub fn request_metadata(&mut self) -> bool {
         if let Some(meta) = &mut self.ut_metadata {
+            trace!("Requesting metadata");
             meta.piece = 0;
             meta.buf.clear();
 
             let id = meta.id;
-            self.send_ext(id, MetadataMsg::Handshake(id, 0));
+            let len = meta.len as u32;
+            self.send_ext(0, MetadataMsg::Handshake(id, len));
             self.send_ext(id, MetadataMsg::Request(0));
             true
         } else {
+            trace!("Requesting metadata not supported");
             false
         }
     }
@@ -176,6 +197,10 @@ impl Connection {
 
     pub fn is_choked(&self) -> bool {
         self.choked
+    }
+
+    pub fn is_ext_handshaked(&self) -> bool {
+        self.ext_handshaked
     }
 
     pub fn recv_packet<'a>(&mut self, mut data: &'a [u8]) -> Option<Packet<'a>> {
@@ -256,6 +281,7 @@ impl Connection {
                 buf: Vec::new(),
                 piece: 0,
             });
+            self.ext_handshaked = true;
             return;
         }
 
