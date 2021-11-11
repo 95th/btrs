@@ -20,6 +20,16 @@ struct PieceInProgress {
     requested: u32,
 }
 
+impl PieceInProgress {
+    fn write_block(&mut self, begin: u32, data: &[u8]) -> bool {
+        self.buf
+            .get_mut(begin as usize..)
+            .and_then(|b| b.get_mut(..data.len()))
+            .map(|b| b.copy_from_slice(data))
+            .is_some()
+    }
+}
+
 pub struct Download<'w, C> {
     /// Peer connection
     client: Client<C>,
@@ -119,11 +129,12 @@ impl<'w, C: AsyncStream> Download<'w, C> {
             .remove(&index)
             .context("Received a piece that was not requested")?;
 
-        p.buf[begin as usize..][..data.len()].copy_from_slice(data);
-        p.downloaded += data.len() as u32;
-        self.work.add_downloaded(data.len());
-        self.backlog -= 1;
-        trace!("current index {}: {}/{}", index, p.downloaded, p.piece.len);
+        if p.write_block(begin, data) {
+            p.downloaded += data.len() as u32;
+            self.work.add_downloaded(data.len());
+            self.backlog -= 1;
+            trace!("current index {}: {}/{}", index, p.downloaded, p.piece.len);
+        }
 
         if p.downloaded < p.piece.len {
             // Not done yet
