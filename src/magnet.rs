@@ -45,31 +45,26 @@ impl MagnetUri {
         loop {
             if futures.len() < 20 {
                 while let Some(p) = peers_iter.next() {
-                    futures.push(timeout(self.try_get(p, &peer_id), 60));
+                    futures.push(self.request_metadata_from_peer(p, &peer_id));
                 }
             }
 
             if let Some(result) = futures.next().await {
-                match result {
-                    Ok(data) => {
-                        if let Some(t) = self.read_info(&data) {
-                            drop(futures);
-                            trace!("Metadata requested successfully");
-                            return Ok(Torrent {
-                                peer_id,
-                                info_hash: self.info_hash.clone(),
-                                piece_len: t.piece_len,
-                                length: t.length,
-                                piece_hashes: t.piece_hashes,
-                                name: t.name,
-                                trackers: self.trackers,
-                                peers,
-                                peers6,
-                                dht_tracker,
-                            });
-                        }
-                    }
-                    Err(e) => debug!("Error : {}", e),
+                if let Some(t) = result.as_ref().and_then(|d| self.read_info(d)) {
+                    drop(futures);
+                    trace!("Metadata requested successfully");
+                    return Ok(Torrent {
+                        peer_id,
+                        info_hash: self.info_hash.clone(),
+                        piece_len: t.piece_len,
+                        length: t.length,
+                        piece_hashes: t.piece_hashes,
+                        name: t.name,
+                        trackers: self.trackers,
+                        peers,
+                        peers6,
+                        dht_tracker,
+                    });
                 }
             } else {
                 break;
@@ -160,12 +155,22 @@ impl MagnetUri {
     }
 
     #[instrument(skip_all, fields(addr = ?peer.addr))]
-    async fn try_get(&self, peer: &Peer, peer_id: &PeerId) -> anyhow::Result<Vec<u8>> {
-        let socket = TcpStream::connect(peer.addr).await?;
-        let mut client = Client::new(socket);
-        client.send_handshake(&self.info_hash, peer_id).await?;
-        client.recv_handshake(&self.info_hash).await?;
-        client.get_metadata().await
+    async fn request_metadata_from_peer(&self, peer: &Peer, peer_id: &PeerId) -> Option<Vec<u8>> {
+        let request = async {
+            let socket = TcpStream::connect(peer.addr).await?;
+            let mut client = Client::new(socket);
+            client.send_handshake(&self.info_hash, peer_id).await?;
+            client.recv_handshake(&self.info_hash).await?;
+            client.get_metadata().await
+        };
+
+        match timeout(request, 60).await {
+            Ok(metadata) => Some(metadata),
+            Err(e) => {
+                warn!("{}", e);
+                None
+            }
+        }
     }
 }
 

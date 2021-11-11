@@ -63,8 +63,7 @@ where
         Ok(packet)
     }
 
-    pub async fn wait_for_unchoke(&mut self) -> anyhow::Result<()> {
-        let buf = &mut Vec::new();
+    pub async fn wait_for_unchoke(&mut self, buf: &mut Vec<u8>) -> anyhow::Result<()> {
         while self.conn.is_choked() {
             self.read_packet(buf).await?;
         }
@@ -75,9 +74,7 @@ where
         debug!("Request metadata");
 
         let buf = &mut Vec::new();
-        while !self.conn.is_ext_handshaked() {
-            self.read_packet(buf).await?;
-        }
+        self.wait_for_unchoke(buf).await?;
 
         if !self.conn.request_metadata() {
             bail!("Metadata request not supported");

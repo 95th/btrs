@@ -21,7 +21,6 @@ pub struct Connection {
     state: State,
     parser: Parser,
     events: VecDeque<Event>,
-    ext_handshaked: bool,
     ut_metadata: Option<UtMetadata>,
 }
 
@@ -42,7 +41,6 @@ impl Connection {
             state: State::HandshakeRequired,
             parser: Parser::new(),
             events: VecDeque::new(),
-            ext_handshaked: false,
             ut_metadata: None,
         }
     }
@@ -199,10 +197,6 @@ impl Connection {
         self.choked
     }
 
-    pub fn is_ext_handshaked(&self) -> bool {
-        self.ext_handshaked
-    }
-
     pub fn recv_packet<'a>(&mut self, mut data: &'a [u8]) -> Option<Packet<'a>> {
         let id = data.get_u8();
         let mut packet = None;
@@ -281,7 +275,6 @@ impl Connection {
                 buf: Vec::new(),
                 piece: 0,
             });
-            self.ext_handshaked = true;
             return;
         }
 
