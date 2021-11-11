@@ -7,6 +7,7 @@ use client::{AsyncStream, Client};
 use futures::channel::mpsc::Sender;
 use futures::SinkExt;
 use std::collections::HashMap;
+use std::mem::MaybeUninit;
 use std::time::Instant;
 
 const MAX_REQUESTS: u32 = 500;
@@ -15,7 +16,7 @@ const MAX_BLOCK_SIZE: u32 = 0x4000;
 
 struct PieceInProgress {
     piece: PieceInfo,
-    buf: Box<[u8]>,
+    buf: Box<[MaybeUninit<u8>]>,
     downloaded: u32,
     requested: u32,
 }
@@ -25,7 +26,9 @@ impl PieceInProgress {
         self.buf
             .get_mut(begin as usize..)
             .and_then(|b| b.get_mut(..data.len()))
-            .map(|b| b.copy_from_slice(data))
+            .map(|b| unsafe {
+                std::ptr::copy_nonoverlapping(data.as_ptr(), b.as_mut_ptr().cast(), data.len());
+            })
             .is_some()
     }
 }
@@ -98,6 +101,7 @@ impl<'w, C: AsyncStream> Download<'w, C> {
 
     pub async fn start(&mut self) -> anyhow::Result<()> {
         trace!("download");
+
         loop {
             self.pick_pieces();
 
@@ -111,7 +115,7 @@ impl<'w, C: AsyncStream> Download<'w, C> {
             self.fill_backlog().await?;
 
             trace!("Current backlog: {}", self.backlog);
-            self.handle_msg().await?;
+            timeout(self.handle_msg(), 60).await?;
         }
         Ok(())
     }
@@ -147,7 +151,10 @@ impl<'w, C: AsyncStream> Download<'w, C> {
 
     async fn piece_done(&mut self, state: PieceInProgress) -> anyhow::Result<()> {
         trace!("Piece downloaded: {}", state.piece.index);
-        let verified = self.work.verify(&state.piece, &state.buf).await;
+
+        // Safety: Piece's buffer is now fully initialized
+        let buf: Box<[u8]> = unsafe { std::mem::transmute(state.buf) };
+        let verified = self.work.verify(&state.piece, &buf).await;
 
         if !verified {
             error!("Bad piece: Hash mismatch for {}", state.piece.index);
@@ -159,7 +166,7 @@ impl<'w, C: AsyncStream> Download<'w, C> {
         self.client.send_have(state.piece.index);
         let piece = Piece {
             index: state.piece.index,
-            buf: state.buf,
+            buf,
         };
         self.piece_tx.send(piece).await?;
         Ok(())
@@ -173,13 +180,7 @@ impl<'w, C: AsyncStream> Download<'w, C> {
         }
 
         if let Some(piece) = self.work.remove_piece() {
-            // Safety: This buffer is sent to the writer task for reading only
-            // after being completely written by this download
-            let buf = unsafe {
-                let mut buf = Vec::with_capacity(piece.len as usize);
-                buf.set_len(piece.len as usize);
-                buf.into_boxed_slice()
-            };
+            let buf = vec![MaybeUninit::uninit(); piece.len as usize].into_boxed_slice();
             self.in_progress.insert(
                 piece.index,
                 PieceInProgress {
