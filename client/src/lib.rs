@@ -14,6 +14,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin> AsyncStream for T {}
 pub struct Client<Stream> {
     stream: Stream,
     conn: Connection,
+    recv_buf: Vec<u8>,
 }
 
 impl<Stream> Client<Stream>
@@ -24,6 +25,7 @@ where
         Self {
             stream,
             conn: Connection::new(),
+            recv_buf: Vec::new(),
         }
     }
 
@@ -33,9 +35,8 @@ where
         peer_id: &PeerId,
     ) -> anyhow::Result<()> {
         debug!("Send handshake");
-        self.conn.send_handshake(info_hash, peer_id)?;
-        self.flush().await?;
-        Ok(())
+        self.conn.send_handshake(info_hash, peer_id);
+        self.flush().await
     }
 
     pub async fn recv_handshake(&mut self, info_hash: &InfoHash) -> anyhow::Result<PeerId> {
@@ -46,26 +47,23 @@ where
         self.conn.recv_handshake(info_hash, buf)
     }
 
-    pub async fn read_packet<'a>(
-        &mut self,
-        buf: &'a mut Vec<u8>,
-    ) -> anyhow::Result<Option<Packet<'a>>> {
-        let buf = self.recv_packet(buf).await?;
-        if buf.is_empty() {
+    pub async fn read_packet(&mut self) -> anyhow::Result<Option<Packet<'_>>> {
+        let len = self.recv_packet().await?;
+        if len == 0 {
             return Ok(None);
         }
 
-        let header_len = Packet::header_len(buf[0]);
-        ensure!(buf.len() >= header_len + 1, "Invalid packet length");
+        let header_len = Packet::header_len(self.recv_buf[0]);
+        ensure!(len >= header_len + 1, "Invalid packet length");
 
-        let packet = self.conn.recv_packet(buf);
-        self.flush().await?;
+        let packet = self.conn.recv_packet(&self.recv_buf[..len]);
+        flush_conn(&mut self.stream, &mut self.conn).await?;
         Ok(packet)
     }
 
-    pub async fn wait_for_unchoke(&mut self, buf: &mut Vec<u8>) -> anyhow::Result<()> {
+    pub async fn wait_for_unchoke(&mut self) -> anyhow::Result<()> {
         while self.conn.is_choked() {
-            self.read_packet(buf).await?;
+            self.read_packet().await?;
         }
         Ok(())
     }
@@ -73,15 +71,14 @@ where
     pub async fn get_metadata(&mut self) -> anyhow::Result<Vec<u8>> {
         debug!("Request metadata");
 
-        let buf = &mut Vec::new();
-        self.wait_for_unchoke(buf).await?;
+        self.wait_for_unchoke().await?;
 
         if !self.conn.request_metadata() {
             bail!("Metadata request not supported");
         }
 
         loop {
-            self.read_packet(buf).await?;
+            self.read_packet().await?;
 
             while let Some(event) = self.conn.poll_event() {
                 match event {
@@ -93,7 +90,7 @@ where
 
     /// Receive one packet from the peer with length header removed.
     /// Hence returns an empty buffer if it is a keep-alive message.
-    async fn recv_packet<'a>(&mut self, buf: &'a mut Vec<u8>) -> anyhow::Result<&'a [u8]> {
+    async fn recv_packet(&mut self) -> anyhow::Result<usize> {
         let mut b = [0; 4];
         self.stream.read_exact(&mut b).await?;
         let len = u32::from_be_bytes(b) as usize;
@@ -102,19 +99,19 @@ where
 
         if len == 0 {
             // Keep-alive
-            return Ok(&[]);
+            return Ok(0);
         }
 
         ensure!(len <= 1024 * 1024, "Packet too large");
 
-        if buf.len() < len {
-            buf.resize(len, 0);
+        if self.recv_buf.len() < len {
+            self.recv_buf.resize(len, 0);
         }
 
-        let buf = &mut buf[..len];
+        let buf = &mut self.recv_buf[..len];
         self.stream.read_exact(buf).await?;
 
-        Ok(buf)
+        Ok(len)
     }
 
     pub fn send_request(&mut self, index: u32, begin: u32, len: u32) {
@@ -142,16 +139,18 @@ where
     }
 
     pub async fn flush(&mut self) -> anyhow::Result<()> {
-        let send_buf = self.conn.get_send_buf();
-        if !send_buf.is_empty() {
-            self.stream.write_all(&send_buf).await?;
-        }
-        Ok(())
+        flush_conn(&mut self.stream, &mut self.conn).await
     }
 
     pub fn is_choked(&self) -> bool {
         self.conn.is_choked()
     }
+}
+
+async fn flush_conn(stream: &mut impl AsyncStream, conn: &mut Connection) -> anyhow::Result<()> {
+    stream.write_all(&conn.get_send_buf()).await?;
+    stream.flush().await?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -276,8 +275,7 @@ mod tests {
 
         let f2 = async move {
             let mut c = Client::new(b);
-            let b = &mut vec![];
-            let p = c.read_packet(b).await.unwrap().unwrap();
+            let p = c.read_packet().await.unwrap().unwrap();
             assert_eq!(
                 p,
                 Packet::Piece(PieceBlock {
@@ -299,13 +297,13 @@ mod tests {
             assert!(c.conn.is_choked());
             c.send_interested();
             c.flush().await.unwrap();
-            c.read_packet(&mut vec![]).await.unwrap();
+            c.read_packet().await.unwrap();
             assert!(!c.conn.is_choked());
         };
 
         let f2 = async move {
             let mut c = Client::new(b);
-            c.read_packet(&mut vec![]).await.unwrap();
+            c.read_packet().await.unwrap();
         };
 
         join!(f1, f2);
@@ -319,18 +317,18 @@ mod tests {
             assert!(c.conn.is_choked());
             c.send_interested();
             c.flush().await.unwrap();
-            c.read_packet(&mut vec![]).await.unwrap();
+            c.read_packet().await.unwrap();
             assert!(!c.conn.is_choked());
             c.send_not_interested();
             c.flush().await.unwrap();
-            c.read_packet(&mut vec![]).await.unwrap();
+            c.read_packet().await.unwrap();
             assert!(c.conn.is_choked());
         };
 
         let f2 = async move {
             let mut c = Client::new(b);
-            c.read_packet(&mut vec![]).await.unwrap();
-            c.read_packet(&mut vec![]).await.unwrap();
+            c.read_packet().await.unwrap();
+            c.read_packet().await.unwrap();
         };
 
         join!(f1, f2);

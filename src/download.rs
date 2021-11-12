@@ -60,8 +60,6 @@ pub struct Download<'w, C> {
 
     /// Block download rate
     rate: SlidingAvg,
-
-    recv_buf: Vec<u8>,
 }
 
 impl<C> Drop for Download<'_, C> {
@@ -82,8 +80,7 @@ impl<'w, C: AsyncStream> Download<'w, C> {
         client.send_interested();
         client.flush().await?;
 
-        let mut recv_buf = Vec::new();
-        client.wait_for_unchoke(&mut recv_buf).await?;
+        client.wait_for_unchoke().await?;
 
         Ok(Download {
             client,
@@ -95,7 +92,6 @@ impl<'w, C: AsyncStream> Download<'w, C> {
             last_requested_blocks: 0,
             last_requested: Instant::now(),
             rate: SlidingAvg::new(10),
-            recv_buf,
         })
     }
 
@@ -122,7 +118,7 @@ impl<'w, C: AsyncStream> Download<'w, C> {
 
     async fn handle_msg(&mut self) -> anyhow::Result<()> {
         let PieceBlock { begin, index, data } = loop {
-            let packet = self.client.read_packet(&mut self.recv_buf).await?;
+            let packet = self.client.read_packet().await?;
             if let Some(Packet::Piece(p)) = packet {
                 break p;
             }

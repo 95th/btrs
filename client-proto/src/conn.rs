@@ -9,7 +9,7 @@ use crate::bitfield::Bitfield;
 use crate::event::Event;
 use crate::ext::{ExtendedMessage, MetadataMsg};
 use crate::handshake::Handshake;
-use crate::state::{Error, State};
+use crate::state::Error;
 use crate::{msg::*, InfoHash, PeerId};
 
 pub struct Connection {
@@ -18,16 +18,9 @@ pub struct Connection {
     bitfield: Bitfield,
     choked: bool,
     interested: bool,
-    state: State,
     parser: Parser,
     events: VecDeque<Event>,
     ut_metadata: Option<UtMetadata>,
-}
-
-macro_rules! ensure_state {
-    ($self:expr, $( $state:pat_param )|+ ) => {
-        ensure!(matches!($self.state, $( $state )|+), Error::InvalidState)
-    };
 }
 
 impl Connection {
@@ -38,7 +31,6 @@ impl Connection {
             bitfield: Bitfield::new(),
             choked: true,
             interested: false,
-            state: State::HandshakeRequired,
             parser: Parser::new(),
             events: VecDeque::new(),
             ut_metadata: None,
@@ -49,13 +41,10 @@ impl Connection {
         self.events.pop_front()
     }
 
-    pub fn send_handshake(&mut self, info_hash: &InfoHash, peer_id: &PeerId) -> anyhow::Result<()> {
-        ensure_state!(self, State::HandshakeRequired);
+    pub fn send_handshake(&mut self, info_hash: &InfoHash, peer_id: &PeerId) {
         let mut h = Handshake::new(*info_hash, *peer_id);
         h.set_extended(true);
         self.send_buf.extend_from_slice(h.as_bytes());
-        self.state = State::HandshakeSent;
-        Ok(())
     }
 
     pub fn recv_handshake(
@@ -63,11 +52,9 @@ impl Connection {
         info_hash: &InfoHash,
         data: [u8; 68],
     ) -> anyhow::Result<PeerId> {
-        ensure_state!(self, State::HandshakeSent);
         let h: Handshake = unsafe { std::mem::transmute(data) };
         ensure!(h.is_supported(), Error::UnsupportedProtocol);
         ensure!(h.info_hash == *info_hash, Error::UnsupportedProtocol);
-        self.state = State::Ready;
         Ok(h.peer_id)
     }
 
@@ -569,24 +556,17 @@ mod tests {
     #[test]
     fn handshake() {
         let mut c = Connection::new();
-        assert_eq!(c.state, State::HandshakeRequired);
-
-        c.send_handshake(&[0; 20], &[1; 20]).unwrap();
-        assert_eq!(c.state, State::HandshakeSent);
+        c.send_handshake(&[0; 20], &[1; 20]);
 
         let h = Handshake::new([0; 20], [2; 20]);
         let p = c.recv_handshake(&[0; 20], *h.as_bytes()).unwrap();
         assert_eq!(p, [2; 20]);
-        assert_eq!(c.state, State::Ready);
     }
 
     #[test]
     fn get_metadata() {
         let mut c = Connection::new();
         let mut sender = Connection::new();
-
-        // Assume handshake is done
-        c.state = State::Ready;
 
         sender.send_ext(0, MetadataMsg::Handshake(2, 20));
         c.recv_packet(&sender.get_send_buf()[4..]);
@@ -641,9 +621,6 @@ mod tests {
     fn get_metadata_with_other_interleaving_msg() {
         let mut c = Connection::new();
         let mut sender = Connection::new();
-
-        // Assume handshake is done
-        c.state = State::Ready;
 
         sender.send_ext(0, MetadataMsg::Handshake(2, 10));
         c.recv_packet(&sender.get_send_buf()[4..]);
