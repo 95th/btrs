@@ -161,6 +161,8 @@ impl MagnetUri {
             let mut client = Client::new(socket);
             client.send_handshake(&self.info_hash, peer_id).await?;
             client.recv_handshake(&self.info_hash).await?;
+            client.send_unchoke();
+            client.send_interested();
             client.get_metadata().await
         };
 

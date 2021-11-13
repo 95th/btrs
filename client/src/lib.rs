@@ -1,7 +1,10 @@
 #[macro_use]
 extern crate tracing;
 
+use std::io;
+
 use anyhow::{bail, ensure};
+use bytes::{Buf, Bytes, BytesMut};
 use proto::{conn::Connection, event::Event, msg::Packet};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
@@ -14,7 +17,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin> AsyncStream for T {}
 pub struct Client<Stream> {
     stream: Stream,
     conn: Connection,
-    recv_buf: Vec<u8>,
+    recv_buf: BytesMut,
 }
 
 impl<Stream> Client<Stream>
@@ -25,7 +28,7 @@ where
         Self {
             stream,
             conn: Connection::new(),
-            recv_buf: Vec::new(),
+            recv_buf: BytesMut::with_capacity(1024),
         }
     }
 
@@ -47,17 +50,18 @@ where
         self.conn.recv_handshake(info_hash, buf)
     }
 
-    pub async fn read_packet(&mut self) -> anyhow::Result<Option<Packet<'_>>> {
-        let len = self.recv_packet().await?;
-        if len == 0 {
+    pub async fn read_packet(&mut self) -> anyhow::Result<Option<Packet>> {
+        let data = self.read_packet_bytes().await?;
+        if data.is_empty() {
+            // Keep-alive
             return Ok(None);
         }
 
-        let header_len = Packet::header_len(self.recv_buf[0]);
-        ensure!(len >= header_len + 1, "Invalid packet length");
+        let header_len = Packet::header_len(data[0]);
+        ensure!(data.len() >= header_len + 1, "Invalid packet length");
 
-        let packet = self.conn.recv_packet(&self.recv_buf[..len]);
-        flush_conn(&mut self.stream, &mut self.conn).await?;
+        let packet = self.conn.recv_packet(data);
+        self.flush().await?;
         Ok(packet)
     }
 
@@ -71,7 +75,9 @@ where
     pub async fn get_metadata(&mut self) -> anyhow::Result<Vec<u8>> {
         debug!("Request metadata");
 
-        self.wait_for_unchoke().await?;
+        while !self.conn.ext_handshaked() {
+            self.read_packet().await?;
+        }
 
         if !self.conn.request_metadata() {
             bail!("Metadata request not supported");
@@ -90,28 +96,18 @@ where
 
     /// Receive one packet from the peer with length header removed.
     /// Hence returns an empty buffer if it is a keep-alive message.
-    async fn recv_packet(&mut self) -> anyhow::Result<usize> {
-        let mut b = [0; 4];
-        self.stream.read_exact(&mut b).await?;
-        let len = u32::from_be_bytes(b) as usize;
-
-        trace!("Packet length: {}", len);
-
+    async fn read_packet_bytes(&mut self) -> anyhow::Result<Bytes> {
+        self.read_bytes(4).await?;
+        let len = self.recv_buf.get_u32() as usize;
         if len == 0 {
-            // Keep-alive
-            return Ok(0);
+            return Ok(Bytes::new());
         }
 
-        ensure!(len <= 1024 * 1024, "Packet too large");
+        ensure!(len <= 1024 * 1024, "Packet too large: {}", len);
+        self.read_bytes(len).await?;
 
-        if self.recv_buf.len() < len {
-            self.recv_buf.resize(len, 0);
-        }
-
-        let buf = &mut self.recv_buf[..len];
-        self.stream.read_exact(buf).await?;
-
-        Ok(len)
+        let packet = self.recv_buf.split().freeze();
+        Ok(packet)
     }
 
     pub fn send_request(&mut self, index: u32, begin: u32, len: u32) {
@@ -139,18 +135,33 @@ where
     }
 
     pub async fn flush(&mut self) -> anyhow::Result<()> {
-        flush_conn(&mut self.stream, &mut self.conn).await
+        self.stream.write_all(&self.conn.get_send_buf()).await?;
+        self.stream.flush().await?;
+        Ok(())
     }
 
     pub fn is_choked(&self) -> bool {
         self.conn.is_choked()
     }
-}
 
-async fn flush_conn(stream: &mut impl AsyncStream, conn: &mut Connection) -> anyhow::Result<()> {
-    stream.write_all(&conn.get_send_buf()).await?;
-    stream.flush().await?;
-    Ok(())
+    async fn read_bytes(&mut self, len: usize) -> io::Result<()> {
+        let mut read = self.recv_buf.len();
+
+        if read < len {
+            self.recv_buf.reserve(len - read);
+        }
+
+        while read < len {
+            let n = self.stream.read_buf(&mut self.recv_buf).await?;
+            if n == 0 {
+                return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "early EOF"));
+            }
+
+            read += n;
+        }
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -161,6 +172,7 @@ mod tests {
         task::{Context, Poll},
     };
 
+    use bytes::Bytes;
     use futures::{
         channel::mpsc::{self, Receiver, Sender},
         join, ready, SinkExt, StreamExt,
@@ -281,7 +293,7 @@ mod tests {
                 Packet::Piece(PieceBlock {
                     index: 1,
                     begin: 2,
-                    data: b"hello"
+                    data: Bytes::from_static(b"hello")
                 })
             )
         };

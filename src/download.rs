@@ -129,7 +129,7 @@ impl<'w, C: AsyncStream> Download<'w, C> {
             .remove(&index)
             .context("Received a piece that was not requested")?;
 
-        if p.write_block(begin, data) {
+        if p.write_block(begin, &data) {
             p.downloaded += data.len() as u32;
             self.work.add_downloaded(data.len());
             self.backlog -= 1;
