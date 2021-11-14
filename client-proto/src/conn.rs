@@ -3,7 +3,7 @@ use std::fmt::Debug;
 use std::ops::Deref;
 
 use ben::{Encode, Parser};
-use bytes::{Buf, BufMut, Bytes};
+use bytes::{Buf, BufMut};
 
 use crate::bitfield::Bitfield;
 use crate::event::Event;
@@ -190,7 +190,7 @@ impl Connection {
         self.ext_handshaked
     }
 
-    pub fn recv_packet(&mut self, mut data: Bytes) -> Option<Packet> {
+    pub fn recv_packet<'a>(&mut self, mut data: &'a [u8]) -> Option<Packet<'a>> {
         let id = data.get_u8();
         let mut packet = None;
         match id {
@@ -252,8 +252,8 @@ impl Connection {
         packet
     }
 
-    fn recv_ext(&mut self, ext: Bytes) {
-        let ext = match ExtendedMessage::parse(&ext, &mut self.parser) {
+    fn recv_ext(&mut self, ext: &[u8]) {
+        let ext = match ExtendedMessage::parse(ext, &mut self.parser) {
             Ok(e) => e,
             Err(e) => {
                 warn!("{}", e);
@@ -443,7 +443,7 @@ mod tests {
         rx.choked = false;
         tx.send_choke();
 
-        let data = tx.get_send_buf()[4..].to_vec().into();
+        let data = &tx.get_send_buf()[4..];
         assert!(rx.recv_packet(data).is_none());
         assert!(rx.choked);
     }
@@ -454,7 +454,7 @@ mod tests {
         let mut tx = Connection::new();
         tx.send_unchoke();
 
-        let data = tx.get_send_buf()[4..].to_vec().into();
+        let data = &tx.get_send_buf()[4..];
         assert!(rx.recv_packet(data).is_none());
         assert!(!rx.choked);
     }
@@ -465,7 +465,7 @@ mod tests {
         let mut tx = Connection::new();
         tx.send_interested();
 
-        let data = tx.get_send_buf()[4..].to_vec().into();
+        let data = &tx.get_send_buf()[4..];
         assert!(rx.recv_packet(data).is_none());
         assert!(rx.interested);
         assert_eq!(rx.send_buf, &[0, 0, 0, 1, UNCHOKE]);
@@ -478,7 +478,7 @@ mod tests {
         rx.interested = true;
         tx.send_not_interested();
 
-        let data = tx.get_send_buf()[4..].to_vec().into();
+        let data = &tx.get_send_buf()[4..];
         assert!(rx.recv_packet(data).is_none());
         assert!(!rx.interested);
         assert_eq!(rx.send_buf, &[0, 0, 0, 1, CHOKE]);
@@ -491,7 +491,7 @@ mod tests {
         rx.bitfield.resize(16);
         tx.send_have(5);
 
-        let data = tx.get_send_buf()[4..].to_vec().into();
+        let data = &tx.get_send_buf()[4..];
         assert!(rx.recv_packet(data).is_none());
         assert_eq!(rx.bitfield.get_bit(5), true);
     }
@@ -504,7 +504,7 @@ mod tests {
         tx.bitfield.set_bit(5);
         tx.send_bitfield();
 
-        let data = tx.get_send_buf()[4..].to_vec().into();
+        let data = &tx.get_send_buf()[4..];
         assert!(rx.recv_packet(data).is_none());
         assert_eq!(rx.bitfield.as_bytes(), &[0b0000_0100, 0b0000_0000]);
     }
@@ -515,7 +515,7 @@ mod tests {
         let mut tx = Connection::new();
         tx.send_request(2, 3, 4);
 
-        let data = tx.get_send_buf()[4..].to_vec().into();
+        let data = &tx.get_send_buf()[4..];
         assert_eq!(
             Packet::Request {
                 index: 2,
@@ -532,12 +532,12 @@ mod tests {
         let mut tx = Connection::new();
         tx.send_piece(2, 3, b"hello");
 
-        let data = tx.get_send_buf()[4..].to_vec().into();
+        let data = &tx.get_send_buf()[4..];
         assert_eq!(
             Packet::Piece(PieceBlock {
                 index: 2,
                 begin: 3,
-                data: Bytes::from_static(b"hello")
+                data: b"hello"
             }),
             rx.recv_packet(data).unwrap()
         );
@@ -549,7 +549,7 @@ mod tests {
         let mut tx = Connection::new();
         tx.send_cancel(2, 3, 4);
 
-        let data = tx.get_send_buf()[4..].to_vec().into();
+        let data = &tx.get_send_buf()[4..];
         assert_eq!(
             Packet::Cancel {
                 index: 2,
@@ -576,7 +576,7 @@ mod tests {
         let mut sender = Connection::new();
 
         sender.send_ext(0, MetadataMsg::Handshake(2, 20));
-        c.recv_packet(sender.get_send_buf()[4..].to_vec().into());
+        c.recv_packet(&sender.get_send_buf()[4..]);
 
         assert_eq!(
             c.ut_metadata.as_ref().unwrap(),
@@ -591,7 +591,7 @@ mod tests {
         assert_eq!(c.poll_event(), None);
 
         sender.send_ext_data(1, MetadataMsg::Data(0, 10), b"xxxxxyyyyy");
-        c.recv_packet(sender.get_send_buf()[4..].to_vec().into());
+        c.recv_packet(&sender.get_send_buf()[4..]);
 
         assert_eq!(
             c.ut_metadata.as_ref().unwrap(),
@@ -606,7 +606,7 @@ mod tests {
         assert_eq!(c.poll_event(), None);
 
         sender.send_ext_data(1, MetadataMsg::Data(1, 10), b"tttttqqqqq");
-        c.recv_packet(sender.get_send_buf()[4..].to_vec().into());
+        c.recv_packet(&sender.get_send_buf()[4..]);
 
         assert_eq!(
             c.ut_metadata.as_ref().unwrap(),
@@ -630,18 +630,18 @@ mod tests {
         let mut sender = Connection::new();
 
         sender.send_ext(0, MetadataMsg::Handshake(2, 10));
-        c.recv_packet(sender.get_send_buf()[4..].to_vec().into());
+        c.recv_packet(&sender.get_send_buf()[4..]);
 
         assert_eq!(c.poll_event(), None);
 
         // A wild choke appears
         sender.send_choke();
-        c.recv_packet(sender.get_send_buf()[4..].to_vec().into());
+        c.recv_packet(&sender.get_send_buf()[4..]);
 
         assert_eq!(c.poll_event(), None);
 
         sender.send_ext_data(1, MetadataMsg::Data(0, 10), b"xxxxxyyyyy");
-        c.recv_packet(sender.get_send_buf()[4..].to_vec().into());
+        c.recv_packet(&sender.get_send_buf()[4..]);
 
         assert_eq!(
             c.poll_event().unwrap(),

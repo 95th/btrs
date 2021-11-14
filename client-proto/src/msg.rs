@@ -1,5 +1,3 @@
-use bytes::Bytes;
-
 pub const CHOKE: u8 = 0;
 pub const UNCHOKE: u8 = 1;
 pub const INTERESTED: u8 = 2;
@@ -12,13 +10,13 @@ pub const CANCEL: u8 = 8;
 pub const EXTENDED: u8 = 20;
 
 #[derive(Debug, PartialEq)]
-pub enum Packet {
+pub enum Packet<'a> {
     Request { index: u32, begin: u32, len: u32 },
-    Piece(PieceBlock),
+    Piece(PieceBlock<'a>),
     Cancel { index: u32, begin: u32, len: u32 },
 }
 
-impl Packet {
+impl Packet<'_> {
     pub fn header_len(id: u8) -> usize {
         match id {
             HAVE => 4,
@@ -30,8 +28,8 @@ impl Packet {
 }
 
 #[derive(Debug, PartialEq)]
-pub struct PieceBlock {
+pub struct PieceBlock<'a> {
     pub index: u32,
     pub begin: u32,
-    pub data: Bytes,
+    pub data: &'a [u8],
 }
