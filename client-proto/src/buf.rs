@@ -2,7 +2,7 @@ use crate::avg::MovingAverage;
 
 const MAX_BUF_SIZE: usize = 1024 * 1024;
 
-pub struct RecvBuffer {
+pub struct RecvBuf {
     buf: Vec<u8>,
     write_pos: usize,
     read_pos: usize,
@@ -10,7 +10,7 @@ pub struct RecvBuffer {
     read_rate: MovingAverage<5>,
 }
 
-impl RecvBuffer {
+impl RecvBuf {
     pub fn new() -> Self {
         Self {
             buf: Vec::new(),
@@ -132,11 +132,11 @@ impl RecvBuffer {
 
 #[cfg(test)]
 mod tests {
-    use super::RecvBuffer;
+    use super::RecvBuf;
 
     #[test]
     fn read_consumes_all_written() {
-        let mut b = RecvBuffer::new();
+        let mut b = RecvBuf::new();
         let w = b.write_reserve(10);
         w[..8].fill(1);
         b.advance_write(8);
@@ -148,7 +148,7 @@ mod tests {
 
     #[test]
     fn read_space_is_discarded() {
-        let mut b = RecvBuffer::new();
+        let mut b = RecvBuf::new();
         let w = b.write_reserve(10);
         w[..8].fill(1);
         b.advance_write(8);
@@ -164,7 +164,7 @@ mod tests {
 
     #[test]
     fn unread_data_is_preserved_and_buf_resizes() {
-        let mut b = RecvBuffer::new();
+        let mut b = RecvBuf::new();
         let w = b.write_reserve(10);
         w[..8].fill(1);
         b.advance_write(8);
@@ -181,7 +181,7 @@ mod tests {
 
     #[test]
     fn write_reserve_returns_empty_for_buffered_data() {
-        let mut b = RecvBuffer::new();
+        let mut b = RecvBuf::new();
         let w = b.write_reserve(10);
         w[..8].fill(1);
         b.advance_write(8);
@@ -191,7 +191,7 @@ mod tests {
 
     #[test]
     fn write_reserve_returns_mut_slice_for_partially_buffered_data() {
-        let mut b = RecvBuffer::new();
+        let mut b = RecvBuf::new();
         let w = b.write_reserve(10);
         w[..8].fill(1);
         b.advance_write(8);
@@ -201,7 +201,7 @@ mod tests {
 
     #[test]
     fn read_array_advances_buf() {
-        let mut b = RecvBuffer::new();
+        let mut b = RecvBuf::new();
         let w = b.write_reserve(10);
         w[..8].fill(1);
         b.advance_write(8);
@@ -214,7 +214,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn reading_more_than_buffered_panics() {
-        let mut b = RecvBuffer::new();
+        let mut b = RecvBuf::new();
         b.write_reserve(8);
         b.advance_write(2);
         b.read(3);
@@ -222,7 +222,7 @@ mod tests {
 
     #[test]
     fn peek_doesnt_consume() {
-        let mut b = RecvBuffer::new();
+        let mut b = RecvBuf::new();
         let w = b.write_reserve(8);
         w[..8].fill(1);
         b.advance_write(8);
@@ -235,14 +235,14 @@ mod tests {
     #[test]
     #[should_panic]
     fn peek_without_buffered_panics() {
-        let mut b = RecvBuffer::new();
+        let mut b = RecvBuf::new();
         b.write_reserve(1);
         b.peek();
     }
 
     #[test]
     fn read_space_is_not_discarded_if_there_is_sufficient_space() {
-        let mut b = RecvBuffer::new();
+        let mut b = RecvBuf::new();
 
         let w = b.write_reserve(10);
         w[..8].fill(1);

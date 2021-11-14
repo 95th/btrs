@@ -4,7 +4,7 @@ extern crate tracing;
 use std::io;
 
 use anyhow::{bail, ensure};
-use proto::{buf::RecvBuffer, conn::Connection, event::Event, msg::Packet};
+use proto::{buf::RecvBuf, conn::Connection, event::Event, msg::Packet};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 pub use proto::*;
@@ -16,7 +16,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin> AsyncStream for T {}
 pub struct Client<Stream> {
     stream: Stream,
     conn: Connection,
-    recv_buf: RecvBuffer,
+    recv_buf: RecvBuf,
 }
 
 impl<Stream> Client<Stream>
@@ -27,7 +27,7 @@ where
         Self {
             stream,
             conn: Connection::new(),
-            recv_buf: RecvBuffer::with_capacity(12),
+            recv_buf: RecvBuf::with_capacity(12),
         }
     }
 
