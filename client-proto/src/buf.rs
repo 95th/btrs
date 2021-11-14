@@ -31,7 +31,7 @@ impl RecvBuffer {
     /// Reserve at least `len` unread bytes in the buffer and return a mutable reference
     /// to the unwritten region.
     ///
-    /// If the `len` bytes are already written to this buffer, it will return an empty buffer.
+    /// If the `len` bytes are already buffered in this buffer, it will return an empty buffer.
     pub fn write_reserve(&mut self, len: usize) -> &mut [u8] {
         let unread = self.write_pos - self.read_pos;
         if unread >= len {
@@ -108,22 +108,158 @@ impl RecvBuffer {
 
     /// Read one bytes from current read cursor position without advancing.
     pub fn peek(&self) -> u8 {
+        assert!(self.read_pos < self.write_pos);
         self.buf[self.read_pos]
     }
 
     /// Read `n` bytes from current read cursor and advance the read
     /// cursor by `n` bytes and returns reference to an slice of `n` size.
     pub fn read(&mut self, n: usize) -> &[u8] {
-        self.read_rate.add_sample(n as isize);
+        assert!(self.read_pos + n <= self.write_pos);
         let buf = &self.buf[self.read_pos..self.read_pos + n];
         self.read_pos += n;
+        self.read_rate.add_sample(n as isize);
         buf
     }
 
     /// Read `N` bytes from current read cursor and advance the read
     /// cursor by `N` bytes and returns reference to an array of `N` size.
     pub fn read_array<const N: usize>(&mut self) -> &[u8; N] {
-        let b = self.read(N);
-        unsafe { &*b.as_ptr().cast() }
+        let buf = self.read(N);
+        unsafe { &*buf.as_ptr().cast() }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::RecvBuffer;
+
+    #[test]
+    fn read_consumes_all_written() {
+        let mut b = RecvBuffer::new();
+        let w = b.write_reserve(10);
+        w[..8].fill(1);
+        b.advance_write(8);
+
+        assert_eq!(b.read(8), &[1; 8]);
+        assert_eq!(b.read_pos, 8);
+        assert_eq!(b.write_pos, 8);
+    }
+
+    #[test]
+    fn read_space_is_discarded() {
+        let mut b = RecvBuffer::new();
+        let w = b.write_reserve(10);
+        w[..8].fill(1);
+        b.advance_write(8);
+
+        assert_eq!(b.read(8), &[1; 8]);
+        assert_eq!(b.read_pos, 8);
+        assert_eq!(b.write_pos, 8);
+
+        b.write_reserve(3);
+        assert_eq!(b.read_pos, 0);
+        assert_eq!(b.write_pos, 0);
+    }
+
+    #[test]
+    fn unread_data_is_preserved_and_buf_resizes() {
+        let mut b = RecvBuffer::new();
+        let w = b.write_reserve(10);
+        w[..8].fill(1);
+        b.advance_write(8);
+
+        assert_eq!(b.read_pos, 0);
+        assert_eq!(b.write_pos, 8);
+        assert_eq!(b.buf.len(), 10);
+
+        b.write_reserve(11);
+        assert_eq!(b.read_pos, 0);
+        assert_eq!(b.write_pos, 8);
+        assert_eq!(b.buf.len(), 11);
+    }
+
+    #[test]
+    fn write_reserve_returns_empty_for_buffered_data() {
+        let mut b = RecvBuffer::new();
+        let w = b.write_reserve(10);
+        w[..8].fill(1);
+        b.advance_write(8);
+
+        assert_eq!(b.write_reserve(8), &mut []);
+    }
+
+    #[test]
+    fn write_reserve_returns_mut_slice_for_partially_buffered_data() {
+        let mut b = RecvBuffer::new();
+        let w = b.write_reserve(10);
+        w[..8].fill(1);
+        b.advance_write(8);
+
+        assert_eq!(b.write_reserve(10).len(), 2);
+    }
+
+    #[test]
+    fn read_array_advances_buf() {
+        let mut b = RecvBuffer::new();
+        let w = b.write_reserve(10);
+        w[..8].fill(1);
+        b.advance_write(8);
+
+        assert_eq!(b.read_array::<8>(), &[1; 8]);
+        assert_eq!(b.read_pos, 8);
+        assert_eq!(b.write_pos, 8);
+    }
+
+    #[test]
+    #[should_panic]
+    fn reading_more_than_buffered_panics() {
+        let mut b = RecvBuffer::new();
+        b.write_reserve(8);
+        b.advance_write(2);
+        b.read(3);
+    }
+
+    #[test]
+    fn peek_doesnt_consume() {
+        let mut b = RecvBuffer::new();
+        let w = b.write_reserve(8);
+        w[..8].fill(1);
+        b.advance_write(8);
+
+        assert_eq!(b.read_pos, 0);
+        assert_eq!(b.peek(), 1);
+        assert_eq!(b.read_pos, 0);
+    }
+
+    #[test]
+    #[should_panic]
+    fn peek_without_buffered_panics() {
+        let mut b = RecvBuffer::new();
+        b.write_reserve(1);
+        b.peek();
+    }
+
+    #[test]
+    fn read_space_is_not_discarded_if_there_is_sufficient_space() {
+        let mut b = RecvBuffer::new();
+
+        let w = b.write_reserve(10);
+        w[..8].fill(1);
+        b.advance_write(8);
+        assert_eq!(b.write_pos, 8);
+
+        assert_eq!(b.read_pos, 0);
+        assert_eq!(b.read(7), &[1; 7]);
+        assert_eq!(b.read_pos, 7);
+
+        let w = b.write_reserve(3);
+        w[..2].fill(2);
+        b.advance_write(2);
+        assert_eq!(b.write_pos, 10);
+
+        assert_eq!(b.read_pos, 7);
+        assert_eq!(b.read(3), &[1, 2, 2]);
+        assert_eq!(b.read_pos, 10);
     }
 }
