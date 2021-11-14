@@ -161,7 +161,7 @@ where
 }
 
 async fn flush(stream: &mut impl AsyncStream, conn: &mut Connection) -> anyhow::Result<()> {
-    stream.write_all(&conn.get_send_buf()).await?;
+    stream.write_all(&conn.send_buf()).await?;
     stream.flush().await?;
     Ok(())
 }
