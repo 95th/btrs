@@ -6,7 +6,7 @@ pub struct RecvBuffer {
     buf: Vec<u8>,
     lo: usize,
     hi: usize,
-    write_rate: MovingAverage,
+    write_rate: MovingAverage<10>,
 }
 
 impl RecvBuffer {
@@ -15,7 +15,7 @@ impl RecvBuffer {
             buf: Vec::new(),
             lo: 0,
             hi: 0,
-            write_rate: MovingAverage::new(10),
+            write_rate: MovingAverage::new(),
         }
     }
 

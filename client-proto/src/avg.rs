@@ -3,26 +3,23 @@
 /// [ema]: https://blog.libtorrent.org/2014/09/running-averages/
 ///
 #[derive(Default)]
-pub struct MovingAverage {
+pub struct MovingAverage<const N: usize> {
     mean: isize,
     num_samples: isize,
-    max_samples: isize,
 }
 
-impl MovingAverage {
-    pub fn new(max_samples: isize) -> Self {
-        assert!(max_samples > 0);
+impl<const N: usize> MovingAverage<N> {
+    pub fn new() -> Self {
         Self {
             mean: 0,
             num_samples: 0,
-            max_samples,
         }
     }
 
     pub fn add_sample(&mut self, mut sample: isize) {
         sample *= 64;
 
-        if self.num_samples < self.max_samples {
+        if self.num_samples < N as isize {
             self.num_samples += 1;
         }
 
@@ -44,7 +41,7 @@ mod tests {
 
     #[test]
     fn reaction_time() {
-        let mut avg = MovingAverage::new(10);
+        let mut avg = MovingAverage::<10>::new();
         avg.add_sample(-10);
         avg.add_sample(10);
 
@@ -53,7 +50,7 @@ mod tests {
 
     #[test]
     fn reaction_time2() {
-        let mut avg = MovingAverage::new(10);
+        let mut avg = MovingAverage::<10>::new();
         avg.add_sample(10);
         avg.add_sample(20);
 
@@ -62,7 +59,7 @@ mod tests {
 
     #[test]
     fn converge() {
-        let mut avg = MovingAverage::new(10);
+        let mut avg = MovingAverage::<10>::new();
         avg.add_sample(100);
         for _ in 0..20 {
             avg.add_sample(10);
@@ -73,7 +70,7 @@ mod tests {
 
     #[test]
     fn converge2() {
-        let mut avg = MovingAverage::new(10);
+        let mut avg = MovingAverage::<10>::new();
         avg.add_sample(-100);
         for _ in 0..20 {
             avg.add_sample(-10);
@@ -84,7 +81,7 @@ mod tests {
 
     #[test]
     fn random_converge() {
-        let mut avg = MovingAverage::new(10);
+        let mut avg = MovingAverage::<10>::new();
         let samples = [
             49, 51, 60, 46, 65, 53, 76, 59, 57, 54, 56, 51, 45, 80, 53, 62, 69, 67, 66, 56, 56, 61,
             52, 61, 61, 62, 59, 53, 48, 68, 47, 47, 63, 51, 53, 54, 46, 65, 64, 64, 45, 68, 64, 66,
