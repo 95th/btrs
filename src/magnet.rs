@@ -2,12 +2,13 @@ use crate::announce::{DhtTracker, Tracker};
 use crate::future::timeout;
 use crate::peer::Peer;
 use crate::torrent::Torrent;
-use anyhow::Context;
+use anyhow::{ensure, Context};
 use ben::decode::Dict;
 use ben::Parser;
 use client::{Client, InfoHash, PeerId};
 use futures::stream::FuturesUnordered;
 use futures::stream::StreamExt;
+use sha1::Sha1;
 use std::collections::{HashSet, VecDeque};
 use std::net::SocketAddr;
 use tokio::net::TcpStream;
@@ -156,23 +157,26 @@ impl MagnetUri {
 
     #[instrument(skip_all, fields(addr = ?peer.addr))]
     async fn request_metadata_from_peer(&self, peer: &Peer, peer_id: &PeerId) -> Option<Vec<u8>> {
-        let request = async {
-            let socket = TcpStream::connect(peer.addr).await?;
-            let mut client = Client::new(socket);
-            client.send_handshake(&self.info_hash, peer_id).await?;
-            client.recv_handshake(&self.info_hash).await?;
-            client.send_unchoke();
-            client.send_interested();
-            client.get_metadata().await
-        };
-
-        match timeout(request, 60).await {
+        match timeout(self.try_request_metadata(peer, peer_id), 60).await {
             Ok(metadata) => Some(metadata),
             Err(e) => {
                 warn!("{}", e);
                 None
             }
         }
+    }
+
+    async fn try_request_metadata(&self, peer: &Peer, peer_id: &PeerId) -> anyhow::Result<Vec<u8>> {
+        let socket = TcpStream::connect(peer.addr).await?;
+        let mut client = Client::new(socket);
+        client.send_handshake(&self.info_hash, peer_id).await?;
+        client.recv_handshake(&self.info_hash).await?;
+        client.send_unchoke();
+        client.send_interested();
+        let metadata = client.get_metadata().await?;
+        let hash = Sha1::from(&metadata).digest().bytes();
+        ensure!(hash == self.info_hash, "Invalid metadata");
+        Ok(metadata)
     }
 }
 

@@ -4,9 +4,9 @@ const MAX_BUF_SIZE: usize = 1024 * 1024;
 
 pub struct RecvBuffer {
     buf: Vec<u8>,
-    lo: usize,
-    hi: usize,
-    write_rate: MovingAverage<10>,
+    write_pos: usize,
+    read_pos: usize,
+    write_rate: MovingAverage<5>,
     read_rate: MovingAverage<5>,
 }
 
@@ -14,8 +14,8 @@ impl RecvBuffer {
     pub fn new() -> Self {
         Self {
             buf: Vec::new(),
-            lo: 0,
-            hi: 0,
+            write_pos: 0,
+            read_pos: 0,
             write_rate: MovingAverage::new(),
             read_rate: MovingAverage::new(),
         }
@@ -33,35 +33,35 @@ impl RecvBuffer {
     ///
     /// If the `len` bytes are already written to this buffer, it will return an empty buffer.
     pub fn write_reserve(&mut self, len: usize) -> &mut [u8] {
-        let unread = self.hi - self.lo;
+        let unread = self.write_pos - self.read_pos;
         if unread >= len {
             return &mut [];
         }
 
         self.discard_read(len);
 
-        if self.lo + len > self.buf.len() {
-            let new_len = self.lo + len;
+        if self.read_pos + len > self.buf.len() {
+            let new_len = self.read_pos + len;
             self.buf.resize(new_len, 0);
         }
 
-        &mut self.buf[self.hi..]
+        &mut self.buf[self.write_pos..]
     }
 
     fn discard_read(&mut self, needed: usize) {
-        if self.lo == 0 {
+        if self.read_pos == 0 {
             return;
         }
 
-        let unread = self.hi - self.lo;
+        let unread = self.write_pos - self.read_pos;
         if unread == 0 {
             // Nothing is buffered. So just shift the pointers.
-            self.hi -= self.lo;
-            self.lo = 0;
+            self.write_pos -= self.read_pos;
+            self.read_pos = 0;
             return;
         }
 
-        if self.lo + needed <= self.buf.len() {
+        if self.read_pos + needed <= self.buf.len() {
             // There is enough space for `needed` bytes. Do nothing.
             return;
         }
@@ -69,23 +69,23 @@ impl RecvBuffer {
         // We dont have enough space. Discard the left side of the buffer.
         unsafe {
             let p = self.buf.as_mut_ptr();
-            if unread > self.lo {
+            if unread > self.read_pos {
                 // There is overlap - use memmove
-                std::ptr::copy(p.add(self.lo), p, unread);
+                std::ptr::copy(p.add(self.read_pos), p, unread);
             } else {
                 // Otherwise memcpy
-                std::ptr::copy_nonoverlapping(p.add(self.lo), p, unread);
+                std::ptr::copy_nonoverlapping(p.add(self.read_pos), p, unread);
             }
         }
 
-        self.hi -= self.lo;
-        self.lo = 0;
+        self.write_pos -= self.read_pos;
+        self.read_pos = 0;
     }
 
     /// Advance the buffer's write cursor to denote that `n` bytes
     /// were successfully written to this buffer.
     pub fn advance_write(&mut self, n: usize) {
-        self.hi += n;
+        self.write_pos += n;
 
         self.write_rate.add_sample(n as isize);
         let write_rate = self.write_rate.mean() as usize;
@@ -108,15 +108,15 @@ impl RecvBuffer {
 
     /// Read one bytes from current read cursor position without advancing.
     pub fn peek(&self) -> u8 {
-        self.buf[self.lo]
+        self.buf[self.read_pos]
     }
 
     /// Read `n` bytes from current read cursor and advance the read
     /// cursor by `n` bytes and returns reference to an slice of `n` size.
     pub fn read(&mut self, n: usize) -> &[u8] {
         self.read_rate.add_sample(n as isize);
-        let buf = &self.buf[self.lo..self.lo + n];
-        self.lo += n;
+        let buf = &self.buf[self.read_pos..self.read_pos + n];
+        self.read_pos += n;
         buf
     }
 
