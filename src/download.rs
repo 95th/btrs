@@ -1,7 +1,7 @@
-use crate::avg::SlidingAvg;
 use crate::future::timeout;
 use crate::work::{Piece, PieceInfo, WorkQueue};
 use anyhow::Context;
+use client::avg::MovingAverage;
 use client::msg::{Packet, PieceBlock};
 use client::{AsyncStream, Client};
 use futures::channel::mpsc::Sender;
@@ -59,7 +59,7 @@ pub struct Download<'w, C> {
     last_requested: Instant,
 
     /// Block download rate
-    rate: SlidingAvg,
+    rate: MovingAverage<10>,
 }
 
 impl<C> Drop for Download<'_, C> {
@@ -91,7 +91,7 @@ impl<'w, C: AsyncStream> Download<'w, C> {
             max_requests: 5,
             last_requested_blocks: 0,
             last_requested: Instant::now(),
-            rate: SlidingAvg::new(10),
+            rate: MovingAverage::new(),
         })
     }
 
@@ -234,10 +234,10 @@ impl<'w, C: AsyncStream> Download<'w, C> {
         }
 
         let blocks_done = self.last_requested_blocks - self.backlog;
-        let blocks_per_sec = (1000 * blocks_done as u128 / millis) as i32;
+        let blocks_per_sec = 1000 * blocks_done as u128 / millis;
 
         // Update the average block download rate
-        self.rate.add_sample(blocks_per_sec);
+        self.rate.add_sample(blocks_per_sec as isize);
 
         let rate = self.rate.mean() as u32;
         if rate > MIN_REQUESTS {
