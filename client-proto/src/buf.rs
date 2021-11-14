@@ -86,6 +86,7 @@ impl RecvBuf {
     /// were successfully written to this buffer.
     pub fn advance_write(&mut self, n: usize) {
         self.write_pos += n;
+        assert!(self.write_pos <= self.buf.len());
 
         self.write_rate.add_sample(n as isize);
         let write_rate = self.write_rate.mean() as usize;
@@ -261,5 +262,20 @@ mod tests {
         assert_eq!(b.read_pos, 7);
         assert_eq!(b.read(3), &[1, 2, 2]);
         assert_eq!(b.read_pos, 10);
+    }
+
+    #[test]
+    fn advance_within_buffer() {
+        let mut b = RecvBuf::new();
+        b.write_reserve(2);
+        b.advance_write(2);
+    }
+
+    #[test]
+    #[should_panic]
+    fn advance_beyond_buffer_panics() {
+        let mut b = RecvBuf::new();
+        b.write_reserve(2);
+        b.advance_write(3);
     }
 }
