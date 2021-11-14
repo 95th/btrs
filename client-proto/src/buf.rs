@@ -7,6 +7,7 @@ pub struct RecvBuffer {
     lo: usize,
     hi: usize,
     write_rate: MovingAverage<10>,
+    read_rate: MovingAverage<5>,
 }
 
 impl RecvBuffer {
@@ -16,6 +17,7 @@ impl RecvBuffer {
             lo: 0,
             hi: 0,
             write_rate: MovingAverage::new(),
+            read_rate: MovingAverage::new(),
         }
     }
 
@@ -86,11 +88,20 @@ impl RecvBuffer {
         self.hi += n;
 
         self.write_rate.add_sample(n as isize);
+        let write_rate = self.write_rate.mean() as usize;
 
-        let new_len = 2 * self.write_rate.mean() as usize;
+        // If writes are filling atleast 90% of current buffer length at once,
+        // increase the buffer length by 50%
+        if write_rate >= self.buf.len() * 90 / 100 {
+            let mut new_len = MAX_BUF_SIZE.min(self.buf.len() * 3 / 2);
 
-        if new_len > self.buf.len() {
-            let new_len = new_len.max(self.buf.len() * 2).min(MAX_BUF_SIZE);
+            let read = self.read_rate.mean() as usize;
+            if read > 0 {
+                // Make the new length multiple of read rate so that there is
+                // less copying when discarding read bytes
+                new_len = read * ((new_len + read - 1) / read);
+            }
+
             self.buf.resize(new_len, 0);
         }
     }
@@ -103,6 +114,7 @@ impl RecvBuffer {
     /// Read `n` bytes from current read cursor and advance the read
     /// cursor by `n` bytes and returns reference to an slice of `n` size.
     pub fn read(&mut self, n: usize) -> &[u8] {
+        self.read_rate.add_sample(n as isize);
         let buf = &self.buf[self.lo..self.lo + n];
         self.lo += n;
         buf
