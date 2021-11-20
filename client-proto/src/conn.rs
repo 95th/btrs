@@ -218,9 +218,8 @@ impl Connection {
                 self.bitfield.set_bit(index as usize);
             }
             BITFIELD => {
-                let len = data.len();
-                trace!("Got bitfield len: {}", len);
-                self.bitfield.copy_from_slice(len * 8, &data);
+                trace!("Got bitfield len: {}", data.len());
+                self.bitfield.copy_from_slice(&data);
             }
             REQUEST => {
                 let index = data.get_u32();

@@ -40,9 +40,8 @@ impl Bitfield {
         unsafe { std::slice::from_raw_parts(ptr, self.len_bytes()) }
     }
 
-    pub fn copy_from_slice(&mut self, bits: usize, buf: &[u8]) {
-        self.resize(bits);
-        assert_eq!(buf.len(), self.len_bytes());
+    pub fn copy_from_slice(&mut self, buf: &[u8]) {
+        self.resize(buf.len() * 8);
         unsafe {
             let ptr = self.buf.as_mut_ptr().cast();
             std::ptr::copy_nonoverlapping(buf.as_ptr(), ptr, self.len_bytes());
@@ -294,7 +293,9 @@ mod tests {
         let mut b = Bitfield::with_size(16);
         assert_eq!(b.len(), 16);
 
-        b.copy_from_slice(20, &[0xff, 0xff, 0xff]);
+        b.copy_from_slice(&[0xff, 0xff, 0xff]);
+        b.resize(20);
+
         assert_eq!(b.count(), 20);
         assert_eq!(b.as_bytes(), &[0xff, 0xff, 0xf0]);
     }
