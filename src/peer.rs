@@ -19,6 +19,6 @@ pub fn generate_peer_id() -> PeerId {
     rand::thread_rng()
         .sample_iter(&Alphanumeric)
         .zip(&mut buf[8..])
-        .for_each(|(c, b)| *b = c as u8);
+        .for_each(|(c, b)| *b = c);
     buf
 }
