@@ -1,5 +1,4 @@
 use crate::announce::{AnnounceRequest, AnnounceResponse};
-use crate::peer::Peer;
 use anyhow::Context;
 use byteorder::{ReadBytesExt, WriteBytesExt, BE};
 use rand::thread_rng;
@@ -100,7 +99,7 @@ impl<'a> UdpTracker<'a> {
             let port = c.read_u16::<BE>()?;
             let addr: IpAddr = ip_addr.to_be_bytes().into();
 
-            peers.insert(Peer::new(addr, port));
+            peers.insert(SocketAddr::new(addr, port));
             n -= 6;
         }
 

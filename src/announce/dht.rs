@@ -1,7 +1,8 @@
-use crate::peer::Peer;
 use client::InfoHash;
 use dht::Dht;
 use dht::NodeId;
+use std::collections::HashSet;
+use std::net::SocketAddr;
 use std::net::ToSocketAddrs;
 use std::time::Duration;
 use std::time::Instant;
@@ -34,7 +35,7 @@ impl DhtTracker {
         })
     }
 
-    pub async fn announce(&mut self, info_hash: &InfoHash) -> anyhow::Result<Vec<Peer>> {
+    pub async fn announce(&mut self, info_hash: &InfoHash) -> anyhow::Result<HashSet<SocketAddr>> {
         tokio::time::sleep_until(self.next_announce.into()).await;
 
         debug!("Announcing to DHT");
@@ -50,6 +51,6 @@ impl DhtTracker {
         );
 
         self.next_announce = Instant::now() + Duration::from_secs(15 * 60);
-        Ok(peers.into_iter().map(|a| a.into()).collect())
+        Ok(peers)
     }
 }

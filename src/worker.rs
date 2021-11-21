@@ -2,11 +2,9 @@ use crate::{
     announce::{DhtTracker, Tracker},
     download::Download,
     future::timeout,
-    peer::Peer,
-    torrent::Torrent,
     work::{Piece, WorkQueue},
 };
-use client::{Client, InfoHash, PeerId};
+use client::{torrent::Torrent, Client, InfoHash, PeerId};
 use futures::{
     channel::mpsc::{self, Sender},
     select,
@@ -15,6 +13,7 @@ use futures::{
 };
 use std::{
     collections::{HashSet, VecDeque},
+    net::SocketAddr,
     time::Duration,
 };
 use tokio::{net::TcpStream, time};
@@ -24,24 +23,24 @@ pub struct TorrentWorker {
     peer_id: PeerId,
     info_hash: InfoHash,
     work: WorkQueue,
-    trackers: VecDeque<Tracker>,
-    peers: HashSet<Peer>,
-    peers6: HashSet<Peer>,
+    trackers: Vec<String>,
+    peers: HashSet<SocketAddr>,
+    peers6: HashSet<SocketAddr>,
     dht_tracker: DhtTracker,
 }
 
 impl TorrentWorker {
-    pub fn new(torrent: Torrent) -> Self {
+    pub fn new(torrent: Torrent, peer_id: PeerId, dht: DhtTracker) -> Self {
         let work = WorkQueue::new(torrent.piece_len, torrent.length, torrent.piece_hashes);
 
         Self {
-            peer_id: torrent.peer_id,
+            peer_id,
             info_hash: torrent.info_hash,
             peers: torrent.peers,
-            peers6: torrent.peers6,
+            peers6: torrent.peers_v6,
             work,
-            trackers: torrent.trackers,
-            dht_tracker: torrent.dht_tracker,
+            trackers: torrent.tracker_urls,
+            dht_tracker: dht,
         }
     }
 
@@ -53,9 +52,13 @@ impl TorrentWorker {
         let work = &self.work;
         let info_hash = &self.info_hash;
         let peer_id = &self.peer_id;
-        let all_peers = &mut self.peers;
-        let all_peers6 = &mut self.peers6;
-        let trackers = &mut self.trackers;
+        let mut all_peers = self.peers.iter().copied().collect::<HashSet<_>>();
+        let mut all_peers6 = self.peers6.iter().copied().collect::<HashSet<_>>();
+        let mut trackers = self
+            .trackers
+            .iter()
+            .map(|t| Tracker::new(t.clone()))
+            .collect::<VecDeque<_>>();
         let dht_tracker = &mut self.dht_tracker;
 
         let pending_downloads = FuturesUnordered::new();
@@ -104,9 +107,9 @@ impl TorrentWorker {
                         for peer in to_connect.drain(..) {
                             let piece_tx = piece_tx.clone();
                             pending_downloads.push(async move {
-                                let span = info_span!("conn", addr = ?peer.addr);
+                                let span = info_span!("conn", addr = ?peer);
                                 let f = async {
-                                    let socket = timeout(TcpStream::connect(peer.addr), 3).await?;
+                                    let socket = timeout(TcpStream::connect(peer), 3).await?;
                                     let mut client = Client::new(socket);
                                     client.send_handshake(info_hash, peer_id).await?;
                                     client.recv_handshake(info_hash).await?;
@@ -133,7 +136,7 @@ impl TorrentWorker {
                     match maybe_result {
                         Some(Ok(())) => {},
                         Some(Err((e, peer))) => {
-                            warn!("Error occurred for peer {} : {}", peer.addr, e);
+                            warn!("Error occurred for peer {} : {}", peer, e);
 
                             if connected.remove(&peer) {
                                 failed.insert(peer);

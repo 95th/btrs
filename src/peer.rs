@@ -1,59 +1,17 @@
 use client::PeerId;
 use rand::{distributions::Alphanumeric, Rng};
-use std::{
-    convert::TryInto,
-    fmt,
-    hash::Hash,
-    net::{IpAddr, SocketAddr},
-};
+use std::net::SocketAddr;
 
-#[derive(Copy, Clone)]
-pub struct Peer {
-    pub addr: SocketAddr,
+pub fn v4(bytes: &[u8]) -> SocketAddr {
+    let ip: [u8; 4] = bytes[..4].try_into().unwrap();
+    let port_bytes: [u8; 2] = bytes[4..].try_into().unwrap();
+    SocketAddr::from((ip, u16::from_be_bytes(port_bytes)))
 }
 
-impl fmt::Debug for Peer {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.addr)
-    }
-}
-
-impl Peer {
-    pub fn new(ip: IpAddr, port: u16) -> Self {
-        SocketAddr::new(ip, port).into()
-    }
-
-    pub fn v4(bytes: &[u8]) -> Self {
-        let ip: [u8; 4] = bytes[..4].try_into().unwrap();
-        let port_bytes: [u8; 2] = bytes[4..].try_into().unwrap();
-        Self::new(ip.into(), u16::from_be_bytes(port_bytes))
-    }
-
-    pub fn v6(bytes: &[u8]) -> Self {
-        let ip: [u8; 16] = bytes[..16].try_into().unwrap();
-        let port_bytes: [u8; 2] = bytes[16..].try_into().unwrap();
-        Self::new(ip.into(), u16::from_be_bytes(port_bytes))
-    }
-}
-
-impl From<SocketAddr> for Peer {
-    fn from(addr: SocketAddr) -> Self {
-        Self { addr }
-    }
-}
-
-impl PartialEq for Peer {
-    fn eq(&self, other: &Self) -> bool {
-        self.addr == other.addr
-    }
-}
-
-impl Eq for Peer {}
-
-impl Hash for Peer {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.addr.hash(state)
-    }
+pub fn v6(bytes: &[u8]) -> SocketAddr {
+    let ip: [u8; 16] = bytes[..16].try_into().unwrap();
+    let port_bytes: [u8; 2] = bytes[16..].try_into().unwrap();
+    SocketAddr::from((ip, u16::from_be_bytes(port_bytes)))
 }
 
 pub fn generate_peer_id() -> PeerId {

@@ -9,6 +9,8 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 pub use proto::*;
 
+pub mod metadata;
+
 pub trait AsyncStream: AsyncRead + AsyncWrite + Unpin {}
 
 impl<T: AsyncRead + AsyncWrite + Unpin> AsyncStream for T {}

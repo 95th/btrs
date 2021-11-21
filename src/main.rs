@@ -1,14 +1,16 @@
-use btrs::magnet::MagnetUri;
-use btrs::peer;
+use btrs::announce::DhtTracker;
+use btrs::metadata::get_peers;
 use btrs::storage::StorageWriter;
-use btrs::torrent::{Torrent, TorrentFile};
 use btrs::work::Piece;
+use btrs::{peer, Torrent, TorrentWorker};
 use clap::{App, Arg};
 use client::bitfield::Bitfield;
+use client::magnet::TorrentMagnet;
+use client::metadata::request_metadata;
 use futures::channel::mpsc;
 use futures::StreamExt;
 use std::fs;
-use tracing::{debug, error, trace};
+use tracing::{debug, error};
 use tracing_subscriber::EnvFilter;
 
 #[tokio::main(flavor = "current_thread")]
@@ -40,21 +42,35 @@ async fn main() -> anyhow::Result<()> {
 }
 
 pub async fn magnet(uri: &str) -> anyhow::Result<()> {
-    let magnet = MagnetUri::parse_lenient(uri)?;
+    let magnet = TorrentMagnet::parse(uri)?;
     let peer_id = peer::generate_peer_id();
     debug!("Our peer_id: {:?}", peer_id);
 
-    let torrent = magnet.request_metadata(peer_id).await?;
+    let mut dht_tracker = DhtTracker::new().await?;
+    let (peers, peers6) = get_peers(
+        &magnet.info_hash,
+        &peer_id,
+        &magnet.tracker_urls,
+        &mut dht_tracker,
+    )
+    .await?;
+    let metadata = request_metadata(
+        peers.iter().chain(peers6.iter()),
+        &magnet.info_hash,
+        &peer_id,
+    )
+    .await?;
+
+    let mut torrent = magnet.with_metadata(metadata);
+    torrent.peers = peers;
+    torrent.peers_v6 = peers6;
+
     download(torrent).await
 }
 
 pub async fn torrent_file(file: &str) -> anyhow::Result<()> {
     let buf = fs::read(file)?;
-    let torrent_file = TorrentFile::parse(buf)?;
-
-    trace!("Parsed torrent file: {:#?}", torrent_file);
-
-    let torrent = torrent_file.into_torrent().await?;
+    let torrent = Torrent::parse_file(&buf)?;
     download(torrent).await
 }
 
@@ -62,7 +78,8 @@ pub async fn download(torrent: Torrent) -> anyhow::Result<()> {
     let torrent_name = torrent.name.clone();
     let piece_len = torrent.piece_len;
 
-    let mut worker = torrent.worker();
+    let dht = DhtTracker::new().await?;
+    let mut worker = TorrentWorker::new(torrent, peer::generate_peer_id(), dht);
     let num_pieces = worker.num_pieces();
 
     let (piece_tx, piece_rx) = mpsc::channel::<Piece>(200);

@@ -52,7 +52,7 @@ impl Parser {
     {
         let (dec, len) = self.parse_prefix_impl(buf)?;
         if len == buf.len() {
-            T::decode(dec)
+            T::decode(dec).ok_or(Error::Decode)
         } else {
             Err(Error::Invalid {
                 reason: "Extra bytes at the end",
@@ -70,7 +70,7 @@ impl Parser {
         T: Decode<'b, 'p>,
     {
         let (dec, pos) = self.parse_prefix_impl(buf)?;
-        let t = T::decode(dec)?;
+        let t = T::decode(dec).ok_or(Error::Decode)?;
         Ok((t, pos))
     }
 
@@ -202,11 +202,9 @@ impl<'a> ParserState<'a> {
         self.next_char()?;
 
         let start = self.pos;
-        let mut sign: i8 = 1;
 
         // Can be negative
         if self.peek_char()? == b'-' {
-            sign = -1;
             self.pos += 1;
         }
 
@@ -214,24 +212,12 @@ impl<'a> ParserState<'a> {
             return Err(Error::unexpected(self.pos));
         }
 
-        let mut val = 0_u64;
         loop {
             match self.peek_char()? {
-                c @ b'0'..=b'9' => {
-                    let d = u64::from(c - b'0');
-                    match val.checked_mul(10).and_then(|n| n.checked_add(d)) {
-                        Some(n) => val = n,
-                        None => return Err(Error::overflow(self.pos)),
-                    }
-                    self.pos += 1;
-                }
+                b'0'..=b'9' => self.pos += 1,
                 b'e' => break,
                 _ => return Err(Error::unexpected(self.pos)),
             }
-        }
-
-        if i64::try_from(val as i128 * sign as i128).is_err() {
-            return Err(Error::overflow(self.pos));
         }
 
         // Consume the closing 'e'
@@ -317,35 +303,19 @@ mod tests {
     }
 
     #[test]
-    fn parse_int_positive_max() {
-        let s = b"i9223372036854775807e";
+    fn parse_int_huge_positive() {
+        let s = b"i92233720368547758079223372036854775807922337203685477580792233720368547758079223372036854775807922337203685477580792233720368547758079223372036854775807922337203685477580792233720368547758079223372036854775807e";
         let mut parser = Parser::new();
         parser.parse::<Entry>(s).unwrap();
-        assert_eq!(&[Token::new(TokenKind::Int, 1, 19, 1)], &parser.tokens[..]);
+        assert_eq!(&[Token::new(TokenKind::Int, 1, 209, 1)], &parser.tokens[..]);
     }
 
     #[test]
-    fn parse_int_negative_max() {
-        let s = b"i-9223372036854775808e";
+    fn parse_int_huge_negative() {
+        let s = b"i-92233720368547758079223372036854775807922337203685477580792233720368547758079223372036854775807922337203685477580792233720368547758079223372036854775807922337203685477580792233720368547758079223372036854775807e";
         let mut parser = Parser::new();
         parser.parse::<Entry>(s).unwrap();
-        assert_eq!(&[Token::new(TokenKind::Int, 1, 20, 1)], &parser.tokens[..]);
-    }
-
-    #[test]
-    fn parse_int_overflow_positive() {
-        let s = b"i9223372036854775808e";
-        let mut parser = Parser::new();
-        let err = parser.parse::<Entry>(s).unwrap_err();
-        assert_eq!(err, Error::Overflow { pos: 20 });
-    }
-
-    #[test]
-    fn parse_int_overflow_negative() {
-        let s = b"i-9223372036854775809e";
-        let mut parser = Parser::new();
-        let err = parser.parse::<Entry>(s).unwrap_err();
-        assert_eq!(err, Error::Overflow { pos: 21 });
+        assert_eq!(&[Token::new(TokenKind::Int, 1, 210, 1)], &parser.tokens[..]);
     }
 
     #[test]

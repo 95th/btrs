@@ -4,36 +4,36 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug, Error, Clone, PartialEq)]
 pub enum Error {
-    /// The string is not a full Bencode packet, more bytes expected
     #[error("Unexpected End of File")]
+    /// The string is not a full Bencode packet, more bytes expected
     Eof,
 
-    /// Unexpected character at given position
     #[error("Unexpected character at {pos}")]
+    /// Unexpected character at given position
     Unexpected { pos: usize },
 
-    /// Invalid data at given position
     #[error("Invalid input at {reason}: {reason}")]
+    /// Invalid data at given position
     Invalid { reason: &'static str, pos: usize },
 
-    /// Exceeded Token limit
     #[error("Exceeded Token limit of {limit}")]
+    /// Exceeded Token limit
     TokenLimit { limit: usize },
 
-    /// Exceeded Depth limit
     #[error("Exceeded Depth limit of {limit}")]
+    /// Exceeded Depth limit
     DepthLimit { limit: usize },
 
-    /// Integer Overflow
     #[error("Integer overflow at {pos}")]
+    /// Integer Overflow
     Overflow { pos: usize },
 
-    /// Type mismatch
-    #[error("Type mismatch: {0}")]
-    TypeMismatch(&'static str),
+    #[error("Unable to decode")]
+    /// Decode error
+    Decode,
 
-    /// Other
     #[error("{0}")]
+    /// Other
     Other(&'static str),
 }
 

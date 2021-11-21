@@ -18,3 +18,5 @@ mod handshake;
 pub mod msg;
 mod state;
 pub mod torrent;
+pub mod magnet;
+pub mod metainfo;

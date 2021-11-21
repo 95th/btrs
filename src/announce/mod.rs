@@ -1,7 +1,6 @@
 use client::{InfoHash, PeerId};
 
 use crate::future::timeout;
-use crate::peer::Peer;
 use std::collections::HashSet;
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
@@ -68,8 +67,8 @@ impl Tracker {
 pub struct AnnounceResponse {
     pub resolved_addr: Option<SocketAddr>,
     pub interval: u64,
-    pub peers: HashSet<Peer>,
-    pub peers6: HashSet<Peer>,
+    pub peers: HashSet<SocketAddr>,
+    pub peers6: HashSet<SocketAddr>,
 }
 
 #[derive(Debug)]

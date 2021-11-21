@@ -11,9 +11,9 @@ pub struct ExtendedMessage<'a, 'p> {
 }
 
 mod msg_type {
-    pub const REQUEST: i64 = 0;
-    pub const DATA: i64 = 1;
-    pub const REJECT: i64 = 2;
+    pub const REQUEST: u8 = 0;
+    pub const DATA: u8 = 1;
+    pub const REJECT: u8 = 2;
 }
 
 impl<'a, 'p> ExtendedMessage<'a, 'p> {
@@ -41,8 +41,8 @@ impl<'a, 'p> ExtendedMessage<'a, 'p> {
         trace!("id: {}, metadata: {:#?}", self.id, self.value);
         let dict = self.value.as_dict()?;
         let m = dict.get_dict("m")?;
-        let id = m.get_int("ut_metadata")? as u8;
-        let len = dict.get_int("metadata_size")? as usize;
+        let id = m.get_int("ut_metadata")?;
+        let len = dict.get_int("metadata_size")?;
         Some(Metadata { id, len })
     }
 
@@ -50,11 +50,11 @@ impl<'a, 'p> ExtendedMessage<'a, 'p> {
         trace!("data: {:#?}", self.value);
         let dict = self.value.as_dict().context("Not a dict")?;
 
-        let msg_type = dict.get_int("msg_type").context("`msg_type` not found")?;
+        let msg_type: u8 = dict.get_int("msg_type").context("`msg_type` not found")?;
         anyhow::ensure!(msg_type == msg_type::DATA, "Not a DATA message");
 
-        let piece = dict.get_int("piece").context("`piece` not found")?;
-        anyhow::ensure!(piece == expected_piece as i64, "Incorrect piece");
+        let piece: u32 = dict.get_int("piece").context("`piece` not found")?;
+        anyhow::ensure!(piece == expected_piece, "Incorrect piece");
 
         if self.rest.len() > METADATA_PIECE_LEN {
             anyhow::bail!("Piece can't be larger than 16kB");
@@ -93,15 +93,15 @@ impl Encode for MetadataMsg {
                 dict.insert("reqq", 500);
             }
             MetadataMsg::Request(piece) => {
-                dict.insert("msg_type", msg_type::REQUEST);
+                dict.insert("msg_type", msg_type::REQUEST as i64);
                 dict.insert("piece", piece as i64);
             }
             MetadataMsg::Reject(piece) => {
-                dict.insert("msg_type", msg_type::REJECT);
+                dict.insert("msg_type", msg_type::REJECT as i64);
                 dict.insert("piece", piece as i64);
             }
             MetadataMsg::Data(piece, total_size) => {
-                dict.insert("msg_type", msg_type::DATA);
+                dict.insert("msg_type", msg_type::DATA as i64);
                 dict.insert("piece", piece as i64);
                 dict.insert("total_size", total_size as i64);
             }
