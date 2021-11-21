@@ -33,6 +33,7 @@ pub async fn request_metadata(
     bail!("Failed to retrieve metadata")
 }
 
+#[instrument(skip_all, fields(peer))]
 async fn request_metadata_from_peer(
     peer: SocketAddr,
     info_hash: &InfoHash,

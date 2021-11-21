@@ -1,30 +1,9 @@
 use std::{collections::HashSet, net::SocketAddr};
 
-use anyhow::ensure;
-use client::{Client, InfoHash, PeerId};
+use client::{InfoHash, PeerId};
 use futures::{stream::FuturesUnordered, StreamExt};
-use sha1::Sha1;
-use tokio::net::TcpStream;
 
 use crate::announce::{DhtTracker, Tracker};
-
-#[instrument(skip_all, fields(peer))]
-pub async fn request_metadata(
-    peer: SocketAddr,
-    info_hash: &InfoHash,
-    peer_id: &PeerId,
-) -> anyhow::Result<Vec<u8>> {
-    let socket = TcpStream::connect(peer).await?;
-    let mut client = Client::new(socket);
-    client.send_handshake(info_hash, peer_id).await?;
-    client.recv_handshake(info_hash).await?;
-    client.send_unchoke();
-    client.send_interested();
-    let metadata = client.get_metadata().await?;
-    let hash = Sha1::from(&metadata).digest().bytes();
-    ensure!(hash == *info_hash, "Invalid metadata");
-    Ok(metadata)
-}
 
 pub async fn get_peers(
     info_hash: &InfoHash,
