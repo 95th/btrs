@@ -49,7 +49,10 @@ impl<'b, 'p> Decode<'b, 'p> for &'b str {
     }
 }
 
-impl<'b, 'p, I: Int> Decode<'b, 'p> for I {
+impl<'b, 'p, I> Decode<'b, 'p> for I
+where
+    I: Int,
+{
     fn decode(entry: Entry<'b, 'p>) -> Option<Self> {
         entry.as_int()
     }

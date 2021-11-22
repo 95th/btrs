@@ -148,7 +148,10 @@ impl<'b, 'p> Entry<'b, 'p> {
     /// let entry = parser.parse::<Entry>(bytes).unwrap();
     /// assert_eq!(123, entry.as_int().unwrap());
     /// ```
-    pub fn as_int<I: Int>(&self) -> Option<I> {
+    pub fn as_int<I>(&self) -> Option<I>
+    where
+        I: Int,
+    {
         if !self.is_int() {
             return None;
         }
