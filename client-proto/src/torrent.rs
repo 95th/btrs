@@ -6,7 +6,7 @@ use anyhow::Context;
 use ben::{decode::Dict, Parser};
 use sha1::Sha1;
 
-use crate::{magnet::TorrentMagnet, InfoHash};
+use crate::InfoHash;
 
 pub struct Torrent {
     pub info_hash: InfoHash,
@@ -55,35 +55,6 @@ impl Torrent {
             name: name.to_owned(),
             tracker_urls,
             peers: HashSet::new(),
-            peers_v6: HashSet::new(),
-        })
-    }
-
-    pub fn parse_metainfo(
-        magnet: TorrentMagnet,
-        info_data: &[u8],
-        parser: &mut Parser,
-    ) -> anyhow::Result<Self> {
-        use ParseError::*;
-        let info = parser.parse::<Dict>(info_data)?;
-
-        let length = info.get_int("length").context(LengthRequired)?;
-        let name = info
-            .get_str("name")
-            .map(|s| s.to_string())
-            .or(magnet.display_name)
-            .unwrap_or_default();
-        let piece_len = info.get_int("piece length").context(PieceLengthRequired)?;
-        let pieces = info.get_bytes("pieces").context(PiecesRequired)?;
-
-        Ok(Torrent {
-            info_hash: magnet.info_hash,
-            piece_hashes: pieces.to_vec(),
-            piece_len,
-            length,
-            name,
-            tracker_urls: magnet.tracker_urls,
-            peers: magnet.peer_addrs,
             peers_v6: HashSet::new(),
         })
     }
