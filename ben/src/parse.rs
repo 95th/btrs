@@ -203,25 +203,35 @@ impl<'a> ParserState<'a> {
 
         let start = self.pos;
 
-        // Can be negative
-        if self.peek_char()? == b'-' {
-            self.pos += 1;
+        let mut c = self.next_char()?;
+        if c == b'-' {
+            c = self.next_char()?;
+
+            // "-0" is invalid
+            if c == b'0' {
+                return Err(Error::unexpected(self.pos - 1));
+            }
+        } else if c == b'0' {
+            // Only case where leading zero is valid in "i0e"
+            if self.next_char()? != b'e' {
+                return Err(Error::unexpected(self.pos - 1));
+            }
+
+            let t = Token::new(TokenKind::Int, start as u32, 1, 1);
+            return self.create_token(t);
         }
 
-        if self.peek_char()? == b'e' {
-            return Err(Error::unexpected(self.pos));
+        if c == b'e' {
+            return Err(Error::unexpected(self.pos - 1));
         }
 
         loop {
-            match self.peek_char()? {
-                b'0'..=b'9' => self.pos += 1,
+            match c {
+                b'0'..=b'9' => c = self.next_char()?,
                 b'e' => break,
-                _ => return Err(Error::unexpected(self.pos)),
+                _ => return Err(Error::unexpected(self.pos - 1)),
             }
         }
-
-        // Consume the closing 'e'
-        self.next_char()?;
 
         let len = self.pos - start - 1;
         let t = Token::new(TokenKind::Int, start as u32, len as u32, 1);
@@ -608,5 +618,37 @@ mod tests {
             &[Token::new(TokenKind::ByteStr, 2, 0, 1)],
             &parser.tokens[..]
         );
+    }
+
+    #[test]
+    fn reject_negative_zero() {
+        let s = b"i-0e";
+        let mut parser = Parser::new();
+        let err = parser.parse::<Entry>(s).unwrap_err();
+        assert_eq!(err, Error::unexpected(2));
+    }
+
+    #[test]
+    fn reject_leading_zero_1() {
+        let s = b"i000e";
+        let mut parser = Parser::new();
+        let err = parser.parse::<Entry>(s).unwrap_err();
+        assert_eq!(err, Error::unexpected(2));
+    }
+
+    #[test]
+    fn reject_leading_zero_2() {
+        let s = b"i01e";
+        let mut parser = Parser::new();
+        let err = parser.parse::<Entry>(s).unwrap_err();
+        assert_eq!(err, Error::unexpected(2));
+    }
+
+    #[test]
+    fn parse_zero_int() {
+        let s = b"i0e";
+        let mut parser = Parser::new();
+        parser.parse::<Entry>(s).unwrap();
+        assert_eq!(&[Token::new(TokenKind::Int, 1, 1, 1)], &parser.tokens[..]);
     }
 }
