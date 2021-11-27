@@ -241,18 +241,26 @@ impl<'a> ParserState<'a> {
     fn parse_string(&mut self, validate_utf8: bool) -> Result<()> {
         let mut len: usize = 0;
 
-        loop {
-            match self.next_char()? {
-                c @ b'0'..=b'9' => {
-                    let digit = (c - b'0') as usize;
-                    match len.checked_mul(10).and_then(|n| n.checked_add(digit)) {
-                        Some(n) => len = n,
-                        None => return Err(Error::overflow(self.pos)),
-                    }
-                }
-                b':' => break,
-                _ => return Err(Error::unexpected(self.pos)),
+        let mut c = self.next_char()?;
+        if c == b'0' {
+            c = self.next_char()?;
+            if c != b':' {
+                return Err(Error::unexpected(self.pos - 1));
             }
+        }
+
+        while c != b':' {
+            if !c.is_ascii_digit() {
+                return Err(Error::unexpected(self.pos - 1));
+            }
+
+            let digit = (c - b'0') as usize;
+            len = len
+                .checked_mul(10)
+                .and_then(|n| n.checked_add(digit))
+                .ok_or_else(|| Error::overflow(self.pos - 1))?;
+
+            c = self.next_char()?;
         }
 
         if len > self.buf.len() - self.pos {
@@ -374,7 +382,7 @@ mod tests {
         let s = format!("{}:", (usize::MAX as u128 + 1));
         let mut parser = Parser::new();
         let err = parser.parse::<Entry>(s.as_bytes()).unwrap_err();
-        assert_eq!(Error::Overflow { pos: s.len() - 1 }, err);
+        assert_eq!(Error::Overflow { pos: s.len() - 2 }, err);
     }
 
     #[test]
@@ -650,5 +658,21 @@ mod tests {
         let mut parser = Parser::new();
         parser.parse::<Entry>(s).unwrap();
         assert_eq!(&[Token::new(TokenKind::Int, 1, 1, 1)], &parser.tokens[..]);
+    }
+
+    #[test]
+    fn reject_string_leading_zeros() {
+        let s = b"001:a";
+        let mut parser = Parser::new();
+        let err = parser.parse::<Entry>(s).unwrap_err();
+        assert_eq!(err, Error::unexpected(1));
+    }
+
+    #[test]
+    fn reject_string_no_length() {
+        let s = b":";
+        let mut parser = Parser::new();
+        let err = parser.parse::<Entry>(s).unwrap_err();
+        assert_eq!(err, Error::unexpected(0));
     }
 }
