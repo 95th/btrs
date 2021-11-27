@@ -54,10 +54,7 @@ impl Parser {
         if len == buf.len() {
             T::decode(dec).ok_or(Error::Decode)
         } else {
-            Err(Error::Invalid {
-                reason: "Extra bytes at the end",
-                pos: len,
-            })
+            Err(Error::TrailingData)
         }
     }
 
@@ -143,7 +140,7 @@ impl<'a> ParserState<'a> {
                 if s.dict && c != b'e' {
                     // The key must be a string
                     if !c.is_ascii_digit() {
-                        return Err(Error::unexpected(self.pos));
+                        return Err(Error::Invalid);
                     }
 
                     // Parse key as a valid UTF-8 string
@@ -151,7 +148,7 @@ impl<'a> ParserState<'a> {
 
                     c = self.peek_char()?;
                     if c == b'e' {
-                        return Err(Error::unexpected(self.pos));
+                        return Err(Error::Invalid);
                     }
                 }
             }
@@ -170,7 +167,7 @@ impl<'a> ParserState<'a> {
                 b'i' => self.parse_int()?,
                 b'0'..=b'9' => self.parse_string(false)?,
                 b'e' => self.pop_scope()?,
-                _ => return Err(Error::unexpected(self.pos)),
+                _ => return Err(Error::Invalid),
             }
 
             if self.scopes.is_empty() {
@@ -179,17 +176,14 @@ impl<'a> ParserState<'a> {
         }
 
         if !self.scopes.is_empty() {
-            return Err(Error::unexpected(self.pos));
+            return Err(Error::Invalid);
         }
 
         Ok(())
     }
 
     fn pop_scope(&mut self) -> Result<()> {
-        let s = self
-            .scopes
-            .pop()
-            .ok_or_else(|| Error::unexpected(self.pos))?;
+        let s = self.scopes.pop().ok_or(Error::Invalid)?;
 
         self.pos += 1;
 
@@ -201,16 +195,11 @@ impl<'a> ParserState<'a> {
         if s.dict {
             let dict = Entry::from_raw(self.buf.as_ptr(), t).as_dict().unwrap();
             let mut last_key = "";
-            let mut pos = t.start as usize + 1;
-            for (k, v) in dict {
+            for (k, _) in dict {
                 if k < last_key {
-                    return Err(Error::Invalid {
-                        reason: "Dict keys must be sorted",
-                        pos,
-                    });
+                    return Err(Error::Invalid);
                 }
                 last_key = k;
-                pos = v.token().start as usize;
             }
         }
 
@@ -229,12 +218,12 @@ impl<'a> ParserState<'a> {
 
             // "-0" is invalid
             if c == b'0' {
-                return Err(Error::unexpected(self.pos - 1));
+                return Err(Error::Invalid);
             }
         } else if c == b'0' {
             // Only case where leading zero is valid in "i0e"
             if self.next_char()? != b'e' {
-                return Err(Error::unexpected(self.pos - 1));
+                return Err(Error::Invalid);
             }
 
             let t = Token::new(TokenKind::Int, start as u32, 1, 1);
@@ -242,14 +231,14 @@ impl<'a> ParserState<'a> {
         }
 
         if c == b'e' {
-            return Err(Error::unexpected(self.pos - 1));
+            return Err(Error::Invalid);
         }
 
         loop {
             match c {
                 b'0'..=b'9' => c = self.next_char()?,
                 b'e' => break,
-                _ => return Err(Error::unexpected(self.pos - 1)),
+                _ => return Err(Error::Invalid),
             }
         }
 
@@ -265,20 +254,20 @@ impl<'a> ParserState<'a> {
         if c == b'0' {
             c = self.next_char()?;
             if c != b':' {
-                return Err(Error::unexpected(self.pos - 1));
+                return Err(Error::Invalid);
             }
         }
 
         while c != b':' {
             if !c.is_ascii_digit() {
-                return Err(Error::unexpected(self.pos - 1));
+                return Err(Error::Invalid);
             }
 
             let digit = (c - b'0') as usize;
             len = len
                 .checked_mul(10)
                 .and_then(|n| n.checked_add(digit))
-                .ok_or_else(|| Error::overflow(self.pos - 1))?;
+                .ok_or_else(|| Error::Invalid)?;
 
             c = self.next_char()?;
         }
@@ -296,10 +285,7 @@ impl<'a> ParserState<'a> {
         if validate_utf8 {
             let value = &self.buf[start..self.pos];
 
-            std::str::from_utf8(value).map_err(|_| Error::Invalid {
-                pos: start,
-                reason: "Dict key must be a valid UTF-8 string",
-            })?;
+            std::str::from_utf8(value).map_err(|_| Error::Invalid)?;
         }
 
         Ok(())
@@ -307,16 +293,12 @@ impl<'a> ParserState<'a> {
 
     fn create_token(&mut self, token: Token) -> Result<()> {
         if self.tokens.len() >= self.token_limit {
-            return Err(Error::TokenLimit {
-                limit: self.token_limit,
-            });
+            return Err(Error::TokenLimit);
         }
 
         if let TokenKind::Dict | TokenKind::List = token.kind {
             if self.scopes.len() >= self.depth_limit {
-                return Err(Error::DepthLimit {
-                    limit: self.depth_limit,
-                });
+                return Err(Error::DepthLimit);
             }
 
             let s = Scope::new(self.tokens.len(), token.kind == TokenKind::Dict);
@@ -361,7 +343,7 @@ mod tests {
         let s = b"ie";
         let mut parser = Parser::new();
         let err = parser.parse::<Entry>(s).unwrap_err();
-        assert_eq!(err, Error::Unexpected { pos: 1 });
+        assert_eq!(err, Error::Invalid);
     }
 
     #[test]
@@ -380,13 +362,7 @@ mod tests {
         let s = b"3:abcd";
         let mut parser = Parser::new();
         let err = parser.parse::<Entry>(s).unwrap_err();
-        assert_eq!(
-            Error::Invalid {
-                reason: "Extra bytes at the end",
-                pos: 5,
-            },
-            err
-        );
+        assert_eq!(Error::TrailingData, err);
     }
 
     #[test]
@@ -402,7 +378,7 @@ mod tests {
         let s = format!("{}:", (usize::MAX as u128 + 1));
         let mut parser = Parser::new();
         let err = parser.parse::<Entry>(s.as_bytes()).unwrap_err();
-        assert_eq!(Error::Overflow { pos: s.len() - 2 }, err);
+        assert_eq!(Error::Invalid, err);
     }
 
     #[test]
@@ -424,14 +400,14 @@ mod tests {
     fn key_only_dict() {
         let s = b"d1:ae";
         let err = Parser::new().parse::<Entry>(s).unwrap_err();
-        assert_eq!(Error::Unexpected { pos: 4 }, err);
+        assert_eq!(Error::Invalid, err);
     }
 
     #[test]
     fn key_only_dict_2() {
         let s = b"d1:a1:a1:ae";
         let err = Parser::new().parse::<Entry>(s).unwrap_err();
-        assert_eq!(Error::Unexpected { pos: 10 }, err);
+        assert_eq!(Error::Invalid, err);
     }
 
     #[test]
@@ -456,13 +432,7 @@ mod tests {
         let s = &[b'd', b'1', b':', 0x80, b'2', b':', b'a', b'b', b'e'];
         let mut parser = Parser::new();
         let err = parser.parse::<Entry>(s).unwrap_err();
-        assert_eq!(
-            err,
-            Error::Invalid {
-                pos: 3,
-                reason: "Dict key must be a valid UTF-8 string"
-            }
-        );
+        assert_eq!(err, Error::Invalid);
     }
 
     #[test]
@@ -565,7 +535,7 @@ mod tests {
 
         let s = b"l1:a2:ab3:abc4:abcde";
         let err = parser.parse::<Entry>(s).unwrap_err();
-        assert_eq!(Error::TokenLimit { limit: 3 }, err);
+        assert_eq!(Error::TokenLimit, err);
 
         let entry = parser.parse::<Entry>(b"le").unwrap();
         assert_eq!(b"le", entry.as_raw_bytes());
@@ -577,7 +547,7 @@ mod tests {
         parser.depth_limit(3);
 
         let err = parser.parse::<Entry>(b"lllleeee").unwrap_err();
-        assert_eq!(Error::DepthLimit { limit: 3 }, err);
+        assert_eq!(Error::DepthLimit, err);
 
         let entry = parser.parse::<Entry>(b"llleee").unwrap();
         assert_eq!(b"llleee", entry.as_raw_bytes());
@@ -590,31 +560,19 @@ mod tests {
     fn multiple_root_tokens() {
         let mut parser = Parser::new();
         assert_eq!(
-            Error::Invalid {
-                reason: "Extra bytes at the end",
-                pos: 3,
-            },
+            Error::TrailingData,
             parser.parse::<Entry>(b"1:a1:b").unwrap_err()
         );
         assert_eq!(
-            Error::Invalid {
-                reason: "Extra bytes at the end",
-                pos: 3,
-            },
+            Error::TrailingData,
             parser.parse::<Entry>(b"i1e1:b").unwrap_err()
         );
         assert_eq!(
-            Error::Invalid {
-                reason: "Extra bytes at the end",
-                pos: 5,
-            },
+            Error::TrailingData,
             parser.parse::<Entry>(b"l1:aede").unwrap_err()
         );
         assert_eq!(
-            Error::Invalid {
-                reason: "Extra bytes at the end",
-                pos: 2,
-            },
+            Error::TrailingData,
             parser.parse::<Entry>(b"lel1:ae").unwrap_err()
         );
     }
@@ -653,7 +611,7 @@ mod tests {
         let s = b"i-0e";
         let mut parser = Parser::new();
         let err = parser.parse::<Entry>(s).unwrap_err();
-        assert_eq!(err, Error::unexpected(2));
+        assert_eq!(err, Error::Invalid);
     }
 
     #[test]
@@ -661,7 +619,7 @@ mod tests {
         let s = b"i--1e";
         let mut parser = Parser::new();
         let err = parser.parse::<Entry>(s).unwrap_err();
-        assert_eq!(err, Error::unexpected(2));
+        assert_eq!(err, Error::Invalid);
     }
 
     #[test]
@@ -669,7 +627,7 @@ mod tests {
         let s = b"i000e";
         let mut parser = Parser::new();
         let err = parser.parse::<Entry>(s).unwrap_err();
-        assert_eq!(err, Error::unexpected(2));
+        assert_eq!(err, Error::Invalid);
     }
 
     #[test]
@@ -677,7 +635,7 @@ mod tests {
         let s = b"i01e";
         let mut parser = Parser::new();
         let err = parser.parse::<Entry>(s).unwrap_err();
-        assert_eq!(err, Error::unexpected(2));
+        assert_eq!(err, Error::Invalid);
     }
 
     #[test]
@@ -693,7 +651,7 @@ mod tests {
         let s = b"001:a";
         let mut parser = Parser::new();
         let err = parser.parse::<Entry>(s).unwrap_err();
-        assert_eq!(err, Error::unexpected(1));
+        assert_eq!(err, Error::Invalid);
     }
 
     #[test]
@@ -701,7 +659,7 @@ mod tests {
         let s = b":";
         let mut parser = Parser::new();
         let err = parser.parse::<Entry>(s).unwrap_err();
-        assert_eq!(err, Error::unexpected(0));
+        assert_eq!(err, Error::Invalid);
     }
 
     #[test]
@@ -709,13 +667,7 @@ mod tests {
         let s = b"d1:b0:1:a0:e";
         let mut parser = Parser::new();
         let err = parser.parse::<Entry>(s).unwrap_err();
-        assert_eq!(
-            err,
-            Error::Invalid {
-                reason: "Dict keys must be sorted",
-                pos: 6
-            }
-        );
+        assert_eq!(err, Error::Invalid);
     }
 
     #[test]
@@ -723,13 +675,7 @@ mod tests {
         let s = b"d1:ad1:b0:1:a0:ee";
         let mut parser = Parser::new();
         let err = parser.parse::<Entry>(s).unwrap_err();
-        assert_eq!(
-            err,
-            Error::Invalid {
-                reason: "Dict keys must be sorted",
-                pos: 10
-            }
-        );
+        assert_eq!(err, Error::Invalid);
     }
 
     #[test]
@@ -737,12 +683,6 @@ mod tests {
         let s = b"l1:ad1:b0:1:a0:ee";
         let mut parser = Parser::new();
         let err = parser.parse::<Entry>(s).unwrap_err();
-        assert_eq!(
-            err,
-            Error::Invalid {
-                reason: "Dict keys must be sorted",
-                pos: 10
-            }
-        );
+        assert_eq!(err, Error::Invalid);
     }
 }

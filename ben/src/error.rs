@@ -8,41 +8,27 @@ pub enum Error {
     /// The string is not a full Bencode packet, more bytes expected
     Eof,
 
-    #[error("Unexpected character at {pos}")]
-    /// Unexpected character at given position
-    Unexpected { pos: usize },
+    #[error("Unexpected trailing data in the input")]
+    /// Unexpected trailing data in the input
+    TrailingData,
 
-    #[error("Invalid input at {reason}: {reason}")]
+    #[error("Invalid input")]
     /// Invalid data at given position
-    Invalid { reason: &'static str, pos: usize },
+    Invalid,
 
-    #[error("Exceeded Token limit of {limit}")]
+    #[error("Exceeded Token limit")]
     /// Exceeded Token limit
-    TokenLimit { limit: usize },
+    TokenLimit,
 
-    #[error("Exceeded Depth limit of {limit}")]
+    #[error("Exceeded Depth limit")]
     /// Exceeded Depth limit
-    DepthLimit { limit: usize },
+    DepthLimit,
 
-    #[error("Integer overflow at {pos}")]
+    #[error("Integer overflow")]
     /// Integer Overflow
-    Overflow { pos: usize },
+    Overflow,
 
-    #[error("Unable to decode")]
+    #[error("Decode error")]
     /// Decode error
     Decode,
-
-    #[error("{0}")]
-    /// Other
-    Other(&'static str),
-}
-
-impl Error {
-    pub fn unexpected(pos: usize) -> Self {
-        Self::Unexpected { pos }
-    }
-
-    pub fn overflow(pos: usize) -> Self {
-        Self::Overflow { pos }
-    }
 }
