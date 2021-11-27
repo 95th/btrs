@@ -201,11 +201,16 @@ impl<'a> ParserState<'a> {
         if s.dict {
             let dict = Entry::from_raw(self.buf.as_ptr(), t).as_dict().unwrap();
             let mut last_key = "";
-            for (k, _) in dict {
+            let mut pos = t.start as usize + 1;
+            for (k, v) in dict {
                 if k < last_key {
-                    return Err(Error::Other("Dict keys must be sorted"));
+                    return Err(Error::Invalid {
+                        reason: "Dict keys must be sorted",
+                        pos,
+                    });
                 }
                 last_key = k;
+                pos = v.token().start as usize;
             }
         }
 
@@ -704,7 +709,13 @@ mod tests {
         let s = b"d1:b0:1:a0:e";
         let mut parser = Parser::new();
         let err = parser.parse::<Entry>(s).unwrap_err();
-        assert_eq!(err, Error::Other("Dict keys must be sorted"));
+        assert_eq!(
+            err,
+            Error::Invalid {
+                reason: "Dict keys must be sorted",
+                pos: 6
+            }
+        );
     }
 
     #[test]
@@ -712,7 +723,13 @@ mod tests {
         let s = b"d1:ad1:b0:1:a0:ee";
         let mut parser = Parser::new();
         let err = parser.parse::<Entry>(s).unwrap_err();
-        assert_eq!(err, Error::Other("Dict keys must be sorted"));
+        assert_eq!(
+            err,
+            Error::Invalid {
+                reason: "Dict keys must be sorted",
+                pos: 10
+            }
+        );
     }
 
     #[test]
@@ -720,6 +737,12 @@ mod tests {
         let s = b"l1:ad1:b0:1:a0:ee";
         let mut parser = Parser::new();
         let err = parser.parse::<Entry>(s).unwrap_err();
-        assert_eq!(err, Error::Other("Dict keys must be sorted"));
+        assert_eq!(
+            err,
+            Error::Invalid {
+                reason: "Dict keys must be sorted",
+                pos: 10
+            }
+        );
     }
 }
