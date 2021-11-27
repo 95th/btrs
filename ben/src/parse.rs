@@ -637,6 +637,14 @@ mod tests {
     }
 
     #[test]
+    fn reject_negative_twice() {
+        let s = b"i--1e";
+        let mut parser = Parser::new();
+        let err = parser.parse::<Entry>(s).unwrap_err();
+        assert_eq!(err, Error::unexpected(2));
+    }
+
+    #[test]
     fn reject_leading_zero_1() {
         let s = b"i000e";
         let mut parser = Parser::new();
