@@ -5,7 +5,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 #[derive(Debug, Error, Clone, PartialEq)]
 pub enum Error {
     #[error("Unexpected End of File")]
-    /// The string is not a full Bencode packet, more bytes expected
+    /// Unexpected End of File
     Eof,
 
     #[error("Unexpected trailing data in the input")]
@@ -13,7 +13,7 @@ pub enum Error {
     TrailingData,
 
     #[error("Invalid input")]
-    /// Invalid data at given position
+    /// Invalid input
     Invalid,
 
     #[error("Exceeded Token limit")]
