@@ -169,30 +169,7 @@ impl<'a> ParserState<'a> {
                 }
                 b'i' => self.parse_int()?,
                 b'0'..=b'9' => self.parse_string(false)?,
-                b'e' => {
-                    let s = self
-                        .scopes
-                        .pop()
-                        .ok_or_else(|| Error::unexpected(self.pos))?;
-
-                    self.pos += 1;
-
-                    let next = self.tokens.len() - s.index as usize;
-                    let t = &mut self.tokens[s.index as usize];
-                    t.finish(self.pos);
-                    t.next = next as u32;
-
-                    if s.dict {
-                        let e = Entry::from_raw(self.buf.as_ptr(), t).as_dict().unwrap();
-                        let mut last_key = "";
-                        for (k, _) in e {
-                            if k < last_key {
-                                return Err(Error::Other("Dict keys must be sorted"));
-                            }
-                            last_key = k;
-                        }
-                    }
-                }
+                b'e' => self.pop_scope()?,
                 _ => return Err(Error::unexpected(self.pos)),
             }
 
@@ -203,6 +180,33 @@ impl<'a> ParserState<'a> {
 
         if !self.scopes.is_empty() {
             return Err(Error::unexpected(self.pos));
+        }
+
+        Ok(())
+    }
+
+    fn pop_scope(&mut self) -> Result<()> {
+        let s = self
+            .scopes
+            .pop()
+            .ok_or_else(|| Error::unexpected(self.pos))?;
+
+        self.pos += 1;
+
+        let next = self.tokens.len() - s.index as usize;
+        let t = &mut self.tokens[s.index as usize];
+        t.finish(self.pos);
+        t.next = next as u32;
+
+        if s.dict {
+            let dict = Entry::from_raw(self.buf.as_ptr(), t).as_dict().unwrap();
+            let mut last_key = "";
+            for (k, _) in dict {
+                if k < last_key {
+                    return Err(Error::Other("Dict keys must be sorted"));
+                }
+                last_key = k;
+            }
         }
 
         Ok(())
