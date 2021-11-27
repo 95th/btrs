@@ -267,7 +267,7 @@ impl<'a> ParserState<'a> {
             len = len
                 .checked_mul(10)
                 .and_then(|n| n.checked_add(digit))
-                .ok_or_else(|| Error::Invalid)?;
+                .ok_or_else(|| Error::Overflow)?;
 
             c = self.next_char()?;
         }
@@ -378,7 +378,7 @@ mod tests {
         let s = format!("{}:", (usize::MAX as u128 + 1));
         let mut parser = Parser::new();
         let err = parser.parse::<Entry>(s.as_bytes()).unwrap_err();
-        assert_eq!(Error::Invalid, err);
+        assert_eq!(Error::Overflow, err);
     }
 
     #[test]
