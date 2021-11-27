@@ -94,8 +94,28 @@ impl Parser {
         state.parse()?;
         let pos = state.pos;
         let entry = Entry::new(buf, &self.tokens);
+        validate_dict_sorting(entry)?;
         Ok((entry, pos))
     }
+}
+
+fn validate_dict_sorting(entry: Entry) -> Result<()> {
+    if let Some(dict) = entry.as_dict() {
+        let mut last = "";
+        for (k, v) in dict {
+            if k < last {
+                return Err(Error::Other("Dict keys must be sorted"));
+            }
+            last = k;
+            validate_dict_sorting(v)?;
+        }
+    } else if let Some(list) = entry.as_list() {
+        for v in list {
+            validate_dict_sorting(v)?;
+        }
+    }
+
+    Ok(())
 }
 
 struct Scope {
@@ -447,7 +467,7 @@ mod tests {
 
     #[test]
     fn dict_mixed_values() {
-        let s = b"d1:a1:b1:ci1e1:x1:y1:dde1:fle1:g1:he";
+        let s = b"d1:a1:b1:ci1e1:d1:e1:fde1:gle1:g1:he";
         let mut parser = Parser::new();
         parser.parse::<Entry>(s).unwrap();
         assert_eq!(
@@ -682,5 +702,13 @@ mod tests {
         let mut parser = Parser::new();
         let err = parser.parse::<Entry>(s).unwrap_err();
         assert_eq!(err, Error::unexpected(0));
+    }
+
+    #[test]
+    fn reject_dict_unsorted_keys() {
+        let s = b"d1:b0:1:a0:e";
+        let mut parser = Parser::new();
+        let err = parser.parse::<Entry>(s).unwrap_err();
+        assert_eq!(err, Error::Other("Dict keys must be sorted"));
     }
 }
