@@ -94,28 +94,8 @@ impl Parser {
         state.parse()?;
         let pos = state.pos;
         let entry = Entry::new(buf, &self.tokens);
-        validate_dict_sorting(entry)?;
         Ok((entry, pos))
     }
-}
-
-fn validate_dict_sorting(entry: Entry) -> Result<()> {
-    if let Some(dict) = entry.as_dict() {
-        let mut last = "";
-        for (k, v) in dict {
-            if k < last {
-                return Err(Error::Other("Dict keys must be sorted"));
-            }
-            last = k;
-            validate_dict_sorting(v)?;
-        }
-    } else if let Some(list) = entry.as_list() {
-        for v in list {
-            validate_dict_sorting(v)?;
-        }
-    }
-
-    Ok(())
 }
 
 struct Scope {
@@ -201,6 +181,17 @@ impl<'a> ParserState<'a> {
                     let t = &mut self.tokens[s.index as usize];
                     t.finish(self.pos);
                     t.next = next as u32;
+
+                    if s.dict {
+                        let e = Entry::from_raw(self.buf.as_ptr(), t).as_dict().unwrap();
+                        let mut last_key = "";
+                        for (k, _) in e {
+                            if k < last_key {
+                                return Err(Error::Other("Dict keys must be sorted"));
+                            }
+                            last_key = k;
+                        }
+                    }
                 }
                 _ => return Err(Error::unexpected(self.pos)),
             }
@@ -707,6 +698,22 @@ mod tests {
     #[test]
     fn reject_dict_unsorted_keys() {
         let s = b"d1:b0:1:a0:e";
+        let mut parser = Parser::new();
+        let err = parser.parse::<Entry>(s).unwrap_err();
+        assert_eq!(err, Error::Other("Dict keys must be sorted"));
+    }
+
+    #[test]
+    fn reject_dict_unsorted_keys_nested_inside_dict() {
+        let s = b"d1:ad1:b0:1:a0:ee";
+        let mut parser = Parser::new();
+        let err = parser.parse::<Entry>(s).unwrap_err();
+        assert_eq!(err, Error::Other("Dict keys must be sorted"));
+    }
+
+    #[test]
+    fn reject_dict_unsorted_keys_nested_inside_list() {
+        let s = b"l1:ad1:b0:1:a0:ee";
         let mut parser = Parser::new();
         let err = parser.parse::<Entry>(s).unwrap_err();
         assert_eq!(err, Error::Other("Dict keys must be sorted"));
