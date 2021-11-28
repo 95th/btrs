@@ -6,8 +6,8 @@ use super::{Dict, Int, List};
 
 #[derive(Clone, Copy, PartialEq)]
 pub struct Entry<'b, 'p> {
-    pub(crate) buf: *const u8,
-    pub(crate) token: *const Token,
+    pub(super) buf: *const u8,
+    pub(super) token: *const Token,
     _marker: PhantomData<(&'b (), &'p ())>,
 }
 
