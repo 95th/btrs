@@ -121,6 +121,14 @@ struct ParserState<'a> {
     depth_limit: usize,
 }
 
+macro_rules! ensure {
+    ($cond:expr) => {
+        if !$cond {
+            return Err(Error::Invalid);
+        }
+    };
+}
+
 impl<'a> ParserState<'a> {
     fn peek_char(&self) -> Result<u8> {
         self.buf.get(self.pos).copied().ok_or(Error::Eof)
@@ -139,17 +147,13 @@ impl<'a> ParserState<'a> {
             if let Some(s) = self.scopes.last() {
                 if s.dict && c != b'e' {
                     // The key must be a string
-                    if !c.is_ascii_digit() {
-                        return Err(Error::Invalid);
-                    }
+                    ensure!(c.is_ascii_digit());
 
                     // Parse key as a valid UTF-8 string
                     self.parse_string(true)?;
 
                     c = self.peek_char()?;
-                    if c == b'e' {
-                        return Err(Error::Invalid);
-                    }
+                    ensure!(c != b'e');
                 }
             }
 
@@ -175,10 +179,7 @@ impl<'a> ParserState<'a> {
             }
         }
 
-        if !self.scopes.is_empty() {
-            return Err(Error::Invalid);
-        }
-
+        ensure!(self.scopes.is_empty());
         Ok(())
     }
 
@@ -196,9 +197,7 @@ impl<'a> ParserState<'a> {
             let dict = Entry::from_raw(self.buf.as_ptr(), t).as_dict().unwrap();
             let mut last_key = "";
             for (k, _) in dict {
-                if k < last_key {
-                    return Err(Error::Invalid);
-                }
+                ensure!(last_key <= k);
                 last_key = k;
             }
         }
@@ -213,34 +212,22 @@ impl<'a> ParserState<'a> {
         let start = self.pos;
 
         let mut c = self.next_char()?;
+
         if c == b'-' {
             c = self.next_char()?;
-
-            // "-0" is invalid
-            if c == b'0' {
-                return Err(Error::Invalid);
-            }
-        } else if c == b'0' {
-            // Only case where leading zero is valid in "i0e"
-            if self.next_char()? != b'e' {
-                return Err(Error::Invalid);
-            }
-
-            let t = Token::new(TokenKind::Int, start as u32, 1, 1);
-            return self.create_token(t);
+            ensure!(c != b'0');
         }
 
-        if c == b'e' {
-            return Err(Error::Invalid);
-        }
-
-        loop {
-            match c {
-                b'0'..=b'9' => c = self.next_char()?,
-                b'e' => break,
-                _ => return Err(Error::Invalid),
+        if c == b'0' {
+            c = self.next_char()?;
+        } else {
+            ensure!(c.is_ascii_digit());
+            while c.is_ascii_digit() {
+                c = self.next_char()?;
             }
         }
+
+        ensure!(c == b'e');
 
         let len = self.pos - start - 1;
         let t = Token::new(TokenKind::Int, start as u32, len as u32, 1);
@@ -265,9 +252,7 @@ impl<'a> ParserState<'a> {
             }
         }
 
-        if c != b':' {
-            return Err(Error::Invalid);
-        }
+        ensure!(c == b':');
 
         if len > self.buf.len() - self.pos {
             return Err(Error::Eof);
