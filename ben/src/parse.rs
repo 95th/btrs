@@ -253,23 +253,20 @@ impl<'a> ParserState<'a> {
         let mut c = self.next_char()?;
         if c == b'0' {
             c = self.next_char()?;
-            if c != b':' {
-                return Err(Error::Invalid);
+        } else {
+            while c.is_ascii_digit() {
+                let digit = (c - b'0') as usize;
+                len = len
+                    .checked_mul(10)
+                    .and_then(|n| n.checked_add(digit))
+                    .ok_or(Error::Overflow)?;
+
+                c = self.next_char()?;
             }
         }
 
-        while c != b':' {
-            if !c.is_ascii_digit() {
-                return Err(Error::Invalid);
-            }
-
-            let digit = (c - b'0') as usize;
-            len = len
-                .checked_mul(10)
-                .and_then(|n| n.checked_add(digit))
-                .ok_or_else(|| Error::Overflow)?;
-
-            c = self.next_char()?;
+        if c != b':' {
+            return Err(Error::Invalid);
         }
 
         if len > self.buf.len() - self.pos {
