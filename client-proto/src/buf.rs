@@ -69,13 +69,7 @@ impl RecvBuf {
         // We dont have enough space. Discard the left side of the buffer.
         unsafe {
             let p = self.buf.as_mut_ptr();
-            if unread > self.read_pos {
-                // There is overlap - use memmove
-                std::ptr::copy(p.add(self.read_pos), p, unread);
-            } else {
-                // Otherwise memcpy
-                std::ptr::copy_nonoverlapping(p.add(self.read_pos), p, unread);
-            }
+            std::ptr::copy(p.add(self.read_pos), p, unread);
         }
 
         self.write_pos -= self.read_pos;
