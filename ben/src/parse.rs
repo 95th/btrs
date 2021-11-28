@@ -72,10 +72,6 @@ impl Parser {
     }
 
     fn parse_prefix_impl<'b, 'p>(&'p mut self, buf: &'b [u8]) -> Result<(Entry<'b, 'p>, usize)> {
-        if buf.is_empty() {
-            return Err(Error::Eof);
-        }
-
         self.tokens.clear();
         self.scopes.clear();
 
@@ -123,8 +119,11 @@ struct ParserState<'a> {
 
 macro_rules! ensure {
     ($cond:expr) => {
+        ensure!($cond, Invalid);
+    };
+    ($cond:expr, $err:ident) => {
         if !$cond {
-            return Err(Error::Invalid);
+            return Err(Error::$err);
         }
     };
 }
@@ -210,7 +209,6 @@ impl<'a> ParserState<'a> {
         self.next_char()?;
 
         let start = self.pos;
-
         let mut c = self.next_char()?;
 
         if c == b'-' {
@@ -218,10 +216,11 @@ impl<'a> ParserState<'a> {
             ensure!(c != b'0');
         }
 
+        ensure!(c.is_ascii_digit());
+
         if c == b'0' {
             c = self.next_char()?;
         } else {
-            ensure!(c.is_ascii_digit());
             while c.is_ascii_digit() {
                 c = self.next_char()?;
             }
@@ -253,10 +252,7 @@ impl<'a> ParserState<'a> {
         }
 
         ensure!(c == b':');
-
-        if len > self.buf.len() - self.pos {
-            return Err(Error::Eof);
-        }
+        ensure!(len <= self.buf.len() - self.pos, Eof);
 
         let t = Token::new(TokenKind::ByteStr, self.pos as u32, len as u32, 1);
         self.create_token(t)?;
@@ -274,15 +270,10 @@ impl<'a> ParserState<'a> {
     }
 
     fn create_token(&mut self, token: Token) -> Result<()> {
-        if self.tokens.len() >= self.token_limit {
-            return Err(Error::TokenLimit);
-        }
+        ensure!(self.tokens.len() < self.token_limit, TokenLimit);
 
         if let TokenKind::Dict | TokenKind::List = token.kind {
-            if self.scopes.len() >= self.depth_limit {
-                return Err(Error::DepthLimit);
-            }
-
+            ensure!(self.scopes.len() < self.depth_limit, DepthLimit);
             let s = Scope::new(self.tokens.len(), token.kind == TokenKind::Dict);
             self.scopes.push(s);
         }
@@ -295,6 +286,14 @@ impl<'a> ParserState<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reject_empty() {
+        let s = b"";
+        let mut parser = Parser::new();
+        let err = parser.parse::<Entry>(s).unwrap_err();
+        assert_eq!(err, Error::Eof);
+    }
 
     #[test]
     fn parse_int() {
