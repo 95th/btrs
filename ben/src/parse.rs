@@ -636,6 +636,14 @@ mod tests {
     }
 
     #[test]
+    fn reject_minus_without_digit() {
+        let s = b"i-e";
+        let mut parser = Parser::new();
+        let err = parser.parse::<Entry>(s).unwrap_err();
+        assert_eq!(err, Error::Invalid);
+    }
+
+    #[test]
     fn parse_zero_int() {
         let s = b"i0e";
         let mut parser = Parser::new();
