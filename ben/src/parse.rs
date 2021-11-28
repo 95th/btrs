@@ -143,8 +143,8 @@ impl<'a> ParserState<'a> {
         loop {
             let mut c = self.peek_char()?;
 
-            if let Some(s) = self.scopes.last() {
-                if s.dict && c != b'e' {
+            if let Some(scope) = self.scopes.last() {
+                if scope.dict && c != b'e' {
                     // The key must be a string
                     ensure!(c.is_ascii_digit());
 
@@ -183,16 +183,16 @@ impl<'a> ParserState<'a> {
     }
 
     fn pop_scope(&mut self) -> Result<()> {
-        let s = self.scopes.pop().ok_or(Error::Invalid)?;
+        let scope = self.scopes.pop().ok_or(Error::Invalid)?;
 
         self.pos += 1;
 
-        let next = self.tokens.len() - s.index as usize;
-        let t = &mut self.tokens[s.index as usize];
+        let next = self.tokens.len() - scope.index as usize;
+        let t = &mut self.tokens[scope.index as usize];
         t.finish(self.pos);
         t.next = next as u32;
 
-        if s.dict {
+        if scope.dict {
             let dict = Entry::from_raw(self.buf.as_ptr(), t).as_dict().unwrap();
             let mut last_key = "";
             for (k, _) in dict {
@@ -206,7 +206,7 @@ impl<'a> ParserState<'a> {
 
     fn parse_int(&mut self) -> Result<()> {
         // Consume the opening 'i'
-        self.next_char()?;
+        self.pos += 1;
 
         let start = self.pos;
         let mut c = self.next_char()?;
@@ -216,7 +216,7 @@ impl<'a> ParserState<'a> {
             ensure!(c != b'0');
         }
 
-        ensure!(c.is_ascii_digit());
+        ensure!(c != b'e');
 
         if c == b'0' {
             c = self.next_char()?;
